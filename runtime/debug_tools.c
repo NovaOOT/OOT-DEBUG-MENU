@@ -13,6 +13,7 @@
 #include "host.h"
 #include "input_map.h"
 #include "layout.h"
+#include "motion_owner.h"
 #include "platform/platform.h"
 #include "ui/menu.h"
 
@@ -662,7 +663,7 @@ static struct Owned {
     {"Equipment", "Hover Boots", "Armor_Adult_HoverBoot", 1},
     {"Items", "Deku Sticks", "Item_DekuStick", 10},
     {"Items", "Deku Nuts", "Item_DekuNut", 20},
-    {"Items", "Bombs (gives a bomb bag too)", "Item_Bomb", 20},
+    {"Items", "Bombs (gives a bomb bag and the Goron's Bracelet too)", "Item_Bomb", 20},
     {"Items", "Bombchus", "Item_Bombchu", 20},
     {"Items", "Magic Beans", "Item_MagicBean", 10},
     {"Items", "Fairy Slingshot", "Weapon_Range_SlingShot", 1},
@@ -835,9 +836,16 @@ static int bomb_bags_apply(void) {
 
 static int owned_set_flags(int i, int on);
 
+// Bombs and bomb bags come with the Goron's Bracelet: the game expects a player with bombs to have it.
+static int bomb_bracelet_give(void) {
+    int bracelet = owned_index("Armor_Child_Gauntlet_Goron");
+    return bracelet < 0 || dbg_owned_get(bracelet) == 1 || owned_set_flags(bracelet, 1);
+}
+
 int dbg_owned_set(int i, int on) {
     if (i < 0 || i >= NOWNED) return 0;
     int ok = owned_set_flags(i, on);
+    if (on && (bomb_bag_of(owned[i].name) >= 0 || !strcmp(owned[i].name, "Item_Bomb"))) ok = bomb_bracelet_give() && ok;
     if (bomb_bag_of(owned[i].name) >= 0) return bomb_bags_apply() && ok;
     // bombs cannot be taken out without a bag: giving bombs to a player with none gives the smallest
     if (on && !strcmp(owned[i].name, "Item_Bomb")) {
@@ -1191,6 +1199,10 @@ int dbg_hotkey(int fkey) {
 // Lank changes the local skeleton's lengths before its world matrices are calculated. The model and its animation
 // rotations stay the same; the other age's bind translations give the stretched or shortened proportions. Both
 // skeletons are read from the user's model resources, so the executable contains no game bone data.
+//
+// A transformation's body (motion_owner_transform_model) is bound to the player's bones by copying their local
+// matrices, so it takes the child's lengths and height. The same change gives it its own: before the body's world
+// matrices are calculated, each copied bone gets the difference between the body's bind translation and the child's.
 #define LANK_BONES 512
 #define LANK_NAME 64
 typedef struct { char name[LANK_NAME]; float t[3]; } LankBone;
@@ -1266,16 +1278,64 @@ static uint64_t lank_player_model(void) {
     uint64_t models = group ? guest_ptr(group + 0x18) : 0;
     return models ? guest_ptr(models) : 0;
 }
+
+// A transformation body's change per bone of its loaded skeleton resource (bone records as in the file, with their
+// name pointers resolved). A bone takes the difference only when the child skeleton has a bone of that name, which
+// makes it a bound one (the body's own face bones carry other names and keep their translations), pointing the same
+// way: face, weapon and knee helpers have other axes in the two skeletons, and those carry no height.
+static struct { uint64_t resource; unsigned count; float delta[LANK_BONES][3]; } lank_body;
+static atomic_flag lank_body_lock = ATOMIC_FLAG_INIT;
+static int lank_body_build(uint64_t resource, unsigned count) {
+    static float delta[LANK_BONES][3];
+    uint64_t bones = guest_ptr(resource + 0x10);
+    if (!bones || !count || count > LANK_BONES) return 0;
+    memset(delta, 0, sizeof delta);
+    for (unsigned j = 0; j < count; j++) {
+        uint64_t bone = bones + (uint64_t)j * 0x58, name = guest_ptr(bone);
+        uint16_t len = 0;
+        char text[LANK_NAME] = {0};
+        float t[3];
+        if (!name || !guest_read(name, &len, 2) || !len || len >= LANK_NAME || !guest_read(name + 2, text, len) ||
+            !guest_read(bone + 0x4c, t, 12)) return 0;
+        if (!strcmp(text, "Root") || !strncmp(text, "Ph_Pred_", 8)) continue;
+        for (int i = 0; i < lank_count[0]; i++) {
+            const LankBone *child = &lank_bones[0][i];
+            if (strcmp(child->name, text)) continue;
+            float dot = 0, lc = 0, lb = 0;
+            for (int k = 0; k < 3; k++) dot += child->t[k] * t[k], lc += child->t[k] * child->t[k], lb += t[k] * t[k];
+            if (lc > 1e-6f && lb > 1e-6f && isfinite(dot) && dot >= 0.8f * sqrtf(lc * lb))
+                for (int k = 0; k < 3; k++) delta[j][k] = t[k] - child->t[k];
+            break;
+        }
+    }
+    memcpy(lank_body.delta, delta, sizeof delta);
+    lank_body.resource = resource, lank_body.count = count;
+    return 1;
+}
+
 int dbg_lank_before(uint64_t model) {
-    if (lank_restore.local || !dbg_available() || !dbg_lank_on() || !model || model != lank_player_model()) return 0;
+    if (lank_restore.local || !dbg_available() || !model) return 0;
+    int body = model == motion_owner_transform_model();
+    if (!body && !(dbg_lank_on() && model == lank_player_model())) return 0;
     lank_prepare();
     if (atomic_load_explicit(&lank_loaded, memory_order_acquire) != 2) return 0;
     uint64_t skel = guest_ptr(model + 0xf8), resource = skel ? guest_ptr(skel) : 0;
     uint16_t count = 0;
-    if (!resource || !guest_read(resource + 0x38, &count, 2)) return 0;
-    int age = count == lank_count[0] ? 0 : count == lank_count[1] ? 1 : -1;
-    uint64_t local = skel ? guest_ptr(skel + 0x18) : 0;
-    if (age < 0 || !local || !plat_mem_readable(local, (size_t)count * 0x60)) return 0;
+    if (!resource || !guest_read(resource + 0x38, &count, 2) || !count || count > LANK_BONES) return 0;
+    uint64_t local = guest_ptr(skel + 0x18);
+    if (!local || !plat_mem_readable(local, (size_t)count * 0x60)) return 0;
+    static _Thread_local float delta[LANK_BONES][3];
+    if (body) {
+        while (atomic_flag_test_and_set_explicit(&lank_body_lock, memory_order_acquire)) {}
+        int ok = (lank_body.resource == resource && lank_body.count == count) || lank_body_build(resource, count);
+        if (ok) memcpy(delta, lank_body.delta, (size_t)count * sizeof delta[0]);
+        atomic_flag_clear_explicit(&lank_body_lock, memory_order_release);
+        if (!ok) return 0;
+    } else {
+        int age = count == lank_count[0] ? 0 : count == lank_count[1] ? 1 : -1;
+        if (age < 0) return 0;
+        memcpy(delta, lank_delta[age], (size_t)count * sizeof delta[0]);
+    }
     // Back up before changing anything. The paired after hook restores every translation, including when disabled
     // during the calculation, so repeated calculations and paused animations cannot accumulate the deformation.
     for (int i = 0; i < count; i++) {
@@ -1286,7 +1346,7 @@ int dbg_lank_before(uint64_t model) {
     plat_mem_prepare_write(local, (size_t)count * 0x60);
     for (int i = 0; i < count; i++) {
         float t[3];
-        for (int k = 0; k < 3; k++) t[k] = lank_restore.old[i][k] + lank_delta[age][i][k];
+        for (int k = 0; k < 3; k++) t[k] = lank_restore.old[i][k] + delta[i][k];
         uint64_t at = local + (uint64_t)i * 0x60;
         uint32_t flags = lank_restore.flags[i] & 0xf0ffffffu;
         memcpy((void *)(uintptr_t)at, &flags, 4);

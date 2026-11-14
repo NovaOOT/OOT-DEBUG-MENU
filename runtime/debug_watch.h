@@ -5,6 +5,7 @@
 // lines are also written to debug_changes.txt next to the game.
 #pragma once
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,8 @@ int dbg_watch_count(void);                          // lines kept, up to 256
 int dbg_watch_line(int i, char *out, size_t n);     // line i, 0 the newest; 0 when out of range
 int dbg_watch_ignored(void);                        // flags ignored, by hand or for changing all the time
 int dbg_watch_names(void);                          // flag names known (debug_flag_names.json next to the game)
+const char *dbg_flag_name(uint32_t key);            // a flag's name from that file (read at the first call), else NULL
+const char *dbg_flag_where(uint32_t key);           // the game file that sets it ("built": the game's own), else NULL
 const char *dbg_watch_state(void);                  // what it is doing, for the menu
 
 #ifdef __cplusplus

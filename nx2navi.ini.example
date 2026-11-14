@@ -73,6 +73,15 @@
 # step_steady = 1
 
 [performance]
+
+# General CPU/detail options. These work independently of low_end_gpu.
+# Foliage shadows: full, reduced (no grass/moss shadows), off (no plant shadows).
+# Plants remain visible unless foliage reduces them separately. Requires a restart.
+# foliage_shadows = full
+# foliage = full
+# guest_opt = 2 compiles optimised game code at the next launcher Rebuild the Game.
+# A restart alone does not rebuild it. Default 1 keeps the faster build at -O1.
+
 # The keys of this section and of [diagnostics] are for testing and troubleshooting, and take effect at the next start.
 # The Advanced tab of the settings menu (F1) shows all of them except zstd_native and zstd_check.
 
@@ -580,6 +589,10 @@
 # 2: the next Rebuild the Game compiles the game's code at -O2 instead of -O1 (faster game threads on a slower CPU, a
 # build several times longer). Read by tools/make_game.py; the environment variable NX2NAVI_GUEST_OPT wins.
 # guest_opt = 1
+# How many of the game's threads run at the same time: empty (all six, as on the console), or 4 or 3 for a CPU with
+# four threads or fewer, which leaves the threads that prepare frames for the GPU room to run. Read at start. Also in
+# the menu: Game, Performance, with replay_async, debug_clip and mirror_hot.
+# cores =
 # GPUs without mesh shaders (VK_EXT_mesh_shader: AMD before RDNA 2, NVIDIA before Turing): 1 runs the game's mesh
 # and task shaders (grass and other foliage) as compute shaders and draws what they make; 0 skips those draws. The
 # arena for their vertices and triangles is mesh_emu_mb MiB of video memory, with mesh_emu_tasks task records (3 KiB
@@ -902,9 +915,11 @@
 # tab shows each stick's deflection now, so a drifting stick's resting value can be read off.
 # lstick_deadzone = 8
 # rstick_deadzone = 8
-# Mouse camera mode: direct (default) or stick. Direct turns the camera by the raw mouse motion, the same on both axes,
-# with no stick dead zone or response curve, at any frame rate and however fast the mouse moves. Stick makes the
-# mouse a right stick. Neither changes the gamepad. The Controls tab changes this while the game runs.
+# Mouse camera mode: direct (default), stick or off. Direct turns the camera by the raw mouse motion, the same on both
+# axes, with no stick dead zone or response curve, at any frame rate and however fast the mouse moves. Stick makes the
+# mouse a right stick. Off: the mouse never turns the camera and the cursor is never captured or hidden, so it moves
+# freely between the game and other windows. None changes the gamepad. The Controls tab changes this while the game
+# runs.
 # mouse_mode = direct
 # Mouse camera sensitivity (0 to 10; 0 = no mouse camera and no cursor capture). In direct mode a count of the mouse
 # turns the camera about 0.08 degrees at 1; the game's own camera sensitivity (Options) scales it as it scales the
@@ -1103,6 +1118,15 @@
 # holds, and live/history a dated copy of each saved slot. How many history
 # copies to keep (0 to 10000; 0 keeps none). Default: 100.
 # debug_save_history = 100
+# The save tree: while a save is played, every lasting thing the player does (a rock broken, a chest opened, someone
+# talked to, a cutscene, an item, a door, a switch) makes the game save the slot it plays, and each such save becomes a
+# node of one tree in saves/tree next to the game, labelled with what changed, under the node the game was on. Doing
+# something else from a node loaded from the tree starts another branch. What goes on by itself (people's daily
+# routes, the clock, Link's position, rupee and ammo counts) never starts a save. The launcher's Save Tree window shows
+# the tree and loads or exports any node; a node is a real save folder (slot_NN) of one slot, in a folder named after
+# its place and what happened. 0 off, 1 player choices, 2 every flag the game changes (those left out above too, so
+# many saves of little use and about 180 KB each). Also in the debug menu's Debug tab. Default: 1.
+# debug_save_tree = 1
 # Volumes further from the player than this many metres are not drawn (10 to 1000). Default: 150.
 # debug_view_range = 150
 # Foliage draw distance (game build 1.1.1): multiplies how far out grass tufts, bushes, flowers and low trees are drawn

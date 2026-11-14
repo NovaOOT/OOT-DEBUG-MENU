@@ -256,6 +256,7 @@ class App:
         self.dump_search = None
         self.uninstall_game = False
         self.game_proc = None
+        self.tree_window = None    # the Save Tree window (ui/savetree.py) while it is open
         self.cursor_frames, self.cursor_k = [], 0
         self.last_second = 0
         self.gamepad = winsys.Gamepad()
@@ -1040,6 +1041,12 @@ class App:
                 desc=('Open the game folder. The game keeps your save in its profile folder, its settings in '
                       'nx2navi.ini and its logs in logs. Its saves folder holds saves to import and backups.',)),
             self.saves_row(gd),
+            Row('value', 'Save Tree', 'Open', 'arrow', on=self.open_save_tree,
+                desc=('A window of its own beside the game: every time a flag of the game changes while you play, '
+                      'the game saves, and each save grows the tree, labelled with the flags that changed. Every '
+                      'path you ever played stays in it.',
+                      'Select a save in the tree to load it at once or export it as a save file for anyone. '
+                      'Search finds a save by its flags or its place; a section folds into one bud.')),
             self.mods_row(gd),
             Row('value', 'Rebuild the Game', rebuild_value, rebuild_style, on=self.start_rebuild,
                 desc=('Build the game again from the files of the last build. Only what changed is compiled. Use it '
@@ -1431,6 +1438,19 @@ class App:
             except OSError:
                 pass
         return False
+
+    def open_save_tree(self):
+        """The Save Tree window: it stays open while the game runs and the launcher's own window is hidden."""
+        if self.tree_window is not None:
+            self.tree_window.lift()
+            return
+        if not self.settings.get('game_dir'):
+            self.message = 'Choose the game folder first.'
+            self.render()
+            return
+        from .savetree import SaveTreeWindow
+        self.tree_window = SaveTreeWindow(self)
+        self.sounds.play('select')
 
     def saves_row(self, gd):
         """Saves: the screen that exports and imports saves; orange while a save waits in the saves folder."""

@@ -1017,6 +1017,8 @@ static uint64_t g_mv_slot_serial[FRAMES];
 static VkImage g_mvi;
 static VmaAllocation g_mvia;
 static int g_mvi_w, g_mvi_h;
+static int g_mv_hold;     // the frame is a held picture (gfx_hold_picture): shown whatever the setting, until released
+static int g_hold_want;   // a held picture is asked for; its grab may not have arrived yet
 
 void gfx_movie_frame(const uint8_t *rgba, int w, int h) {
     if (w <= 0 || h <= 0) return;
@@ -1056,6 +1058,37 @@ void gfx_movie_stop(void) {
     plat_mutex_unlock(&g_mv_lock);
 }
 
+// ---- Held picture (gfx.h): the frame of the next present, grabbed as a bug capture is (vk_present_grab), becomes the
+// movie overlay's frame and stays up until it is released. The grab arrives on the presenting thread (g_pl held); a
+// release cancels a grab still waiting first, so none lands after it.
+static void hold_grabbed(VkGrab *g, void *ctx) {
+    (void)ctx;
+    uint8_t *rgba = g && !g->hdr && __atomic_load_n(&g_hold_want, __ATOMIC_ACQUIRE) ? malloc((size_t)g->w * g->h * 4)
+                                                                                    : NULL;
+    if (rgba) {
+        vk_present_grab_rgba(g, rgba);
+        gfx_movie_frame_own(rgba, g->w, g->h);
+        __atomic_store_n(&g_mv_hold, 1, __ATOMIC_RELEASE);
+    }
+    vk_present_grab_free(g);
+}
+
+int gfx_hold_picture(void) {
+    __atomic_store_n(&g_hold_want, 1, __ATOMIC_RELEASE);
+    if (vk_present_grab(hold_grabbed, NULL)) return 1;
+    __atomic_store_n(&g_hold_want, 0, __ATOMIC_RELEASE);
+    return 0;
+}
+
+int gfx_picture_held(void) { return __atomic_load_n(&g_mv_hold, __ATOMIC_ACQUIRE); }
+
+void gfx_hold_release(void) {
+    __atomic_store_n(&g_hold_want, 0, __ATOMIC_RELEASE);
+    vk_present_grab_cancel();
+    __atomic_store_n(&g_mv_hold, 0, __ATOMIC_RELEASE);
+    gfx_movie_stop();
+}
+
 // Records the overlay into cb for swapchain image dst (in TRANSFER_DST_OPTIMAL, left so). 1 when drawn.
 static int movie_overlay(VkCommandBuffer cb, int slot, VkImage dst) {
     static int off = -1;
@@ -1063,10 +1096,11 @@ static int movie_overlay(VkCommandBuffer cb, int slot, VkImage dst) {
         const char *v = cfg_get("NX2NAVI_MOVIE_OVERLAY");
         off = !(v && strcmp(v, "0"));
     }
-    if (off) return 0;
+    int hold = __atomic_load_n(&g_mv_hold, __ATOMIC_ACQUIRE);
+    if (off && !hold) return 0;
     VkCtx *c = vk_ctx();
     plat_mutex_lock(&g_mv_lock);
-    if (!g_mv_ns || plat_now_ns() - g_mv_ns > GFX_MOVIE_HOLD_NS || !g_mv_rgba) {
+    if (!g_mv_ns || (!hold && plat_now_ns() - g_mv_ns > GFX_MOVIE_HOLD_NS) || !g_mv_rgba) {
         plat_mutex_unlock(&g_mv_lock);
         return 0;
     }

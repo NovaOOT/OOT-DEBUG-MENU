@@ -4,6 +4,7 @@
 #include "nvn_api.h"
 #include "platform/platform.h"
 #include "cfg.h"
+#include "mods.h"
 #include <string.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -49,9 +50,33 @@ static int keep_player(void) {
         on = RT_V111 && cfg_bool("NX2NAVI_DEBUG_HIDE_MESHES") && !cfg_bool("NX2NAVI_DEBUG_HIDE_PLAYER"), seen = v;
     return on;
 }
+static volatile int transformed;
+static volatile uint64_t transform_model;
+static volatile uint64_t preview_actor;
+void motion_owner_set_preview(uint64_t actor) { preview_actor = actor; }
+// The Transformations mod (its folder name) is on for this run: the transformation masks' models are its bodies.
+static int transform_mod(void) {
+    static int known, on;
+    if (!known) {
+        for (int i = 0; i < mods_count(); i++) {
+            const ModInfo *m = mods_at(i);
+            if (m && m->start_enabled && !m->problem && !strcmp(m->name, "Transformations")) on = 1;
+        }
+        known = 1;
+    }
+    return on;
+}
+// The mask's MOTION_OWNER_* flags, or 0 when it is no transformation mask.
+static uint32_t transform_mask(const char *name) {
+    if (!strcmp(name, "Armor_Child_Mask_Goron")) return MOTION_OWNER_TRANSFORM;
+    if (!strcmp(name, "Armor_Child_Mask_Zora")) return MOTION_OWNER_TRANSFORM | MOTION_OWNER_ZORA;
+    return 0;
+}
+int motion_owner_transformed(void) { return RT_V111 ? transformed : MOTION_TRANSFORM_NONE; }
+uint64_t motion_owner_transform_model(void) { return RT_V111 && transformed ? transform_model : 0; }
 int motion_owner_enabled(void) {
     plat_once(&owner_once, owner_init, NULL);
-    return owner_on || keep_player();
+    return owner_on || keep_player() || (RT_V111 && transform_mod());
 }
 int motion_owner_selective(void) {
     plat_once(&owner_once, owner_init, NULL);
@@ -77,6 +102,11 @@ static uint64_t player_actor(void) {
     uint64_t p = field(ptr(MOD_MAIN_BASE + 0x4e371d0), 0x480);
     char name[7];
     return p && read_at(field(p, 0x20), name, sizeof name) && !memcmp(name, "Player", 7) ? p : 0;
+}
+uint64_t motion_owner_preview(void) {
+    uint64_t p = preview_actor;
+    char name[18];
+    return p && read_at(field(p, 0x20), name, sizeof name) && !memcmp(name, "PouchPlayer_Child", 18) ? p : 0;
 }
 static int actor_link(uint64_t link, OwnerActor *out) {
     struct { uint64_t table; uint32_t generation, padding; } a, b;
@@ -112,10 +142,12 @@ static uint32_t equipment_flags(uint64_t actor) {
     char name[64];
     if (!read_at(field(actor, 0x20), name, sizeof name)) return 0;
     name[sizeof name - 1] = 0;
+    uint32_t transform = transform_mask(name);
+    if (transform) return transform_mod() ? transform : 0;
     return !strncmp(name, "Weapon_Sword_", 13) || !strncmp(name, "Weapon_Shield_", 14)
                ? MOTION_OWNER_RIGID_EQUIPMENT : 0;
 }
-static int collect_models(uint64_t player, OwnerActor actor) {
+static int collect_models(uint64_t player, OwnerActor actor, uint32_t extra) {
     uint64_t model_component = component(actor.actor, 8);
     if (!model_component) return 1;
     // Only decode the implementation whose getter directly returns its model collection.
@@ -129,9 +161,14 @@ static int collect_models(uint64_t player, OwnerActor actor) {
         // Match the model implementation used by the traced skeleton and shape binding path.
         if (field(ptr(model), 0x40) != MOD_MAIN_BASE + 0x735430) continue;
         if (O.count == OWNER_MODELS) return 0;
+        uint32_t flags = (actor.kind ? equipment_flags(actor.actor) : 0) | extra;
+        // A mask taken off stays in its slot with its model hidden (bit 0x80 of the model's byte at +0x12): it is
+        // then no transformation.
+        uint8_t hidden;
+        if ((flags & MOTION_OWNER_TRANSFORM) && (!read_at(model + 0x12, &hidden, 1) || (hidden & 0x80)))
+            flags &= ~(MOTION_OWNER_TRANSFORM | MOTION_OWNER_ZORA);
         O.models[O.count++] = (MotionOwner){.player = player, .actor = actor.actor, .link = actor.link,
-            .model = model, .generation = actor.generation, .kind = actor.kind,
-            .flags = actor.kind ? equipment_flags(actor.actor) : 0};
+            .model = model, .generation = actor.generation, .kind = actor.kind, .flags = flags};
     }
     return field(model_component, 0x18) == collection && field(collection, 0x28) == list;
 }
@@ -163,8 +200,12 @@ static void refresh(uint64_t frame, int force) {
         }
     }
     for (unsigned i = 0; i < count; ++i)
-        if (!collect_models(player, actors[i])) { O.count = 0; break; }
+        if (!collect_models(player, actors[i], 0)) { O.count = 0; break; }
     if (player_actor() != player || component(player, 0x200) != equipment) O.count = 0;
+    // The preview's body follows, flagged: it is drawn while the pause menu shows the Equipment page. Its own
+    // equipment is not linked from it and stays untracked.
+    uint64_t preview = O.count ? motion_owner_preview() : 0;
+    if (preview && !collect_models(player, (OwnerActor){preview, 0, 0, 0}, MOTION_OWNER_PREVIEW)) O.count = 0;
     for (unsigned i = 0; i < O.count; ++i) {
         MotionOwner *m = &O.models[i];
         for (unsigned j = 0; j < nprevious; ++j) {
@@ -177,6 +218,15 @@ static void refresh(uint64_t frame, int force) {
         }
         if (!m->lifetime) m->lifetime = ++O.serial;
     }
+    int t = MOTION_TRANSFORM_NONE;
+    uint64_t body = 0;
+    for (unsigned i = 0; i < O.count; ++i)
+        if (O.models[i].flags & MOTION_OWNER_TRANSFORM) {
+            t = O.models[i].flags & MOTION_OWNER_ZORA ? MOTION_TRANSFORM_ZORA : MOTION_TRANSFORM_GORON;
+            body = O.models[i].model;
+        }
+    transform_model = body;
+    transformed = t;
 }
 static int same_owner(const MotionOwner *a, const MotionOwner *b) {
     return a->player == b->player && a->actor == b->actor && a->link == b->link &&

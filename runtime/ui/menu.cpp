@@ -1478,6 +1478,32 @@ static void tab_game(float scale) {
     // discord_rpc.c reads the setting on its own thread and connects or clears the status within half a second
     opt_toggle("NX2NAVI_DISCORD_RPC", UI_MENU_DISCORD_RPC, UI_MENU_DISCORD_RPC_DESC);
     rows_saves();
+    opt_group_text("Performance");
+    {   // vk_exec_draw.c foliage_skip
+        static const char *const values[] = {"full", "reduced", "off"};
+        const char *names[] = {menu_text(UI_MENU_LOWEND_FOLIAGE_FULL), menu_text(UI_MENU_LOWEND_FOLIAGE_REDUCED), menu_text(UI_MENU_OFF)};
+        opt_choice_list("NX2NAVI_FOLIAGE", UI_MENU_LOWEND_FOLIAGE, values, names, 3, UI_MENU_LOWEND_FOLIAGE_DESC);
+    }
+    {
+        static const char *const values[] = {"full", "reduced", "off"};
+        const char *names[] = {menu_text(UI_MENU_LOWEND_FOLIAGE_FULL), menu_text(UI_MENU_LOWEND_FOLIAGE_REDUCED), menu_text(UI_MENU_OFF)};
+        opt_choice_list("NX2NAVI_FOLIAGE_SHADOWS", UI_MENU_FOLIAGE_SHADOWS, values, names, 3, UI_MENU_FOLIAGE_SHADOWS_DESC);
+    }
+    opt_toggle("NX2NAVI_ZSTD_NATIVE", UI_MENU_LOWEND_ZSTD, UI_MENU_LOWEND_ZSTD_DESC);   // ov_zstd.c trusted
+    // This changes the next launcher rebuild; a game restart alone cannot recompile guest code.
+    opt_toggle_value("NX2NAVI_GUEST_OPT", UI_MENU_LOWEND_GUEST_OPT, UI_MENU_LOWEND_GUEST_OPT_DESC, "2", "1", menu_text(UI_MENU_LOWEND_GUEST_OPT_NOTE));
+    // For a CPU short of threads. The GPU command translation off the game's thread (vk_backend.c, read at start).
+    opt_toggle("NX2NAVI_REPLAY_ASYNC", UI_MENU_REPLAY_ASYNC, UI_MENU_REPLAY_ASYNC_DESC);
+    {   // kernel.c cores_enabled: fewer game threads at once leave host threads to the replay (read at start)
+        static const char *const values[] = {"", "4", "3"};
+        const char *names[] = {menu_text(UI_MENU_PERF_CORES_ALL), "4", "3"};
+        opt_choice_list("NX2NAVI_CORES", UI_MENU_PERF_CORES, values, names, 3, UI_MENU_PERF_CORES_DESC);
+    }
+    // clip_win.c: the last seconds kept for clips cost a copy of each frame and its encoding; live (clip_enabled)
+    opt_toggle("NX2NAVI_DEBUG_CLIP", UI_MENU_PERF_CLIPS, UI_MENU_PERF_CLIPS_DESC);
+    // vk_memory.c hot_check: pools the GPU rewrites every frame are read in system memory, without the copies through
+    // video memory (read at start)
+    opt_slider("NX2NAVI_MIRROR_HOT", UI_MENU_LOWEND_MIRROR_HOT, 0, 100, UI_MENU_LOWEND_MIRROR_HOT_DESC, 5, "%.0f %%");
     // Testing: experimental rows
     opt_group_text("Testing");
     // vk_exec.c rw_init and tail_enabled read these at start: each row notes the restart and the bar's Restart does
@@ -1667,12 +1693,17 @@ static void restart_confirm(float scale) {
 static void tab_controls(float scale) {
     opt_begin("##controls", scale);
     // The mouse camera first, where a player on keyboard and mouse looks for it; both rows are live. How the mouse
-    // reaches the game, where the game version has the direct mode's patch set (mouse_direct.c; the values in their
-    // cfg.c order, stick then direct), and its sensitivity. The slider stops short of 0, which nx2navi.ini takes to
-    // switch the mouse camera and the cursor capture off.
+    // reaches the game (the values in their cfg.c order: stick, direct where the game version has the direct mode's
+    // patch set (mouse_direct.c), off: no mouse camera and no cursor capture, input.c input_cursor_allowed), and its
+    // sensitivity. The slider stops short of 0, which nx2navi.ini takes to switch the mouse camera off too.
     if (input_direct_mouse_available()) {
-        static const UiTextId mouse_mode[] = {UI_MENU_MOUSE_STICK, UI_MENU_MOUSE_DIRECT};
-        opt_choice("NX2NAVI_MOUSE_MODE", UI_MENU_MOUSE_MODE, mouse_mode, 2, UI_MENU_MOUSE_MODE_DESC);
+        static const UiTextId mouse_mode[] = {UI_MENU_MOUSE_STICK, UI_MENU_MOUSE_DIRECT, UI_MENU_MOUSE_OFF};
+        opt_choice("NX2NAVI_MOUSE_MODE", UI_MENU_MOUSE_MODE, mouse_mode, 3, UI_MENU_MOUSE_MODE_DESC);
+    } else {   // no direct mode here: on (stick emulation) or off
+        static const char *const values[] = {"stick", "off"};
+        const char *names[] = {ui_text(UI_MENU_MOUSE_STICK), ui_text(UI_MENU_MOUSE_OFF)};
+        opt_choice_list("NX2NAVI_MOUSE_MODE", UI_MENU_MOUSE_MODE, values, names, 2, UI_MENU_MOUSE_MODE_DESC,
+                        !strcmp(cfg_value("NX2NAVI_MOUSE_MODE"), "off") ? 1 : 0);
     }
     opt_slider("NX2NAVI_MOUSE_SENS", UI_MENU_MOUSE_SENS, 0.05f, 10, UI_MENU_MOUSE_SENS_DESC, 0.05f, "%.2f");
     static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX,
@@ -1730,7 +1761,6 @@ static void rows_low_end(void) {
         const char *names[] = {menu_text(UI_MENU_AUTO), "512", "1024", "2048", "4096", "8192"};
         opt_choice_list("NX2NAVI_TEX_RELEASED_MAX", UI_MENU_LOWEND_RELEASED, values, names, 6, UI_MENU_LOWEND_RELEASED_DESC);
     }
-    opt_slider("NX2NAVI_MIRROR_HOT", UI_MENU_LOWEND_MIRROR_HOT, 0, 100, UI_MENU_LOWEND_MIRROR_HOT_DESC, 5, "%.0f %%");
     {   // vk_device.c vram_heap_limits
         static const char *const values[] = {"auto", "0"};
         const char *names[] = {menu_text(UI_MENU_AUTO), menu_text(UI_MENU_OFF)};
@@ -1757,17 +1787,10 @@ static void rows_low_end(void) {
         const char *names[] = {menu_text(UI_MENU_LOWEND_RESULTS_ALL), menu_text(UI_MENU_LOWEND_RESULTS_NO_EVENTS)};
         opt_choice_list("NX2NAVI_SUBMIT_FINISH_KINDS", UI_MENU_LOWEND_RESULTS, values, names, 2, UI_MENU_LOWEND_RESULTS_DESC);
     }
-    opt_toggle("NX2NAVI_ZSTD_NATIVE", UI_MENU_LOWEND_ZSTD, UI_MENU_LOWEND_ZSTD_DESC);   // ov_zstd.c trusted
     opt_group(UI_MENU_LOWEND_RENDER);
-    opt_toggle("NX2NAVI_REPLAY_ASYNC", UI_MENU_LOWEND_ASYNC, UI_MENU_LOWEND_ASYNC_DESC);   // vk_backend.c
     const bool native = vk_mesh_shader_native() != 0;   // vk_exec_draw.c: the emulation only where the GPU lacks them
     if (native) opt_disable_next(UI_MENU_LOWEND_MESH_NATIVE);
     opt_toggle("NX2NAVI_MESH_EMULATION", UI_MENU_LOWEND_MESH_EMU, UI_MENU_LOWEND_MESH_EMU_DESC);
-    {   // vk_exec_draw.c foliage_skip
-        static const char *const values[] = {"full", "reduced", "off"};
-        const char *names[] = {menu_text(UI_MENU_LOWEND_FOLIAGE_FULL), menu_text(UI_MENU_LOWEND_FOLIAGE_REDUCED), menu_text(UI_MENU_OFF)};
-        opt_choice_list("NX2NAVI_FOLIAGE", UI_MENU_LOWEND_FOLIAGE, values, names, 3, UI_MENU_LOWEND_FOLIAGE_DESC);
-    }
     if (native) opt_disable_next(UI_MENU_LOWEND_MESH_NATIVE);
     opt_slider("NX2NAVI_MESH_EMU_MB", UI_MENU_LOWEND_MESH_MB, 64, 2048, UI_MENU_LOWEND_MESH_MB_DESC, 64, "%.0f MB");
     if (native) opt_disable_next(UI_MENU_LOWEND_MESH_NATIVE);
@@ -1777,10 +1800,6 @@ static void rows_low_end(void) {
     opt_toggle("NX2NAVI_TEX_CLOBBER", UI_MENU_LOWEND_CLOBBER, UI_MENU_LOWEND_CLOBBER_DESC);
     static const UiTextId vec[] = {UI_MENU_OFF, UI_MENU_LOWEND_VEC_AUTO, UI_MENU_ON};   // gfx_shader.c patch_vec_index
     opt_choice("NX2NAVI_VEC_INDEX_FIX", UI_MENU_LOWEND_VEC_INDEX, vec, 3, UI_MENU_LOWEND_VEC_INDEX_DESC);
-    opt_group(UI_MENU_LOWEND_BUILD);
-    // tools/make_game.py reads it from nx2navi.ini at the next Rebuild the Game (guest_opt_ini)
-    opt_toggle_value("NX2NAVI_GUEST_OPT", UI_MENU_LOWEND_GUEST_OPT, UI_MENU_LOWEND_GUEST_OPT_DESC, "2", "1",
-                     menu_text(UI_MENU_LOWEND_GUEST_OPT_NOTE));
     opt_group(UI_MENU_LOWEND_DIAG);
     opt_toggle("NX2NAVI_PASS_TIMES", UI_MENU_LOWEND_PASS_TIMES, UI_MENU_LOWEND_PASS_TIMES_DESC);   // vk_crumbs.c
 #ifdef _WIN32

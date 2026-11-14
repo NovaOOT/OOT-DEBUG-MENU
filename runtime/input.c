@@ -1373,9 +1373,12 @@ static void poll_merged(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx
 static volatile uint64_t g_block_closed, g_menu_closed;
 #define RELEASE_WAIT_NS 1000000000ull
 
+// mouse_mode = off: the mouse never turns the camera and the cursor is never captured, so it moves freely between the
+// game and other windows.
 int input_cursor_allowed(void) {
     const char *in = cfg_get("NX2NAVI_INPUT");
-    return g_block != 1 && g_menu != 1 && mouse_sens_get() > 0 && !(in && !strcmp(in, "none")) && !menu_cursor_pointer();
+    return g_block != 1 && g_menu != 1 && mouse_sens_get() > 0 && !(in && !strcmp(in, "none")) && !menu_cursor_pointer() &&
+           strcmp(cfg_value("NX2NAVI_MOUSE_MODE"), "off");
 }
 
 void input_block(int on) {
@@ -1446,7 +1449,8 @@ int input_menu_press(const char *names) {
             if (menu_press[i].to + MENU_GAP_NS > at) at = menu_press[i].to + MENU_GAP_NS;
         }
     menu_press_n = keep;
-    for (char *t = strtok_r(buf, " \t,;", &save); t && menu_press_n < MENU_PRESS_MAX; t = strtok_r(NULL, " \t,;", &save)) {
+    const char *sep = " \t\r\n,;";   // the console's line keeps its line end
+    for (char *t = strtok_r(buf, sep, &save); t && menu_press_n < MENU_PRESS_MAX; t = strtok_r(NULL, sep, &save)) {
         int bit = -1;
         for (size_t i = 0; i < sizeof script_buttons / sizeof *script_buttons; i++)
             if (!strcmp(t, script_buttons[i].name)) bit = script_buttons[i].bit;

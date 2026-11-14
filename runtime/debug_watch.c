@@ -95,8 +95,9 @@ int dbg_watch_line(int i, char *out, size_t n) {
 }
 
 // ---- flag names: debug_flag_names.json (tools/debug_flag_names.py) maps "KEY": [kind, name, where]
-static struct Name { uint32_t key; char *name; } *names;
-static int nnames;
+// Built whole by the first caller, then published: names before nnames, so a reader that sees a count sees the array.
+static struct Name { uint32_t key; char *name, *where; } *names;   // where: the game file that sets it, or "built"
+static _Atomic int nnames;
 static _Atomic int names_loaded;
 
 static int name_cmp(const void *a, const void *b) {
@@ -139,9 +140,10 @@ static void names_load(void) {
     }
     fclose(f);
     text[len] = 0;
-    int cap = 0;
+    int cap = 0, n = 0;
+    struct Name *nm = NULL;
     for (const char *s = text; (s = strchr(s, '"'));) {
-        char key[16], kind[32], name[160];
+        char key[16], kind[32], name[160], where[200];
         if (!json_str(&s, key, sizeof key)) break;
         const char *q = skip_ws(s);
         if (strlen(key) != 8 || strspn(key, "0123456789abcdefABCDEF") != 8 || *q != ':') continue;
@@ -153,26 +155,50 @@ static void names_load(void) {
         if (*q != ',') continue;
         q = skip_ws(q + 1);
         if (!json_str(&q, name, sizeof name)) continue;
-        s = q;
-        if (nnames == cap) {
-            cap = cap ? cap * 2 : 4096;
-            struct Name *g = realloc(names, (size_t)cap * sizeof *names);
-            if (!g) break;
-            names = g;
+        q = skip_ws(q);
+        where[0] = 0;
+        if (*q == ',') {
+            q = skip_ws(q + 1);
+            if (!json_str(&q, where, sizeof where)) where[0] = 0;
         }
-        names[nnames].key = (uint32_t)strtoul(key, NULL, 16);
-        names[nnames].name = strdup(name);
-        if (names[nnames].name) nnames++;
+        s = q;
+        if (n == cap) {
+            cap = cap ? cap * 2 : 4096;
+            struct Name *g = realloc(nm, (size_t)cap * sizeof *nm);
+            if (!g) break;
+            nm = g;
+        }
+        nm[n].key = (uint32_t)strtoul(key, NULL, 16);
+        nm[n].name = strdup(name);
+        nm[n].where = strdup(where);
+        if (nm[n].name && nm[n].where) n++;
+        else free(nm[n].name), free(nm[n].where);
     }
     free(text);
-    qsort(names, (size_t)nnames, sizeof *names, name_cmp);
+    if (nm) qsort(nm, (size_t)n, sizeof *nm, name_cmp);
+    names = nm;
+    atomic_store(&nnames, n);
+}
+
+const char *dbg_flag_name(uint32_t key) {
+    names_load();
+    int n = atomic_load(&nnames);
+    struct Name want = {key, NULL, NULL}, *f = n ? bsearch(&want, names, (size_t)n, sizeof *names, name_cmp) : NULL;
+    return f ? f->name : NULL;
+}
+
+const char *dbg_flag_where(uint32_t key) {
+    names_load();
+    int n = atomic_load(&nnames);
+    struct Name want = {key, NULL, NULL}, *f = n ? bsearch(&want, names, (size_t)n, sizeof *names, name_cmp) : NULL;
+    return f ? f->where : NULL;
 }
 
 int dbg_watch_names(void) { return nnames; }
 
 static const char *name_of(uint32_t key, char buf[16]) {
-    struct Name want = {key, NULL}, *n = nnames ? bsearch(&want, names, (size_t)nnames, sizeof *names, name_cmp) : NULL;
-    if (n) return n->name;
+    const char *n = dbg_flag_name(key);
+    if (n) return n;
     snprintf(buf, 16, "key %08x", key);
     return buf;
 }

@@ -234,6 +234,12 @@ void rt_frame_presented(const tex_t *t, uint64_t n);       // boot.c: --frames N
 void gfx_movie_frame(const uint8_t *rgba, int w, int h);
 void gfx_movie_frame_own(uint8_t *rgba, int w, int h);   // the same, taking the malloc'd buffer (freed later)
 void gfx_movie_stop(void);
+// A held picture: the next presented frame stays on screen, over the live game image, until gfx_hold_release, so the
+// game can be driven through its menus out of sight (save_tree.c open_load_screen). SDR swapchains only, as the movie
+// overlay it goes through. gfx_hold_picture: 0 when another frame grab is waiting; gfx_picture_held: the frame is up.
+int gfx_hold_picture(void);
+int gfx_picture_held(void);
+void gfx_hold_release(void);
 
 // The game's queue (NVNqueue address) of the submission this thread is handing to GfxBackend.submit, 0 when none
 // (probes). Set by nvnQueueSubmitCommands around the call; vk_exec.c orders queues by their events with it.

@@ -62,6 +62,13 @@ static void out_put(const char *fmt, ...) {
     out_len += n;
     out_buf[out_len] = 0;
 }
+// One line per actor whose name holds the filter (console actors).
+static int actors_print(uint64_t actor, const char *name, void *vctx) {
+    struct { const char *filter; int n; } *ctx = vctx;
+    if (ctx->filter && !strstr(name, ctx->filter)) return 1;
+    out_put("%#llx %s\n", (unsigned long long)actor, name);
+    return ++ctx->n < 400;
+}
 
 static int u64_order(const void *a, const void *b) {
     uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
@@ -623,6 +630,15 @@ static void run_command(char *line) {
     } else if (!strcmp(cmd, "warpcancel")) {
         dbg_warp_cancel();
         out_put("%s\n", dbg_warp_note());
+    } else if (!strcmp(cmd, "gameload") && a1) {   // gameload SLOT: the game reads slot 0..5 into its flags
+        out_put("gameload %s: %s\n", a1, dbg_game_load_request(atoi(a1)) ? "requested" : "refused");
+    } else if (!strcmp(cmd, "gamesave") && a1) {   // gamesave SLOT|auto: the game saves the running game to slot 0..5
+        int slot = !strcmp(a1, "auto") ? DBG_GAME_SAVE_AUTO : atoi(a1);   // or autosaves
+        out_put("gamesave %s: %s\n", a1, dbg_game_save_request(slot) ? "requested" : "refused");
+    } else if (!strcmp(cmd, "actors")) {   // actors [FILTER]: the generic class's actors whose names hold FILTER (heap scan)
+        struct { const char *filter; int n; } ctx = {a1, 0};
+        dbg_each_actor(actors_print, &ctx);
+        out_put("%d actors\n", ctx.n);
     } else if (!strcmp(cmd, "own")) {   // own [FILTER]: the owned-items list with each one's state
         for (int i = 0; i < dbg_owned_count(); i++) {
             const char *group = NULL, *label = dbg_owned_label(i, &group);
@@ -699,6 +715,18 @@ static void run_command(char *line) {
                     if (*q < 32 || *q > 126) { *q = 0; break; }
             out_put("  0x%llx  class main+0x%llx  at %.2f %.2f %.2f  %s\n", (unsigned long long)o[i],
                     (unsigned long long)(vt - MOD_MAIN_BASE), p[0], p[1], p[2], name);
+        }
+    } else if (!strcmp(cmd, "spawn")) {   // spawn [NAME [DX DZ]]: make an actor next to the player; no name: the last one's state
+        static const char *const kState[] = {"idle", "queued", "loading", "done", "failed"};
+        uint64_t actor = 0;
+        uint32_t err = 0;
+        if (a1) {
+            int ok = dbg_spawn_request(a1, a2 ? strtof(a2, NULL) : 0.0f, a3 ? strtof(a3, NULL) : 2.0f);
+            out_put(ok ? "spawn queued\n" : "spawn refused\n");
+        } else {
+            int st = dbg_spawn_status(&actor, &err);
+            out_put("spawn: %s, actor %#llx, error %u\n", st >= 0 && st < 5 ? kState[st] : "?",
+                    (unsigned long long)actor, err);
         }
     } else if (!strcmp(cmd, "bombs")) {   // bombs [on|off|clear]: the bomb paths, newest first
         if (a1 && !strcmp(a1, "clear")) dbg_bomb_paths_clear();

@@ -28,6 +28,7 @@ extern "C" {
 #include "layout.h"
 #include "platform/platform.h"
 #include "save_slots.h"
+#include "save_tree.h"
 
 #include <time.h>
 #include "ui/menu.h"
@@ -445,7 +446,7 @@ extern "C" bool debug_force_age_asking(void) { return g_age_ask >= 0 || g_age_fr
 
 static bool age_profile_ok(void) {
     char prof[SAVE_NAME_MAX];
-    if (save_profile_active(prof)) return false;
+    if (!save_profile_active(prof)) return false;   // 1 with the profile in prof
     const char *list = cfg_value("NX2NAVI_DEBUG_FORCE_AGE_OK");
     size_t n = strlen(prof);
     for (const char *p = list; *p;) {
@@ -459,7 +460,7 @@ static bool age_profile_ok(void) {
 
 static void age_profile_mark(void) {
     char prof[SAVE_NAME_MAX], list[1024];
-    if (save_profile_active(prof)) return;
+    if (!save_profile_active(prof)) return;
     const char *old = cfg_value("NX2NAVI_DEBUG_FORCE_AGE_OK");
     snprintf(list, sizeof list, "%s%s%s", old, *old ? "|" : "", prof);
     opt_apply("NX2NAVI_DEBUG_FORCE_AGE_OK", list);
@@ -1166,6 +1167,26 @@ extern "C" void tab_debug(float scale) {
                 if (c >= 0 && c != content) dbg_owned_set_bottle_content(i, c);
             }
         }
+    }
+
+    opt_group_text("Save tree");
+    {
+        // debug_save_tree (save_tree.c tree_mode): the launcher's Save Tree window shows and loads what it records
+        static const char *const values[] = {"0", "1", "2"};
+        static const char *const names[] = {"Off", "Player choices", "Every flag"};
+        const char *v = cfg_get("NX2NAVI_DEBUG_SAVE_TREE");
+        int cur = v && *v ? atoi(v) : 1;
+        cur = cur < 0 ? 0 : cur > 2 ? 2 : cur;
+        snprintf(value, sizeof value, "%s, %d saves", names[cur], save_tree_count());
+        int r = opt_text_choice("##dbg_savetree", "Save tree", names, 3, cur,
+                                "Keeps a real save, in the save tree next to the game, each time something changes. "
+                                "Player choices: each lasting thing the player does (a rock broken, a chest opened, "
+                                "someone talked to, an item, a cutscene, a door, a switch); people walking about, the "
+                                "clock, Link's position and rupee or ammo counts are left out. Every flag: a save for "
+                                "every flag the game changes, those too; it makes many saves of little use, and disk "
+                                "space goes fast (about 180 KB each). Left and right change it; A opens the list.",
+                                false, value);
+        if (r >= 0) opt_apply("NX2NAVI_DEBUG_SAVE_TREE", values[r]);
     }
 
     opt_group_text("Save states");
@@ -2184,7 +2205,7 @@ static void draw_collision(float scale) {
 // and what is happening. A switch that needs a restart restarts the game from here, on the render thread, as the
 // menu's Restart does.
 static void draw_title_profiles(float scale) {
-    if (save_title_restart_due()) {
+    if (save_title_restart_due() || save_tree_restart_due()) {
         cfg_save();
         gfx_window_request_restart();
     }
@@ -2458,66 +2479,110 @@ extern "C" void debug_overlay_draw(float scale) {
             uint64_t btn = 0;
             int32_t lx = 0, ly = 0, rx = 0, ry = 0;
             input_poll_ui(&btn, &lx, &ly, &rx, &ry);
-            // Switch npad bits: A B X Y, stick clicks, L R ZL ZR, plus minus, d-pad left up right down.
-            // Drawn like a Pro Controller: shoulders on top, left stick and d-pad on the left, face buttons and right stick on the right.
+            // Pro Controller silhouette, with the same npad bits and stick values the game receives.
             auto down = [&](int bit) { return ((btn >> bit) & 1) != 0; };
-            float u = 8.5f * scale, fs = u * 0.95f;
-            float W = 26.0f * u, H = 15.5f * u;
-            float ox = 14.0f * scale, oy = ImGui::GetIO().DisplaySize.y - 14.0f * scale - H;
-            auto P = [&](float x, float y) { return ImVec2(ox + x * u, oy + y * u); };
-            struct Sh { int bit; const char *n; float x0, x1, y0, y1; } sh[] = {
-                {8, "ZL", 1.5f, 8.5f, 0.0f, 1.7f}, {9, "ZR", 17.5f, 24.5f, 0.0f, 1.7f},
-                {6, "L", 1.0f, 8.0f, 1.9f, 3.6f}, {7, "R", 18.0f, 25.0f, 1.9f, 3.6f},
+            const float u = 0.92f * scale;
+            const float ox = 18.0f * scale;
+            const float oy = ImGui::GetIO().DisplaySize.y - 18.0f * scale - 238.0f * u;
+            auto P = [&](float x, float y) { return ImVec2(ox + x*u, oy + y*u); };
+            const ImU32 shell = IM_COL32(54, 57, 59, 240), rim = IM_COL32(95, 100, 101, 245);
+            const ImU32 inset = IM_COL32(45, 48, 50, 250), rubber = IM_COL32(68, 73, 75, 255);
+            const ImU32 silver = IM_COL32(181, 188, 187, 255), press = IM_COL32(240, 209, 117, 255);
+            const ImU32 ink = IM_COL32(225, 230, 227, 255);
+            auto path = [&]() {
+                dl->PathLineTo(P(21, 190));
+                dl->PathBezierCubicCurveTo(P(17, 171), P(28, 109), P(36, 75));
+                dl->PathBezierCubicCurveTo(P(40, 49), P(61, 43), P(87, 45));
+                dl->PathBezierCubicCurveTo(P(112, 49), P(168, 49), P(193, 45));
+                dl->PathBezierCubicCurveTo(P(219, 43), P(240, 49), P(244, 75));
+                dl->PathBezierCubicCurveTo(P(252, 109), P(263, 171), P(259, 190));
+                dl->PathBezierCubicCurveTo(P(255, 207), P(241, 211), P(230, 202));
+                dl->PathBezierCubicCurveTo(P(219, 192), P(211, 170), P(202, 161));
+                dl->PathLineTo(P(78, 161));
+                dl->PathBezierCubicCurveTo(P(69, 170), P(61, 192), P(50, 202));
+                dl->PathBezierCubicCurveTo(P(39, 211), P(25, 207), P(21, 190));
             };
-            for (auto &s : sh) {
-                dl->AddRectFilled(P(s.x0, s.y0), P(s.x1, s.y1), down(s.bit) ? lit : edge, 0.8f * u);
-                label(fs, P((s.x0 + s.x1) / 2, (s.y0 + s.y1) / 2), s.n, down(s.bit) ? txt_lit : IM_COL32(20, 20, 24, 255));
+            // The bumpers tuck behind the shell; only their dark upper lip is exposed.
+            for (int side = 0; side < 2; ++side) {
+                float x = side ? 210.0f : 70.0f;
+                bool trigger = down(side ? 9 : 8), shoulder = down(side ? 7 : 6);
+                dl->AddRectFilled(P(x-12, 16), P(x+12, 33), trigger ? press : rubber, 5*u);
+                dl->AddRect(P(x-12, 16), P(x+12, 33), trigger ? press : rim, 5*u);
+                label(10*u, P(x, 24), side ? "ZR" : "ZL", trigger ? txt_lit : ink);
+                auto B = [&](float bx, float by) { return P(side ? 280-bx : bx, by); };
+                dl->PathLineTo(B(38, 61));
+                dl->PathBezierCubicCurveTo(B(41, 44), B(60, 39), B(80, 42));
+                dl->PathBezierCubicCurveTo(B(91, 43), B(99, 46), B(105, 50));
+                dl->PathLineTo(B(101, 58));
+                dl->PathLineTo(B(38, 61));
+                dl->PathFillConvex(shoulder ? press : rubber);
+                dl->AddBezierCubic(B(42, 53), B(49, 43), B(76, 40), B(96, 48),
+                                   shoulder ? ink : rim, 1.2f*u, 24);
             }
-            dl->AddRectFilled(P(0.0f, 3.4f), P(W / u, 13.2f), body, 3.0f * u);
-            dl->AddCircleFilled(P(3.6f, 11.2f), 4.4f * u, body, 40);
-            dl->AddCircleFilled(P(22.4f, 11.2f), 4.4f * u, body, 40);
-            dl->AddRect(P(0.0f, 3.4f), P(W / u, 13.2f), edge, 3.0f * u, 0, 1.2f * scale);
-            auto stick = [&](ImVec2 c, int32_t sx, int32_t sy, int clickbit) {
-                float R = 2.5f * u;
-                dl->AddCircleFilled(c, R, idle, 32);
-                dl->AddCircle(c, R, edge, 32, 1.2f * scale);
-                float tx = sx / 32767.0f, ty = -sy / 32767.0f, m = sqrtf(tx * tx + ty * ty);
-                if (m > 1) { tx /= m; ty /= m; }
-                ImVec2 k(c.x + tx * R * 0.55f, c.y + ty * R * 0.55f);
-                dl->AddCircleFilled(k, R * 0.72f, down(clickbit) ? lit : IM_COL32(88, 92, 102, 255), 28);
-                dl->AddCircle(k, R * 0.72f, edge, 28, 1.0f * scale);
+            // Concave fill is needed for the gap between the two grips.
+            path(); dl->PathFillConcave(shell);
+            path(); dl->PathStroke(rim, ImDrawFlags_Closed, 1.25f*scale);
+            dl->AddRectFilled(P(41, 52), P(239, 153), inset, 32*u);
+            dl->AddRect(P(41, 52), P(239, 153), IM_COL32(29, 32, 34, 255), 32*u, 0, 1.0f*scale);
+            label(8*u, P(70, 53), "L", down(6) ? press : silver);
+            label(8*u, P(210, 53), "R", down(7) ? press : silver);
+            dl->AddLine(P(85, 157), P(195, 157), IM_COL32(107, 113, 108, 120), u);
+            auto button = [&](float x, float y, float r, int bit, const char *name) {
+                ImVec2 c = P(x, y);
+                bool held = bit >= 0 && down(bit);
+                dl->AddCircleFilled(ImVec2(c.x, c.y+1.5f*u), (r+1)*u, IM_COL32(22, 25, 26, 255), 32);
+                dl->AddCircleFilled(c, r*u, held ? press : rubber, 32);
+                dl->AddCircle(c, r*u, held ? ink : rim, 32, u);
+                label((r > 7 ? 10 : 8)*u, c, name, held ? txt_lit : ink);
             };
-            stick(P(5.4f, 6.2f), lx, ly, 4);
-            stick(P(16.6f, 10.6f), rx, ry, 5);
-            {
-                ImVec2 c = P(9.4f, 10.6f);
-                struct D { int bit; float dx, dy; const char *n; } d[] = {{13, 0, -1, "^"}, {15, 0, 1, "v"}, {12, -1, 0, "<"}, {14, 1, 0, ">"}};
-                float a = 1.15f * u;
-                for (auto &e : d) {
-                    ImVec2 m(c.x + e.dx * 1.55f * u, c.y + e.dy * 1.55f * u);
-                    dl->AddRectFilled(ImVec2(m.x - a, m.y - a), ImVec2(m.x + a, m.y + a), down(e.bit) ? lit : idle, 0.5f * u);
-                    dl->AddRect(ImVec2(m.x - a, m.y - a), ImVec2(m.x + a, m.y + a), edge, 0.5f * u, 0, 1.0f * scale);
-                    label(fs, m, e.n, down(e.bit) ? txt_lit : txt);
+            auto stick = [&](float x, float y, int32_t sx, int32_t sy, int bit) {
+                ImVec2 c = P(x, y);
+                dl->AddCircleFilled(c, 22*u, IM_COL32(25, 28, 29, 255), 48);
+                dl->AddCircle(c, 22*u, rim, 48, u);
+                dl->AddCircle(c, 19*u, rubber, 48, u);
+                float tx = sx/32767.0f, ty = -sy/32767.0f;
+                float length = sqrtf(tx*tx + ty*ty);
+                if (length > 1) { tx /= length; ty /= length; }
+                ImVec2 k(c.x+tx*9*u, c.y+ty*9*u);
+                dl->AddCircleFilled(k, 15*u, down(bit) ? press : IM_COL32(100, 107, 108, 255), 40);
+                dl->AddCircle(k, 15*u, down(bit) ? ink : silver, 40, u);
+                dl->AddCircle(k, 12*u, down(bit) ? IM_COL32(182, 150, 65, 255) : rubber, 40, u);
+                for (int j = 0; j < 20; ++j) {
+                    float a = j * 6.2831853f / 20;
+                    dl->AddLine(ImVec2(k.x+cosf(a)*13*u, k.y+sinf(a)*13*u),
+                                ImVec2(k.x+cosf(a)*14.5f*u, k.y+sinf(a)*14.5f*u), rim, 0.7f*u);
                 }
-                dl->AddRectFilled(ImVec2(c.x - a, c.y - a), ImVec2(c.x + a, c.y + a), idle);
+            };
+            stick(73, 88, lx, ly, 4);
+            stick(169, 123, rx, ry, 5);
+            // One connected cross with independently lit directions, including diagonals.
+            const float cx = 105, cy = 123, arm = 17, neck = 6;
+            const ImVec2 cross[] = {P(cx-neck,cy-arm),P(cx+neck,cy-arm),P(cx+neck,cy-neck),
+                P(cx+arm,cy-neck),P(cx+arm,cy+neck),P(cx+neck,cy+neck),P(cx+neck,cy+arm),
+                P(cx-neck,cy+arm),P(cx-neck,cy+neck),P(cx-arm,cy+neck),P(cx-arm,cy-neck),P(cx-neck,cy-neck)};
+            dl->AddConcavePolyFilled(cross, 12, rubber);
+            dl->AddPolyline(cross, 12, rim, ImDrawFlags_Closed, u);
+            const struct { int bit; float x, y; } dirs[] = {{13,105,112},{15,105,134},{12,94,123},{14,116,123}};
+            for (auto &d : dirs) {
+                if (down(d.bit)) dl->AddRectFilled(P(d.x-4.5f,d.y-4.5f), P(d.x+4.5f,d.y+4.5f), press, 1.5f*u);
+                else dl->AddCircleFilled(P(d.x,d.y), 1.2f*u, silver, 12);
             }
-            {
-                ImVec2 c = P(21.0f, 6.2f);
-                struct F { int bit; float dx, dy; const char *n; } f[] = {{2, 0, -1, "X"}, {1, 0, 1, "B"}, {3, -1, 0, "Y"}, {0, 1, 0, "A"}};
-                for (auto &e : f) {
-                    ImVec2 m(c.x + e.dx * 2.0f * u, c.y + e.dy * 2.0f * u);
-                    dl->AddCircleFilled(m, 1.35f * u, down(e.bit) ? lit : idle, 24);
-                    dl->AddCircle(m, 1.35f * u, edge, 24, 1.0f * scale);
-                    label(fs, m, e.n, down(e.bit) ? txt_lit : txt);
-                }
-            }
-            const struct { int bit; const char *n; float x; } mp[] = {{11, "-", 10.6f}, {10, "+", 15.4f}};
-            for (auto &e : mp) {
-                ImVec2 m = P(e.x, 4.7f);
-                dl->AddCircleFilled(m, 0.9f * u, down(e.bit) ? lit : idle, 20);
-                dl->AddCircle(m, 0.9f * u, edge, 20, 1.0f * scale);
-                label(fs, m, e.n, down(e.bit) ? txt_lit : txt);
-            }
+            button(204, 69, 9, 2, "X"); button(204, 105, 9, 1, "B");
+            button(186, 87, 9, 3, "Y"); button(222, 87, 9, 0, "A");
+            button(109, 69, 5, 11, "-"); button(166, 69, 5, 10, "+");
+            // Home and capture are decorative: they are not game npad input bits.
+            dl->AddRect(P(119,83), P(128,92), rim, u);
+            dl->AddCircle(P(123.5f,87.5f), 2*u, silver, 16, u);
+            button(153, 88, 5, -1, "");
+            dl->AddTriangle(P(150,88), P(153,85), P(156,88), silver, u);
+            dl->AddRect(P(151,88), P(155,91), silver, 0, 0, u);
+            for (int j=0; j<4; ++j)
+                dl->AddRectFilled(P(134+j*4,140), P(136+j*4,142), j==0 ? silver : rubber, 0.5f*u);
+            char left[40], right[40];
+            snprintf(left, sizeof left, "%d, %d", (int)lroundf(lx*100.0f/32767.0f), (int)lroundf(ly*100.0f/32767.0f));
+            snprintf(right, sizeof right, "%d, %d", (int)lroundf(rx*100.0f/32767.0f), (int)lroundf(ry*100.0f/32767.0f));
+            label(15*u, P(76,225), left, ink);
+            label(15*u, P(204,225), right, ink);
         }
     }
     if (!n) return;

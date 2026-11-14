@@ -115,7 +115,15 @@ static void settings_load(void) {
     atomic_store(&seconds, s < SECONDS_MIN ? SECONDS_MIN : s > SECONDS_MAX ? SECONDS_MAX : s);
     atomic_store(&enabled, cfg_bool("NX2NAVI_DEBUG_CLIP") != 0);
 }
-int clip_enabled(void) { settings_load(); return atomic_load(&enabled) == 1; }
+// Read again when the settings change (the Game tab's Performance row writes the key itself); clip_set_enabled writes
+// both, so the two agree.
+int clip_enabled(void) {
+    settings_load();
+    static _Atomic unsigned seen = ~0u;
+    unsigned v = cfg_version();
+    if (atomic_exchange(&seen, v) != v) atomic_store(&enabled, cfg_bool("NX2NAVI_DEBUG_CLIP") != 0);
+    return atomic_load(&enabled) == 1;
+}
 int clip_seconds(void) { settings_load(); return atomic_load(&seconds); }
 void clip_set_enabled(int on) {
     settings_load();

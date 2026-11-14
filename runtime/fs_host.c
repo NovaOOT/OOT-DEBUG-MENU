@@ -27,6 +27,7 @@
 #include "platform/platform.h"
 #include "romfs_path.h"
 #include "save_share.h"
+#include "save_tree.h"
 
 #define NX2NAVI_APPLICATION_ID 0x0400486024dec000ull   // the game's title id, as svc.c PROGRAM_ID tells it
 #define FILE_BASE 0x200000000ull
@@ -672,6 +673,7 @@ static void live_copy(int record) {
     if (*slot) {
         char *sd = join(src, slot);
         caption_read(sd, kind, sizeof kind, place, sizeof place);
+        save_tree_committed(sd, atoi(slot + 5), kind, place);
         free(sd);
     }
     snprintf(label, sizeof label, "%s%s%s", *slot ? slot : "settings", *kind ? " " : "", kind);   // no slot: option.sav, account.sav
@@ -1517,6 +1519,17 @@ static int64_t host_read_at(PlatFile *f, void *buf, uint32_t n, uint64_t off) {
     return got < 0 ? -1 : got;
 }
 
+// A save slot's progress.sav opened for reading: the game loads that slot (save_tree.h).
+static void tree_note_open(const char *p) {
+    size_t n = strlen(p);
+    static const char tail[] = "progress.sav";
+    if (n < 20 || strcmp(p + n - 12, tail) || (p[n - 13] != '/' && p[n - 13] != '\\') || strncmp(p + n - 20, "slot_", 5))
+        return;
+    int slot = (p[n - 15] - '0') * 10 + (p[n - 14] - '0');
+    rt_log("save tree: the game reads slot_%02d's progress", slot);
+    save_tree_note_read(p, slot);
+}
+
 static uint32_t open_file_ungated(uint64_t *out, const char *path, int mode) {
     if (romfs_owns(path)) {
         return romfs_open(out, path, mode);
@@ -1530,6 +1543,7 @@ static uint32_t open_file_ungated(uint64_t *out, const char *path, int mode) {
     if (plat_fs_kind(p) != PLAT_FS_FILE) return FS_R_PATH_NOT_FOUND;
     if (kind == M_SAVE_RO && (mode & FS_OPEN_WRITE)) return FS_R_UNSUPPORTED_OPEN;
     int save_writer = kind == M_SAVE && (mode & FS_OPEN_WRITE);
+    if ((kind == M_SAVE || kind == M_SAVE_RO) && !(mode & FS_OPEN_WRITE)) tree_note_open(p);
     int err = 0;
     PlatFile *f = plat_fs_open(p, (mode & FS_OPEN_WRITE) != 0, &err);
     if (!f) return fs_result(err);

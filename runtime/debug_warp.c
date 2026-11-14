@@ -1084,4 +1084,5 @@ void dbg_game_frame(Cpu *c) {
     if (dbg_flag_addr(DBG_FLAG_STRING, K_START)) remember_start();
     dbg_move_frame(c);
     dbg_bombs_frame();
+    dbg_transform_frame(c);
 }

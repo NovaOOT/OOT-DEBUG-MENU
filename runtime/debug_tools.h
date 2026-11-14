@@ -498,6 +498,22 @@ typedef struct {
 } DbgBombPath;
 void dbg_bombs_frame(void);
 int dbg_bomb_paths(DbgBombPath *out, int max);
+
+// Spawning actors (debug_transform.c): dbg_spawn_request queues an actor of the given name ("Npc_Goron_GON_Default",
+// the name of its file under Pack/Actor) dx metres to the player's right and dz ahead. The frame hook
+// (dbg_transform_frame) has the game's actor manager make it and, once made, puts it in the world.
+// dbg_spawn_status gives the state (DBG_SPAWN_*), the actor once done and the manager's refusal code (3: no such actor).
+enum { DBG_SPAWN_IDLE, DBG_SPAWN_QUEUED, DBG_SPAWN_SENT, DBG_SPAWN_DONE, DBG_SPAWN_FAILED };
+int dbg_spawn_request(const char *name, float dx, float dz);
+int dbg_spawn_status(uint64_t *actor, uint32_t *error);
+void dbg_transform_frame(struct Cpu *c);
+// The game writes a real save of the running game to save slot 0..5, as its System page does (the frame hook
+// calls it next frame). DBG_GAME_SAVE_AUTO: an autosave instead, to the slot the game plays, as when it enters an
+// area. 0 when another request waits.
+#define DBG_GAME_SAVE_AUTO 6
+int dbg_game_save_request(int slot);
+// The game reads save slot 0..5 into its flags, as its load node does (next frame); the scene stays. 0 when another waits.
+int dbg_game_load_request(int slot);
 void dbg_bomb_paths_clear(void);   // forgets the paths that have ended
 
 // Call tracing on the lifted code's function-entry hook (debug_fntrace.c; the console's ftrace and fcount). Watch:

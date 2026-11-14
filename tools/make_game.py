@@ -1623,12 +1623,11 @@ def pgo_gen_record(out, clang, env):
 
 
 def guest_opt_ini(out):
-    """NX2NAVI_GUEST_OPT from nx2navi.ini next to the exe (the low-end GPU rows of the menu's Game tab write it there)
-    when the environment does not set it: the next build of the game folder out takes it. Only while low_end_gpu = 1
-    is in the file too: the mode's settings count only with the mode on (runtime/cfg.c LOWEND_ONLY)."""
+    """Read the Game tab's CPU optimisation choice for the next build, unless the environment overrides it.
+    This setting is available on every GPU, independently of low_end_gpu."""
     if os.environ.get('NX2NAVI_GUEST_OPT', '').strip():
         return
-    found, low = '', False
+    found = ''
     try:
         for line in (Path(out) / 'nx2navi.ini').read_text(encoding='utf-8', errors='replace').splitlines():
             key, eq, value = line.partition('=')
@@ -1636,11 +1635,9 @@ def guest_opt_ini(out):
             value = value.split('#')[0].split(';')[0].strip().strip('"')
             if eq and key in ('guest_opt', 'nx2navi_guest_opt') and value:
                 found = value
-            if eq and key in ('low_end_gpu', 'nx2navi_low_end_gpu'):
-                low = value not in ('', '0')
     except OSError:
         pass
-    if found and low:
+    if found in ('1', '2'):
         os.environ['NX2NAVI_GUEST_OPT'] = found
 
 

@@ -88,6 +88,11 @@ int romfs_owns(const char *path) { (void)path; return 0; }
 int mem_probing(void) { return 0; }   // write_file asks before each write: no probe, no lazy heap here
 void mem_kernel_access(uint64_t a, uint64_t n) { (void)a, (void)n; }
 void fs_trace(const char *what, const char *path) { (void)what, (void)path; }
+const char *cfg_get(const char *name) { (void)name; return NULL; }   // every setting at its default
+void save_tree_note_read(const char *path, int slot) { (void)path, (void)slot; }   // no save tree here
+void save_tree_committed(const char *dir, int slot, const char *kind, const char *place) {
+    (void)dir, (void)slot, (void)kind, (void)place;
+}
 
 // Resolve the same file-service thunks the game imports; exercise the mounted working copy through its public ABI.
 typedef struct { const char *name; GuestFn fn; } TestHostEntry;

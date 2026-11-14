@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "cfg.h"
+#include "foliage_detail.h"
 #include "flight.h"
 #include "host.h"
 #include "nvn_api.h"
@@ -4735,6 +4736,14 @@ static int prepare_draw_ex(VkExec *ex, int prim, int32_t count, int restart, int
     // after the camera is taken, which the collision overlay needs; before anything is bound for the draw
     int hide = hide_meshes_now();
     if (hide && scene_geometry(ex, &s) && !(hide == 2 && player_draw(ex))) return draw_skipped(ex, mesh, SK_HIDE_MESHES);
+    if (!hide && motion_owner_transformed()) {
+        // A transformation's body stands in for the player's: the player and its other equipment go, and the pause
+        // menu preview's player body (MOTION_OWNER_PREVIEW), which is drawn to a target of its own.
+        MotionOwner o;
+        if (pose_owner(ex, &o) && !(o.flags & MOTION_OWNER_TRANSFORM) &&
+            ((o.flags & MOTION_OWNER_PREVIEW) || scene_geometry(ex, &s)))
+            return draw_skipped(ex, mesh, SK_HIDE_MESHES);
+    }
     vk_dlaa_jitter_check(ex);   // a draw with another jitter than the viewport recorded last records it again
     record_fixed(ex);
     repeat_stats(ex, info);
@@ -6313,17 +6322,25 @@ static int mesh_ring_entry(VkExec *ex, VkCommandBuffer cb, const p_draw_mesh_ind
 // off every indirect one, in every pass (their shadows too). In a frame dump of Kokiri Forest on an RX 580
 // (f8118, 2026-11-10) the grass and moss were one draw with task stage 2ddf7b0bf74e5a05; the plants nine without.
 static int foliage_skip(VkExec *ex) {
-    static int mode = -1;
+    static int mode = -1, shadows;
     if (mode < 0) {
         const char *v = cfg_get("NX2NAVI_FOLIAGE");
         mode = v && !strcmp(v, "off") ? 2 : v && !strcmp(v, "reduced") ? 1 : 0;
-        rt_log("vk: foliage %s (NX2NAVI_FOLIAGE)", mode == 2 ? "off" : mode ? "reduced: no small grass or moss" : "full");
+        v = cfg_get("NX2NAVI_FOLIAGE_SHADOWS");
+        shadows = v && !strcmp(v, "off") ? 2 : v && !strcmp(v, "reduced") ? 1 : 0;
+        const char *names[] = {"full", "reduced", "off"};
+        rt_log("vk: foliage %s, foliage shadows %s", names[mode], names[shadows]);
     }
-    if (!mode) return 0;
-    if (mode == 2) return 1;
+    if (!mode && !shadows) return 0;
+    // Use the current command's attachments, not cached images from a previous pass.
+    int depth_only = ex->rt.depth != NULL;
+    for (int i = 0; i < ex->rt.n && i < 8; ++i) if (ex->rt.color[i]) depth_only = 0;
+    if (!mode && !depth_only) return 0;
+    if (mode == 2 || (depth_only && shadows == 2)) return 1;
     const uint8_t *ctl, *code;
     uint32_t len;
-    return ex->prog && find_stage(ex->dc, ex->prog, NVN_STAGE_TASK, &ctl, &code, &len);
+    int task = ex->prog && find_stage(ex->dc, ex->prog, NVN_STAGE_TASK, &ctl, &code, &len);
+    return foliage_detail_skip(1, task, depth_only, mode, shadows);
 }
 
 // DrawMeshTasksIndirect: one draw from its ring entry (mesh_ring_entry); x2-x4 of the call vary like leftovers, so they

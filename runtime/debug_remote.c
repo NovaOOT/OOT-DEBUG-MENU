@@ -287,6 +287,9 @@ static void run_command(char *line) {
         rest = rest ? rest + 5 : "";
         if (a1) out_put("queued %d input events\n", input_script_live(rest));
         else out_put("%d input events pending\n", input_script_live_busy());
+    } else if (!strcmp(cmd, "menu") && a1) {   // menu BUTTON [BUTTON ...]: presses for the in-game menu (input.h)
+        const char *rest = strstr(whole, "menu");
+        out_put("queued %d menu presses\n", input_menu_press(rest ? rest + 4 : ""));
     } else if (!strcmp(cmd, "main")) {
         out_put("main base 0x%llx, v111 %d\n", (unsigned long long)MOD_MAIN_BASE, dbg_available());
     } else if (!strcmp(cmd, "anchor")) {   // the host address of this program's code: map symbol dbg_remote_set minus this = slide

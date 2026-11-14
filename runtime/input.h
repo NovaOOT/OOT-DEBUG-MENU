@@ -83,6 +83,10 @@ int input_dump_key(void);
 // console's "input" command (debug_remote.c run_command). Any thread.
 int input_script_live(const char *text);
 int input_script_live_busy(void);   // queued live events not finished yet
+// Button names (as in the input script, separated by spaces) pressed one after another for the in-game menu, 100 ms
+// each with 120 ms between them, on the wall clock; input_pad_read reports them. Returns how many were queued. The
+// remote console's "menu" command (debug_remote.c run_command). Any thread.
+int input_menu_press(const char *names);
 
 // Mouse camera and cursor (input_win.c, Win32 window thread). The window procedure calls input_window_msg first for raw
 // mouse input, cursor hiding and confinement; it returns 1 with *res set when the message is handled. input_cursor_suspend(1)

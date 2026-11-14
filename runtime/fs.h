@@ -93,3 +93,7 @@ const char *fs_save_import_done(void);                     // the backup of the 
 // (empty when nothing is saved yet: nothing to copy), 0 when it could not be made (logged). Slow (the whole save): not
 // on the game's thread.
 int fs_save_snapshot(const char *folder, const char *prefix, int keep, char *out, size_t cap);
+// The save slot folder the game's last save wrote and that save's kind, "slot_01 manual" or "slot_00 autosave", from
+// this run or, before its first save, from <game folder>/saves/live/last-save.txt (fs_host.c "the live copy"). 1 when
+// known.
+int fs_save_last_slot(char *out, size_t cap);

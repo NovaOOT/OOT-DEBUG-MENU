@@ -982,6 +982,20 @@
 # rando_drops = off
 # Maps and compasses: own_dungeon (between the chests of their dungeon) or vanilla. Default: own_dungeon.
 # rando_maps = own_dungeon
+# Shops: shuffle gives the shop shelves each other's items, with their prices (the Happy Mask Shop stays). Default: off.
+# rando_shops = off
+# Business Scrubs: shuffle makes the scrubs that sell wares trade their offers (items, price, text). Default: off.
+# rando_scrubs = off
+# Songs: shuffle makes the twelve songs trade the places they are taught (with the logic each can be learnt).
+# Default: off.
+# rando_songs = off
+# Gifts: shuffle makes what the Great Fairies, the House of Skulltula, the minigames and the Skull Kid give trade
+# places; with rando_logic = none the Fairy Ocarina, the Goron's Bracelet, the Gerudo card, the Light Arrows and the
+# tunics too. Default: off.
+# rando_gifts = off
+# Dungeon rewards: shuffle makes the Spiritual Stones trade places, the forest, fire and water medallions too, and the
+# shadow and spirit ones. Default: off.
+# rando_rewards = off
 # Lone enemies: off, same_kind (ground, flying, water) or any_kind. Default: off.
 # rando_enemies = off
 # Loading zones, swapped in pairs so the way back leads back: off, dungeons, bosses (the boss rooms that are stages of
@@ -1080,6 +1094,15 @@
 # debug_fly_speed = 8
 # Force age on every debug warp: off, child or adult. Default: off.
 # debug_force_age = off
+# The save profiles whose player confirmed the Force age warning (it can break a save), '|' between them; the menu
+# asks once for each other profile before turning Force age on. Default: none.
+# debug_force_age_ok =
+# Every save the game makes, its autosaves too, is copied to saves/live next to the game, where it can be read while
+# the game runs: live/save is the newest save, live/saves.log has a line per save (the time, the slot, autosave or
+# manual, the place and the files that changed), live/last-save.txt the last slot, live/slots.txt what each slot
+# holds, and live/history a dated copy of each saved slot. How many history
+# copies to keep (0 to 10000; 0 keeps none). Default: 100.
+# debug_save_history = 100
 # Volumes further from the player than this many metres are not drawn (10 to 1000). Default: 150.
 # debug_view_range = 150
 # Foliage draw distance (game build 1.1.1): multiplies how far out grass tufts, bushes, flowers and low trees are drawn

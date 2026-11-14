@@ -1,13 +1,14 @@
-"""Randomizer: shuffles what chests, pots, grass and other drops give, which enemies stand where and where loading
-zones lead, and writes the result as the Randomizer mod.
+"""Randomizer: shuffles what chests, pots, grass and other drops give, the songs, gifts and dungeon rewards, which
+enemies stand where and where loading zones lead, and writes the result as the Randomizer mod.
 
     python tools/randomizer.py --game <install folder> [--seed TEXT] [options]
 
 The install folder is the one that holds romfs/ (index.json and romfs.bin, as the setup unpacks the game) and mods/.
 The tool reads every area's stage files (Banc/<area>/<area>[_Child|_Adult]_{Static,Dynamic}.bcett.byml.zs), changes
-the actors' parameters there and writes the changed stage files to mods/Randomizer/romfs, with the seed, the options
-and every change in mods/Randomizer/spoiler.txt. The game's Randomizer tab (runtime/randomizer.c) runs it with
---pending --status: the files then wait in romfs.new until the game starts again. Run by hand, turn the mod on in the
+the actors' parameters there and writes the changed stage files (and changed event flows, Event/EventFlow) to
+mods/Randomizer/romfs, with the seed, the options and every change in mods/Randomizer/spoiler.txt. The game's
+Randomizer tab (runtime/randomizer.c) runs it with --pending --status: the files then wait in romfs.new until the game
+starts again. Run by hand, turn the mod on in the
 Mods tab; it applies at the next start. A new seed rewrites the folder.
 
 Item locations (Location):
@@ -23,8 +24,12 @@ Item locations (Location):
   give a second item when the first is owned (Drop__CheckActor: the Deku and Hylian Shield chests), and the areas
   DreamWorld and BossRushIntervalRoom.
 - Navi's comment (GetEventName) goes with the chest only while the chest keeps its own item.
-- Items the game gives outside stage actors (songs, NPC gifts, Gold Skulltula rewards, shops, scrubs) stay where they
-  are: those are in the event flows.
+- Items the game gives from events (songs, gifts, dungeon rewards) are in the event flows; --songs, --gifts and
+  --rewards shuffle them there (see "event flows" below). The trading sequence and the capacity upgrades stay.
+
+Shops (--shops shuffle): the shelves (actors Shop_<item>, Dynamic.ShopItemIndex the slot) trade their items; the
+item actor carries its price. Business Scrubs (--scrubs shuffle): the scrubs that sell named wares trade their offers
+(SCRUB_KEYS: the wares, the talk event with the prices and text, the events when hit).
 
 Enemies (--enemies): an enemy that no link, AI group or event refers to (referenced) becomes another of the same
 group (ENEMY_GROUPS: ground, air, water) or any ground or air enemy, the same in the child and the adult file.
@@ -494,6 +499,83 @@ def shuffle_enemies(stages, how, rnd):
             a['Gyaml'] = (T_STR, picks[key])
     return done
 
+# ---- shops and Business Scrubs
+
+def _xz(a):
+    """An actor's place on the ground in decimetres, to match the same actor in an area's child and adult files."""
+    t = a.get('Translate') or []
+    if len(t) < 3:
+        return None
+    f = [struct.unpack('<f', struct.pack('<I', v[1]))[0] if v[0] == T_FLOAT else float(v[1]) for v in t]
+    return round(f[0] * 10), round(f[2] * 10)
+
+
+def shuffle_shops(stages, rnd):
+    """Shop shelves: each item a shop sells is an actor Shop_<item> with Dynamic.ShopItemIndex, its slot; the actor
+    itself has the item, its price and its sign. The shelves keep their slots and get each other's items, the same in
+    every file of an area (key: area, slot, item). The Happy Mask Shop's masks (lent, not sold) stay.
+    Returns [(area, slot, old, new)]."""
+    keys = []
+    for path in sorted(stages):
+        if folder_of(path) in EXCLUDE_AREAS:
+            continue
+        for a in stages[path].get('Actors', []):
+            g = a.get('Gyaml', (0, ''))[1]
+            d = a.get('Dynamic') or {}
+            if g.startswith('Shop_') and 'ShopItemIndex' in d and not g.startswith('Shop_Mask_'):
+                k = (folder_of(path), d['ShopItemIndex'][1], g)
+                if k not in keys:
+                    keys.append(k)
+    items = [k[2] for k in keys]
+    rnd.shuffle(items)
+    new = dict(zip(keys, items))
+    for path in stages:
+        for a in stages[path].get('Actors', []):
+            g = a.get('Gyaml', (0, ''))[1]
+            d = a.get('Dynamic') or {}
+            k = (folder_of(path), d.get('ShopItemIndex', (0, None))[1], g)
+            if k in new:
+                a['Gyaml'] = (T_STR, new[k])
+    return [(k[0], k[1], k[2], new[k]) for k in keys if new[k] != k[2]]
+
+
+# What a Business Scrub sells and says: its wares (up to three item actors), the talk event that offers them (the
+# prices and the text are in it) and the events when it is hit. They move together, so the offer matches the wares.
+SCRUB_KEYS = ('ScrubBusiness_ShopItemActorName0', 'ScrubBusiness_ShopItemActorName1',
+              'ScrubBusiness_ShopItemActorName2', 'TalkEventName', 'AttackedEventName', 'FirstTimeAttackDelayFrame')
+
+
+def shuffle_scrubs(stages, rnd):
+    """Business Scrubs (Enemy_Scrub_Business) that sell named wares trade their offers (SCRUB_KEYS). A scrub is the
+    same in an area's child and adult files (key: area and place). Scrubs without wares of their own (the dungeon
+    scrubs whose event decides, the bug buyer) and the Boss Rush room's stay. Returns [(area, old offer, new offer)]."""
+    offers, order = {}, []
+    for path in sorted(stages):
+        if folder_of(path) in EXCLUDE_AREAS:
+            continue
+        for a in stages[path].get('Actors', []):
+            d = a.get('Dynamic') or {}
+            if a.get('Gyaml', (0, ''))[1] != 'Enemy_Scrub_Business' or 'ScrubBusiness_ShopItemActorName0' not in d:
+                continue
+            k = (folder_of(path), _xz(a))
+            if k not in offers:
+                offers[k] = {n: d[n] for n in SCRUB_KEYS if n in d}
+                order.append(k)
+    moved = [offers[k] for k in order]
+    rnd.shuffle(moved)
+    new = dict(zip(order, moved))
+    for path in stages:
+        for a in stages[path].get('Actors', []):
+            k = (folder_of(path), _xz(a))
+            if a.get('Gyaml', (0, ''))[1] != 'Enemy_Scrub_Business' or k not in new:
+                continue
+            d = a['Dynamic']
+            for n in SCRUB_KEYS:
+                d.pop(n, None)
+            d.update(copy.deepcopy(new[k]))
+    name = lambda o: o.get('TalkEventName', (0, '?'))[1]
+    return [(k[0], name(offers[k]), name(new[k])) for k in order if new[k] is not offers[k]]
+
 # ---- entrances
 
 DUNGEONS_CHILD = ('InsideTheDekuTree', 'DodongoCavern', 'InsideJabuJabuBelly', 'BottomOfTheWell')
@@ -595,6 +677,221 @@ def shuffle_entrances(stages, how, rnd, mixed=False, any_age=False):
 # ---- the mod
 
 
+# ---- event flows: songs, gifts and dungeon rewards
+
+# An event flow (Event/EventFlow/<name>.bfevfl.zs, little endian) holds one flowchart: actors, events, entry points.
+# Every pointer is a file offset listed in the relocation table at the end (RELT). A string is a u16 length, the
+# bytes and a NUL, and a pointer to it points at the length. An event is 0x30 bytes: its name, its type (0 action,
+# 1 switch, 2 fork, 3 join, 4 subflow) and, for actions, switches and subflows, its parameters at +0x10. Parameters
+# are a container (type 1: a count, a name dictionary and pointers to the values); a string value (type 5) holds a
+# pointer to the string at +0x10.
+#
+# The game gives an item from an event by calling a subflow (GetPouchContent, Dm_SY_GetInEvent, NpcCommon's hand-over
+# flows, the Gold Skulltula reward flow) with the item's actor name as a parameter (GIVE_KEYS), and remembers what was
+# given in the flag IsGet.<actor>, which the giving event itself often checks (a Great Fairy blesses once). A shuffle
+# points the parameter at the new item's name and the location's own IsGet checks at the new item's flag, so the
+# event still gives once. Every item has such a flag, rupees and heart pieces included; for those the flag says "one
+# was ever got", so a location that now gives one keeps checking its old item's flag.
+
+GIVE_KEYS = ('ActorName', 'ReveiveItem', 'ReceiveItem', 'TakenRewardActor')
+REPEATABLE = ('Obj_Heart_Piece', 'Obj_Rupee_Gold')
+
+
+def _u16(b, o):
+    return struct.unpack_from('<H', b, o)[0]
+
+
+def _u64(b, o):
+    return struct.unpack_from('<Q', b, o)[0]
+
+
+def evfl_string(b, p):
+    return b[p + 2:p + 2 + _u16(b, p)].decode('utf-8', 'replace') if p else None
+
+
+def evfl_params(b, p):
+    """A parameter container's string values: name -> (where the pointer is, the string)."""
+    if not p or b[p] != 1:
+        return {}
+    d, out = _u64(b, p + 8), {}
+    for i in range(_u16(b, p + 2)):
+        name = evfl_string(b, _u64(b, d + 8 + 16 * (i + 1) + 8))
+        c = _u64(b, p + 0x10 + 8 * i)
+        if c and b[c] == 5:
+            out[name] = (c + 0x10, evfl_string(b, _u64(b, c + 0x10)))
+    return out
+
+
+def evfl_string_refs(b):
+    """Every string parameter of the flowchart's actions, switches and subflows: (event type, name, ptr, string)."""
+    if b[:8] != b'BFEVFL\0\0' or not _u16(b, 0x20):
+        return []
+    fc = _u64(b, _u64(b, 0x28))
+    ep, out = _u64(b, fc + 0x30), []
+    for i in range(_u16(b, fc + 0x16)):
+        e = ep + 0x30 * i
+        if b[e + 8] in (0, 1, 4):
+            for name, (where, s) in evfl_params(b, _u64(b, e + 0x10)).items():
+                out.append((b[e + 8], name, where, s))
+    return out
+
+
+def evfl_set_strings(b, edits):
+    """The flow with each pointer in edits (pointer offset -> new string) pointing at that string. The new strings go
+    after the old ones, before the relocation table, which moves down; the pointers already are in its list."""
+    b = bytearray(b)
+    rlt = struct.unpack_from('<I', b, 0x18)[0]
+    assert b[rlt:rlt + 4] == b'RELT' and struct.unpack_from('<I', b, rlt + 4)[0] == rlt
+    head, table = b[:rlt], b[rlt:]
+    where = {}
+    for s in sorted(set(edits.values())):
+        if len(head) % 2:
+            head += b'\0'
+        where[s] = len(head)
+        raw = s.encode('utf-8')
+        head += struct.pack('<H', len(raw)) + raw + b'\0'
+    head += b'\0' * (-len(head) % 8)
+    new = len(head)
+    for p, s in edits.items():
+        struct.pack_into('<Q', head, p, where[s])
+    struct.pack_into('<I', table, 4, new)
+    for k in range(struct.unpack_from('<I', table, 8)[0]):   # a section that ran up to the table runs up to it again
+        sec = 0x10 + 0x18 * k
+        off, size = struct.unpack_from('<II', table, sec + 8)
+        if off + size == rlt:
+            struct.pack_into('<I', table, sec + 12, new - off)
+    struct.pack_into('<II', head, 0x18, new, new + len(table))
+    return bytes(head + table)
+
+
+def flow_path(stem):
+    return 'Event/EventFlow/%s.bfevfl.zs' % stem
+
+# The locations. A stem names a flow and its 1.1.0 copy (<stem>.110) when the game has one; both change alike.
+# Songs: what each needs before it can be learnt (the songs that open the way there), for --logic glitchless.
+LULLABY, EPONA, SARIA, SUN, TIME, STORM = ('Item_Melody_ZeldaLullaby', 'Item_Melody_EponaSong', 'Item_Melody_SariaSong',
+                                           'Item_Melody_SunSong', 'Item_Melody_TimeSong', 'Item_Melody_StormSong')
+MINUET, BOLERO, SERENADE, NOCTURNE, REQUIEM, PRELUDE = (
+    'Item_Melody_ForestMinuet', 'Item_Melody_FireBolero', 'Item_Melody_WaterSerenade', 'Item_Melody_ShadowNocturne',
+    'Item_Melody_SpiritRequiem', 'Item_Melody_LightPrelude')
+ADULT_SONGS = {TIME, LULLABY, SARIA}   # the Door of Time: its song and the stones (Saria's Song for Darunia, the
+                                      # Lullaby for Zora's Domain)
+SONGS = [   # (flows, vanilla item, where, songs needed first)
+    (('Dm_MelodyGet_Zelda',), LULLABY, 'Impa at Hyrule Castle', set()),
+    (('Dm_MelodyGet_Epona',), EPONA, 'Malon at Lon Lon Ranch', set()),
+    (('Dm_MelodyGet_Saria',), SARIA, 'Saria in the Sacred Forest Meadow', set()),
+    (('Dm_MelodyGet_Sun_03',), SUN, 'the Royal Family\'s Tomb', {LULLABY}),
+    (('Dm_MelodyGet_Time',), TIME, 'Zelda at the castle moat', {LULLABY, SARIA}),   # the three stones first
+    (('Dm_MelodyGet_Storm',), STORM, 'the Windmill', ADULT_SONGS),
+    (('Dm_MelodyGet_Forest',), MINUET, 'Sheik in the Sacred Forest Meadow', ADULT_SONGS),
+    (('Dm_MelodyGet_Fire',), BOLERO, 'Sheik in Death Mountain Crater', ADULT_SONGS),
+    (('Dm_MelodyGet_Water',), SERENADE, 'Sheik in the Ice Cavern', ADULT_SONGS),
+    (('Dm_MelodyGet_Shadow',), NOCTURNE, 'Sheik in Kakariko Village', ADULT_SONGS),
+    (('Dm_MelodyGet_Spilit',), REQUIEM, 'Sheik at the Desert Colossus', ADULT_SONGS | {EPONA}),
+    (('Dm_MelodyGet_Shine',), PRELUDE, 'Sheik in the Temple of Time', ADULT_SONGS),
+]
+GIFTS = [   # (flows, vanilla item, where)
+    (('Dm_FairyFountain_Din',), 'Item_DinFire', 'the Great Fairy near Hyrule Castle'),
+    (('Dm_FairyFountain_Frore',), 'Item_FaroreWind', 'the Great Fairy in Zora\'s Fountain'),
+    (('Dm_FairyFountain_Nayru',), 'Item_NayruLove', 'the Great Fairy at the Desert Colossus'),
+    (('Dm_FairyFountain_Power',), 'Item_FairyBless_MP', 'the Great Fairy on Death Mountain'),
+    (('Dm_FairyFountain_Wisdom',), 'Item_FairyBless_MPDouble', 'the Great Fairy in Death Mountain Crater'),
+    (('Dm_FairyFountain_Courage',), 'Item_FairyBless_DefenseDouble', 'the Great Fairy outside Ganon\'s Castle'),
+    (('GatheringTokenGold',), 'Item_AgonyStone', 'the House of Skulltula, 20 tokens'),
+    (('GatheringTokenGold',), 'Item_BombchuBundle_Large', 'the House of Skulltula, 40 tokens'),
+    (('GatheringTokenGold',), 'Obj_Rupee_Gold', 'the House of Skulltula, 100 tokens'),
+    (('MiniGame_Diving',), 'Item_Scale_Silver', 'the Zora diving game'),
+    (('MiniGame_Fishing',), 'Item_Scale_Gold', 'the fishing pond, adult'),
+    (('MiniGame_Fishing',), 'Obj_Heart_Piece', 'the fishing pond, child'),
+    (('MiniGame_FrogTenors',), 'Obj_Heart_Piece', 'the frogs in Zora\'s River'),
+    (('Minigame_HorsebackArchery',), 'Obj_Heart_Piece', 'horseback archery'),
+    (('Npc_Hylia_001_Adult',), 'Obj_Heart_Piece', 'the man on the Kakariko roof'),
+    (('Npc_Hylia_Dampe_001',), 'Obj_Heart_Piece', 'Dampe\'s race'),
+    (('Npc_SkullKid_Child',), 'Obj_Heart_Piece', 'the Skull Kid\'s song'),
+    (('Npc_SkullKid_Child_02',), 'Obj_Heart_Piece', 'the Skull Kid\'s second song'),
+]
+GIFTS_KEY = [   # the gifts that open the way (the tunics: the Fire and Water Temples): only with --logic none
+    (('SageOfFire',), 'Obj_Armor_Goron', 'the Goron Tunic gift'),
+    (('SageOfWater',), 'Obj_Armor_Zora', 'the Zora Tunic gift'),
+    (('Dm_Kokiri_0155',), 'Item_Ocarina_Fairy', 'Saria at the Kokiri Forest bridge'),
+    (('Dm_Goron_0030',), 'Item_Gauntlet_Goron', 'Darunia\'s Goron\'s Bracelet'),
+    (('Dm_Gerudo_0025',), 'Item_Token_Gerudo', 'the Gerudo membership card'),
+    (('Dm_TimeTemple_0130',), 'Item_Arrow_Light', 'Zelda\'s Light Arrows'),
+]
+# Dungeon rewards trade only within a group: any stone opens the Door of Time with the others, and the forest, fire and
+# water medallions (what Kakariko's Sheik waits for) trade among themselves, the shadow and spirit ones too.
+REWARDS = [
+    [(('Dm_Kokiri_0130',), 'Item_Stone_Forest', 'the Deku Tree'),
+     (('Dm_DeathMtTrail_0025',), 'Item_Stone_Fire', 'Darunia'),
+     (('Dm_ZoraFountain_0030', 'Dm_InsideJabu_Jabu_0030'), 'Item_Stone_Water', 'Ruto')],
+    [(('Dm_Awake_Forest_Get',), 'Item_Medal_Forest', 'the Forest Temple'),
+     (('Dm_Awake_Fire_Get',), 'Item_Medal_Fire', 'the Fire Temple'),
+     (('Dm_Awake_Water_Get',), 'Item_Medal_Water', 'the Water Temple')],
+    [(('Dm_Awake_Shadow_Get',), 'Item_Medal_Shadow', 'the Shadow Temple'),
+     (('Dm_Awake_Spirit_Get',), 'Item_Medal_Spirit', 'the Spirit Temple')],
+]
+
+
+def songs_beatable(spots):
+    """spots: (vanilla, needs, item now). Every song can be learnt, starting with none."""
+    have, left = set(), list(spots)
+    while left:
+        now = [s for s in left if s[1] <= have]
+        if not now:
+            return False
+        have |= {s[2] for s in now}
+        left = [s for s in left if s not in now]
+    return True
+
+
+def shuffle_flow_items(groups, rnd, songs_logic=False):
+    """groups: lists of (flows, vanilla, where[, needs]); each group's items trade among its locations.
+    Returns [(flows, vanilla, where, new)]."""
+    out = []
+    for g in groups:
+        items = [loc[1] for loc in g]
+        for attempt in range(1000):
+            rnd.shuffle(items)
+            if not songs_logic or songs_beatable([(loc[1], loc[3], it) for loc, it in zip(g, items)]):
+                break
+        else:
+            sys.exit('no song placement found')
+        out += [(loc[0], loc[1], loc[2], it) for loc, it in zip(g, items)]
+    return out
+
+
+def apply_flow_items(rom, game, below, placed):
+    """The changed flows (path -> bytes) for placed [(flows, vanilla, where, new)]: in each location's flows the give
+    parameters naming the vanilla item name the new one, and its IsGet checks check the new one's flag."""
+    edits = {}   # path -> {pointer: string}
+    datas = {}
+    missing = []
+    for stems, vanilla, where, new in placed:
+        if new == vanilla:
+            continue
+        found = 0
+        for stem in stems:
+            for st in (stem, stem + '.110'):
+                path = flow_path(st)
+                if path not in rom.idx:
+                    continue
+                if path not in datas:
+                    datas[path] = load_stage(rom, game, path, below)[0]
+                b, e = datas[path], edits.setdefault(path, {})
+                for typ, key, ptr, s in evfl_string_refs(b):
+                    if key in GIVE_KEYS and s == vanilla and typ in (0, 4):
+                        e[ptr] = new
+                        found += 1
+                    elif key == 'GameDataName' and s == 'IsGet.' + vanilla and new not in REPEATABLE \
+                            and vanilla not in REPEATABLE:
+                        e[ptr] = 'IsGet.' + new
+        if not found:
+            missing.append('%s (%s)' % (where, vanilla))
+    if missing:
+        sys.exit('the game files differ from what the randomizer knows; not found: ' + ', '.join(missing))
+    return {p: evfl_set_strings(datas[p], e) for p, e in edits.items() if e}
+
+
 def mod_order(game):
     """Mod folder names in the game's order (top first), from nx2navi.ini [mods] mods_order."""
     ini = os.path.join(game, 'nx2navi.ini')
@@ -652,6 +949,10 @@ def main():
     ap.add_argument('--maps-compasses', choices=('vanilla', 'own_dungeon'), default='own_dungeon')
     ap.add_argument('--enemies', choices=('off', 'same_kind', 'any_kind'), default='off',
                     help='lone enemies become others: of their kind (ground, air, water) or any but water')
+    ap.add_argument('--shops', choices=('off', 'shuffle'), default='off',
+                    help='shuffle: the shop shelves trade their items (prices go with the items)')
+    ap.add_argument('--scrubs', choices=('off', 'shuffle'), default='off',
+                    help='shuffle: the Business Scrubs that sell wares trade their offers')
     ap.add_argument('--entrances', choices=('off', 'dungeons', 'bosses', 'overworld', 'all'), default='off',
                     help='reconnect loading zones: dungeon doors, the boss rooms that have their own stage, the field '
                          'and town connections, or all of them; overworld and all turn the logic off')
@@ -662,6 +963,16 @@ def main():
     ap.add_argument('--dungeon-ages', choices=('same', 'any'), default='same',
                     help='same: child dungeons swap with child dungeons and adult with adult; any: a dungeon door can '
                          'lead to a dungeon of either age')
+    ap.add_argument('--songs', choices=('off', 'shuffle'), default='off',
+                    help='shuffle: the twelve songs trade the places they are taught (with the logic, each can still '
+                         'be learnt)')
+    ap.add_argument('--gifts', choices=('off', 'shuffle'), default='off',
+                    help='shuffle: what the Great Fairies, the House of Skulltula, the minigames and people give '
+                         'trades places; with --logic none the Fairy Ocarina, the Goron\'s Bracelet, the Gerudo card '
+                         'and the Light Arrows too')
+    ap.add_argument('--rewards', choices=('off', 'shuffle'), default='off',
+                    help='shuffle: the Spiritual Stones trade places, the forest, fire and water medallions too, and '
+                         'the shadow and spirit ones')
     ap.add_argument('--no-spoiler', action='store_true', help='write no spoiler.txt')
     ap.add_argument('--pending', action='store_true',
                     help='leave the new files in romfs.new and spoiler.new for the game to move into place at its next start')
@@ -710,10 +1021,27 @@ def generate(opts):
         before[path] = copy.deepcopy(stages[path])
     key = '|'.join([seed, logic, opts.chests, opts.drops, opts.maps_compasses, opts.enemies, opts.entrances]
                    + (['mixed'] if opts.entrance_pools == 'mixed' else [])
-                   + (['any_age'] if opts.dungeon_ages == 'any' else []))   # separate pools keep older seeds' results
+                   + (['any_age'] if opts.dungeon_ages == 'any' else [])
+                   + (['shops'] if opts.shops == 'shuffle' else []) + (['scrubs'] if opts.scrubs == 'shuffle' else []))   # separate pools keep older seeds' results
     rnd = random.Random(hashlib.sha256(key.encode()).digest())
+    # the event-flow shuffles draw from their own generator, so turning them on leaves the rest of a seed as it was
+    frnd = random.Random(hashlib.sha256((key + '|flows|%s|%s|%s' % (opts.songs, opts.gifts, opts.rewards)).encode()).digest())
 
     report = []
+    placed = []
+    if opts.songs == 'shuffle':
+        got = shuffle_flow_items([SONGS], frnd, logic == 'glitchless')
+        placed += got
+        report += ['', 'Songs:'] + ['  %s: %s (was %s)' % (w, n, v) for f, v, w, n in got]
+    if opts.gifts == 'shuffle':
+        got = shuffle_flow_items([GIFTS + (GIFTS_KEY if logic == 'none' else [])], frnd)
+        placed += got
+        report += ['', 'Gifts:'] + ['  %s: %s (was %s)' % (w, n, v) for f, v, w, n in got]
+    if opts.rewards == 'shuffle':
+        got = shuffle_flow_items(REWARDS, frnd)
+        placed += got
+        report += ['', 'Dungeon rewards:'] + ['  %s: %s (was %s)' % (w, n, v) for f, v, w, n in got]
+    flows = apply_flow_items(rom, opts.game, below, placed) if placed else {}
     if opts.entrances != 'off':
         conns, moved = shuffle_entrances(stages, opts.entrances, rnd, opts.entrance_pools == 'mixed',
                                          opts.dungeon_ages == 'any')
@@ -721,6 +1049,14 @@ def generate(opts):
             area_needs[d] = set(AREA_NEEDS.get(d, set())).union(*(AREA_NEEDS.get(v, set()) for v in vias))
         report += ['', 'Entrances (%d connections):' % len(conns)]
         report += ['  %s %s <-> %s %s' % (a[0], a[1], b[0], b[1]) for a, b in conns]
+    if opts.shops == 'shuffle':
+        moved_items = shuffle_shops(stages, rnd)
+        report += ['', 'Shops (%d shelves changed):' % len(moved_items)]
+        report += ['  %s slot %s: %s -> %s' % s for s in moved_items]
+    if opts.scrubs == 'shuffle':
+        moved_offers = shuffle_scrubs(stages, rnd)
+        report += ['', 'Business Scrubs (%d changed):' % len(moved_offers)]
+        report += ['  %s: %s -> %s' % s for s in moved_offers]
     if opts.enemies != 'off':
         swaps = shuffle_enemies(stages, opts.enemies, rnd)
         report += ['', 'Enemies (%d changed):' % len(swaps)]
@@ -762,6 +1098,11 @@ def generate(opts):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         with open(dst, 'wb') as f:
             f.write(_zc(data))
+    for path, data in sorted(flows.items()):
+        dst = os.path.join(stage, path.replace('/', os.sep))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with open(dst, 'wb') as f:
+            f.write(_zc(data))
     os.makedirs(stage, exist_ok=True)
     if not opts.pending:
         old = os.path.join(out, 'romfs')
@@ -769,11 +1110,12 @@ def generate(opts):
             shutil.rmtree(old)
         os.replace(stage, old)
     lines = ['Randomizer seed %s' % seed,
-             'Options: logic %s, chests %s, drops %s, maps and compasses %s, enemies %s, entrances %s (%s pools, dungeons of %s age)'
-             % (logic, opts.chests, opts.drops, opts.maps_compasses, opts.enemies, opts.entrances, opts.entrance_pools,
-                opts.dungeon_ages),
-             '%d chests, %d drops, %d changed stage files' % (sum(l.kind == 'chest' for l in locs),
-                                                               sum(l.kind == 'drop' for l in locs), len(changed))]
+             'Options: logic %s, chests %s, drops %s, maps and compasses %s, shops %s, scrubs %s, enemies %s, '
+             'entrances %s (%s pools, dungeons of %s age), songs %s, gifts %s, dungeon rewards %s'
+             % (logic, opts.chests, opts.drops, opts.maps_compasses, opts.shops, opts.scrubs, opts.enemies,
+                opts.entrances, opts.entrance_pools, opts.dungeon_ages, opts.songs, opts.gifts, opts.rewards),
+             '%d chests, %d drops, %d changed stage files, %d changed event flows'
+             % (sum(l.kind == 'chest' for l in locs), sum(l.kind == 'drop' for l in locs), len(changed), len(flows))]
     lines += ['Stage files taken from the mod %s: %s' % (m, ', '.join(p for p in changed if source[p] == m))
               for m in sorted({source[p] for p in changed if source[p]})]
     lines += ['', 'Where the progression items are:']
@@ -784,10 +1126,11 @@ def generate(opts):
     sp = os.path.join(out, 'spoiler.new' if opts.pending else 'spoiler.txt')
     with open(sp, 'w', encoding='utf-8') as f:   # empty with --no-spoiler, so an old seed's spoiler never stays
         f.write('' if opts.no_spoiler else '\n'.join(lines) + '\n')
-    print('seed %s: %d item locations, %d stage files written to %s' % (seed, len(locs), len(changed), out))
+    print('seed %s: %d item locations, %d stage files and %d event flows written to %s'
+          % (seed, len(locs), len(changed), len(flows), out))
     if MOD_NAME in order and any(order.index(m) < order.index(MOD_NAME) for m in {source[p] for p in changed if source[p]}):
         print('note: move %s above the mods it builds on in the Mods order' % MOD_NAME)
-    return 'seed %s, %d item locations, %d stage files' % (seed, len(locs), len(changed))
+    return 'seed %s, %d item locations, %d stage files, %d event flows' % (seed, len(locs), len(changed), len(flows))
 
 
 if __name__ == '__main__':

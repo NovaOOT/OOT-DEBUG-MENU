@@ -12,6 +12,7 @@
 
 #include "imgui.h"
 #include "ui/binds_page.h"
+#include "ui/menu_skin.h"
 #include "ui/option_rows.h"
 
 extern "C" {
@@ -114,7 +115,9 @@ static void sv_main(void *arg) {
         int r = save_manual_make(made);
         if (r > 0) snprintf(msg, sizeof msg, "The game has not saved yet: save in the game first."), warn = true;
         else if (r) snprintf(msg, sizeof msg, "Could not make the manual save (the log says why)."), warn = true;
-        else snprintf(msg, sizeof msg, "Saved as %s.", made);
+        else
+            snprintf(msg, sizeof msg, "Saved as %s. It holds the game's last save: play since then is not in it.",
+                     made);
         break;
     }
     case SV_LOAD:
@@ -228,8 +231,10 @@ static void save_rows(void) {
 
     if (busy) opt_disable_next_text("Busy with the last change.");
     if (opt_text_row("##sv_make", "Make a manual save", "A: save", nullptr,
-                     "Keeps a copy of the game's save in the profile in use, named after the date, the time and the "
-                     "area. As many as you like.",
+                     "Keeps a copy of the game's save in the profile in use, named after the date, the time, the slot "
+                     "the game saved last (autosave or manual) and the area. As many as you like. It copies the game's last save (its "
+                     "autosave or a save from its System page): play since that save is not in it, so save in the "
+                     "game first.",
                      false) == 2 && !busy)
         sv_start(SV_MAKE, nullptr);
     static char mpicked[SAVE_NAME_MAX];
@@ -431,6 +436,79 @@ static void hotkey_capture(void) {
     }
 }
 
+// Force age can leave a save in a state the game never makes, so turning it on (child or adult) asks first, once per
+// save profile: nx2navi.ini debug_force_age_ok lists the profiles whose player said yes, '|' between them. Until the
+// yes, the row keeps its value; Cancel, B or Esc leave it so.
+static int g_age_ask = -1;   // the age that waits for the yes (DBG_AGE_CHILD or DBG_AGE_ADULT), -1 when none
+static int g_age_frame = -1;   // the last frame the warning was open: the B that closes it must not close the menu too
+extern "C" bool debug_force_age_asking(void) { return g_age_ask >= 0 || g_age_frame == ImGui::GetFrameCount(); }
+
+static bool age_profile_ok(void) {
+    char prof[SAVE_NAME_MAX];
+    if (save_profile_active(prof)) return false;
+    const char *list = cfg_value("NX2NAVI_DEBUG_FORCE_AGE_OK");
+    size_t n = strlen(prof);
+    for (const char *p = list; *p;) {
+        const char *bar = strchr(p, '|');
+        size_t len = bar ? (size_t)(bar - p) : strlen(p);
+        if (len == n && !strncmp(p, prof, n)) return true;
+        p += len + (bar ? 1 : 0);
+    }
+    return false;
+}
+
+static void age_profile_mark(void) {
+    char prof[SAVE_NAME_MAX], list[1024];
+    if (save_profile_active(prof)) return;
+    const char *old = cfg_value("NX2NAVI_DEBUG_FORCE_AGE_OK");
+    snprintf(list, sizeof list, "%s%s%s", old, *old ? "|" : "", prof);
+    opt_apply("NX2NAVI_DEBUG_FORCE_AGE_OK", list);
+}
+
+static void force_age_confirm(float scale) {
+    if (g_age_ask < 0) return;
+    if (!ImGui::IsPopupOpen("##age_confirm")) ImGui::OpenPopup("##age_confirm");
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetMainViewport()->Size.x * 0.42f, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 0);
+    const bool open = ImGui::BeginPopupModal("##age_confirm", nullptr, ImGuiWindowFlags_NoDecoration);
+    ImGui::PopStyleVar();
+    if (!open) return;
+    g_age_frame = ImGui::GetFrameCount();
+    const ImVec2 box = ImGui::GetWindowPos(), box_size = ImGui::GetWindowSize();
+    skin_panel(ImGui::GetWindowDrawList(), box, ImVec2(box.x + box_size.x, box.y + box_size.y), scale);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1), "Force age %s can break this save.",
+                       g_age_ask == DBG_AGE_CHILD ? "child" : "adult");
+    ImGui::TextUnformatted(
+        "Areas and scenes made for one age then load with the other: a cutscene can play with the wrong Link, people "
+        "and doors can act as if it were the other time, and the area's story flags can be set at the wrong age. The "
+        "game saves that state, and it may not come right again by playing on, even with Force age off.");
+    ImGui::TextUnformatted("Keep a copy first: make a new save profile for glitch hunting (Profiles and manual saves, above). This "
+                           "asks once for each save profile.");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    const char *yes = "Turn it on", *no = "Cancel";
+    const ImGuiStyle &st = ImGui::GetStyle();
+    float bw = fmaxf(ImGui::CalcTextSize(yes).x, ImGui::CalcTextSize(no).x) + st.FramePadding.x * 4;
+    bool close = skin_widget_button(no, ImVec2(bw, 0), scale);
+    if (ImGui::IsWindowAppearing()) ImGui::SetItemDefaultFocus();
+    ImGui::SameLine(0, st.ItemSpacing.x + skin_cursor_reach(scale));
+    if (skin_widget_button(yes, ImVec2(bw, 0), scale)) {
+        age_profile_mark();
+        dbg_warp_set_age(g_age_ask);
+        close = true;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+        close = true;
+    if (close) {
+        g_age_ask = -1;
+        ImGui::CloseCurrentPopup();
+        opt_focus_key("##dbg_wflag");
+    }
+    ImGui::EndPopup();
+}
+
 extern "C" void tab_debug(float scale) {
     opt_begin("##debug", scale);
     if (!dbg_available()) {
@@ -558,9 +636,11 @@ extern "C" void tab_debug(float scale) {
                                  "player as this age, body included, over the area's own choice, even where the game "
                                  "never lets that age in. The game's age flag (Sequence_IsChildhood) is held to it while "
                                  "the area loads. To force it on the current area, choose an age, then Reload area. The "
-                                 "equipment stays what the save has, so a child can hold adult items. Left and right "
-                                 "change it; A opens the list.");
-        if (rf >= 0) dbg_warp_set_age(rf);
+                                 "equipment stays what the save has, so a child can hold adult items. It can break a "
+                                 "save, so turning it on asks first, once for each save profile. Left and right change "
+                                 "it; A opens the list.");
+        if (rf >= 0 && rf != DBG_AGE_ANY && rf != dbg_warp_get_age() && !age_profile_ok()) g_age_ask = rf;
+        else if (rf >= 0) dbg_warp_set_age(rf);
         // The entrances of the chosen area in the chosen age (or the area's only file when it has no age suffix).
         std::vector<int> ents;
         bool has_age = false;
@@ -1417,6 +1497,7 @@ extern "C" void tab_debug(float scale) {
     }
     opt_end();
     hotkey_capture();
+    force_age_confirm(scale);
 }
 
 // ---- the readout, top left, over the game

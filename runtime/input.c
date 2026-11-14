@@ -1427,6 +1427,39 @@ void input_poll_ui(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int
     poll_merged(buttons, lx, ly, rx, ry);
 }
 
+// Presses queued by input_menu_press for the menu (the remote console's "menu" command), timed on the wall clock: the
+// game time the input script counts in stands still while the menu pauses the game. Under lock.
+enum { MENU_PRESS_MAX = 64, MENU_PRESS_NS = 100000000, MENU_GAP_NS = 120000000 };
+static struct { uint64_t from, to; int bit; } menu_press[MENU_PRESS_MAX];
+static int menu_press_n;
+
+int input_menu_press(const char *names) {
+    char buf[512], *save = NULL;
+    snprintf(buf, sizeof buf, "%s", names);
+    int added = 0;
+    plat_mutex_lock(&lock);
+    uint64_t now = plat_now_ns(), at = now;
+    int keep = 0;
+    for (int i = 0; i < menu_press_n; i++)   // drop the finished ones, start after the last queued one
+        if (menu_press[i].to > now) {
+            menu_press[keep++] = menu_press[i];
+            if (menu_press[i].to + MENU_GAP_NS > at) at = menu_press[i].to + MENU_GAP_NS;
+        }
+    menu_press_n = keep;
+    for (char *t = strtok_r(buf, " \t,;", &save); t && menu_press_n < MENU_PRESS_MAX; t = strtok_r(NULL, " \t,;", &save)) {
+        int bit = -1;
+        for (size_t i = 0; i < sizeof script_buttons / sizeof *script_buttons; i++)
+            if (!strcmp(t, script_buttons[i].name)) bit = script_buttons[i].bit;
+        if (bit < 0) continue;
+        menu_press[menu_press_n].from = at, menu_press[menu_press_n].to = at + MENU_PRESS_NS;
+        menu_press[menu_press_n++].bit = bit;
+        at += MENU_PRESS_NS + MENU_GAP_NS;
+        added++;
+    }
+    plat_mutex_unlock(&lock);
+    return added;
+}
+
 int input_pad_read(uint64_t *buttons, int32_t *lx, int32_t *ly) {
     uint64_t b = 0;
     int32_t sl[2] = {0, 0}, sr[2] = {0, 0};
@@ -1434,6 +1467,12 @@ int input_pad_read(uint64_t *buttons, int32_t *lx, int32_t *ly) {
     if (!state) start();
     if (state > 0) binds_refresh();
     int ok = state == 1 && pad_read(&b, sl, sr, 0, NULL);
+    if (menu_press_n) {
+        uint64_t now = plat_now_ns();
+        for (int i = 0; i < menu_press_n; i++)
+            if (now >= menu_press[i].from && now < menu_press[i].to) b |= 1ull << menu_press[i].bit;
+        ok = 1;
+    }
     plat_mutex_unlock(&lock);
     *buttons = b;
     *lx = sl[0];

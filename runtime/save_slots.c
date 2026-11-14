@@ -321,10 +321,12 @@ static int save_manual_make_impl(char out[SAVE_NAME_MAX]) {
     if (dbg_available() && dbg_current_area(area))
         for (char *p = area; *p; p++)
             if (!(*p >= 'A' && *p <= 'Z') && !(*p >= 'a' && *p <= 'z') && !(*p >= '0' && *p <= '9') && *p != '_') *p = '_';
+    char slot[48] = "";   // the slot the game saved last and its kind: where this zip's newest progress is
+    fs_save_last_slot(slot, sizeof slot);
     for (int k = 1; k < 100; k++) {
         char stem[SAVE_NAME_MAX];
-        snprintf(stem, sizeof stem, "%04d-%02d-%02d %02d.%02d.%02d%s%s", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-                 t.tm_hour, t.tm_min, t.tm_sec, *area ? " " : "", area);
+        snprintf(stem, sizeof stem, "%04d-%02d-%02d %02d.%02d.%02d%s%s%s%s", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+                 t.tm_hour, t.tm_min, t.tm_sec, *slot ? " " : "", slot, *area ? " " : "", area);
         if (k > 1) {
             size_t len = strlen(stem);
             snprintf(stem + len, sizeof stem - len, " (%d)", k);

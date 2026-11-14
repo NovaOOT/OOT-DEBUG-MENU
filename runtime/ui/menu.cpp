@@ -105,6 +105,7 @@ void tab_debug(float scale);         // ui/debug_tab.cpp: the Debug tab
 void tab_mods(float scale);          // ui/mods_tab.cpp: the Mods tab
 void tab_randomizer(float scale);    // ui/randomizer_tab.cpp: the Randomizer tab
 bool debug_hotkey_waiting(void);     // ui/debug_tab.cpp: a hotkey cell waits for a press
+bool debug_force_age_asking(void);   // ui/debug_tab.cpp: the Force age warning is open
 void debug_hotkey_cancel(void);      // ui/debug_tab.cpp: and stops waiting (the menu opened or closed)
 void debug_overlay_draw(float scale);   // ui/debug_tab.cpp: the on-screen readout
 }
@@ -1887,7 +1888,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     const int menu_pad = dbg_menu_button();
     const bool lb = menu_pad != PAD_L && ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false),
                rb = menu_pad != PAD_R && ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false);
-    const bool keeps_keys = g_modal || binds_modal() || debug_hotkey_waiting() || opt_list_open() ||
+    const bool keeps_keys = g_modal || binds_modal() || debug_hotkey_waiting() || debug_force_age_asking() || opt_list_open() ||
                             ImGui::GetIO().WantTextInput;
     int step = keeps_keys                                                                                     ? 0
              : rb || ImGui::IsKeyPressed(ImGuiKey_GamepadR2, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
@@ -1989,7 +1990,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     if (skin_widget_button(quit, ImVec2(bw, 0), scale)) g_confirm_quit = true, ImGui::OpenPopup("##confirm");
     restart_confirm(scale);
     menu_sounds_frame();
-    bool was_modal = g_modal || binds_modal() || opt_list_open() || ImGui::GetIO().WantTextInput;
+    bool was_modal = g_modal || binds_modal() || debug_force_age_asking() || opt_list_open() || ImGui::GetIO().WantTextInput;
     if (!was_modal && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         set_open(0);
     ImGui::End();

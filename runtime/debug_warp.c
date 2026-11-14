@@ -451,8 +451,9 @@ static const struct Boss {
     {"Volvagia (Fire Temple)", "FireTemple", NULL, 1, {-71.2f, 103.0f, 0.0f}},
     {"Morpha (Water Temple)", "WaterTemple", NULL, 1, {-4.5f, 131.9f, -75.3f}},
     {"Bongo Bongo (Shadow Temple)", "ShadowTemple", NULL, 1, {-138.3f, -11.0f, 22.0f}},
-    // Its StartPos is outside the boss door: the floor past the door instead (probed in game, y 135.0 at z -110).
-    {"Twinrova (Spirit Temple)", "SpiritTemple", NULL, 1, {0.0f, 135.5f, -110.0f}},
+    // Its StartPos is outside the boss door: the arena's floor instead, between the door and the centre platform
+    // (Land_SpiritTemple_BossBase_A_01 at z -157.9; probed in game, y 135.0 at z -146).
+    {"Twinrova (Spirit Temple)", "SpiritTemple", NULL, 1, {0.0f, 135.5f, -146.0f}},
     {"Ganondorf (Ganon's Tower)", "InsideGanonCastle", NULL, 1, {0.0f, 171.6f, -11.3f}},
     // The final battle's own area: its entrance is the arena.
     {"Ganon (the final battle)", "FinalBattleField", "FinalBattleField_Entrance", 0, {0}},

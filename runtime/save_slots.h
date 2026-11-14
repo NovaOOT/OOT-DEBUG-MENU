@@ -3,7 +3,7 @@
 //   active.txt                   the profile whose progress is the game's save now ("Default" when missing)
 //   <profile>/                   one folder per profile; a new one is "Profile <n>"
 //   <profile>/progress.zip       that profile's save while another profile is played (none: it starts a new game)
-//   <profile>/manual/<name>.zip  its manual saves, any number: "<date> <time> <area>"
+//   <profile>/manual/<name>.zip  its manual saves, any number: "<date> <time> <slot> <kind> <area>"
 //
 // The game's own save is one folder that the game reads at its start and writes as it plays, so a switch and a load
 // take effect at the next start: the save to load is staged as an import (save_share.h, fs_host.c import_pending), which
@@ -44,7 +44,7 @@ int save_profile_delete(const char *name);
 
 // The manual saves of the profile in use, newest first (by name: the names start with the date). The number listed.
 int save_manual_list(char names[][SAVE_NAME_MAX], int max);
-// A manual save of the game's save now, named "<date> <time> <area>": its name in out. 0 on success, 1 when the game
+// A manual save of the game's save now, named "<date> <time> <slot> <kind> <area>": its name in out. 0 on success, 1 when the game
 // has not saved yet, -1 on a failure.
 int save_manual_make(char out[SAVE_NAME_MAX]);
 // Stages that manual save for the next start. 0 on success.

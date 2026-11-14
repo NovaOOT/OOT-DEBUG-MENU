@@ -31,6 +31,23 @@ static const struct {
      "items the game can drop go to them; equipment stays in chests."},
     {"Maps and compasses", {"Own dungeon", "Vanilla"},
      "Own dungeon: each dungeon's map and compass move between that dungeon's chests. Vanilla: they stay."},
+    {"Shops", {"Vanilla", "Shuffled"},
+     "Shuffled: the shop shelves trade their items, each with its own price, so the Kokiri Shop can sell a Goron "
+     "Tunic and Goron City Deku Shields. The Happy Mask Shop stays."},
+    {"Business Scrubs", {"Vanilla", "Shuffled"},
+     "Shuffled: the Business Scrubs that sell wares trade their offers (the items, the price and what they say), so a "
+     "Heart Piece can be sold where the Deku Stick upgrade was."},
+    {"Songs", {"Vanilla", "Shuffled"},
+     "Shuffled: the twelve songs trade the places they are taught, so Saria can teach the Song of Time. Each scene "
+     "still plays and teaches its own melody on the ocarina; the song you get is the shuffled one. With the logic "
+     "every song can be learnt."},
+    {"Gifts", {"Vanilla", "Shuffled"},
+     "Shuffled: what the Great Fairies, the House of Skulltula, the minigames (diving, fishing, the frogs, archery, "
+     "Dampe's race) and the Skull Kid give trades places. With No logic the Fairy Ocarina, the Goron's Bracelet, "
+     "the Gerudo card, the Light Arrows and the tunics join in. Bag, quiver and wallet upgrades stay."},
+    {"Dungeon rewards", {"Vanilla", "Shuffled"},
+     "Shuffled: the Spiritual Stones trade places, the Forest, Fire and Water Medallions among themselves, and the "
+     "Shadow and Spirit ones. The Light Medallion stays."},
     {"Enemies", {"Vanilla", "Same kind", "Any kind"},
      "Lone enemies become other enemies. Same kind: ground for ground, flying for flying, water for water. Any kind: "
      "any ground or flying enemy. Enemies a door, a fight or an event waits on stay."},
@@ -94,7 +111,7 @@ extern "C" void tab_randomizer(float scale) {
 
     opt_group_text("Items");
     for (int i = 0; i < rando_noptions; i++) {
-        if (i == 4) opt_group_text("World");
+        if (i == 9) opt_group_text("World");
         const RandoOption *o = &rando_options[i];
         if (running) opt_disable_next_text("Generating...");
         char id[48];
@@ -122,7 +139,8 @@ extern "C" void tab_randomizer(float scale) {
     opt_text_str("Generate writes the Randomizer mod from your own game files and puts it at the top of the Mods "
                  "order; it applies when the game starts again. Start a new save file for a new seed: the chests an "
                  "old save opened stay open. Turn the mod off on the Mods tab to play the normal game again.");
-    opt_text_str("Not shuffled yet: songs, gifts from people, Gold Skulltula rewards, shops and Deku Scrubs. Pots, grass "
-                 "and drops give their item each time they are broken, as in the normal game.");
+    opt_text_str("Not shuffled: the trading sequence and the bag, quiver and wallet upgrades. Pots, grass and drops "
+                 "give their item each time they are broken, as in the normal game. A shuffled gift's own message and "
+                 "tip screens still speak of the old item.");
     opt_end();
 }

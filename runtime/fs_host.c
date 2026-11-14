@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cfg.h"
 #include "fs.h"
 #include "host.h"
 #include "platform/platform.h"
@@ -504,6 +505,8 @@ static void save_recover(void) {
     rt_log("host save recovery: %s", did);
 }
 
+static void live_copy(int record);   // section "the live copy" below
+
 // The first save mount: a fresh working copy of the newest save.
 static void work_create(void) {
     int n = 0, linked = 0;
@@ -512,12 +515,237 @@ static void work_create(void) {
     if (remove_tree_retry(work_root) || copy_tree(newest_save(), work_root, NULL, 0, &n, &linked, &bytes))
         rt_fatal("fs: cannot make the save working copy");
     rt_log("host save working copy: %d files, %.1f MiB", n, bytes / 1048576.0);
+    live_copy(0);
 }
 
 // The last save unmount: changes no Commit took are dropped.
 static void work_discard(void) {
     if (plat_xchg32(&save_dirty, 0)) rt_log("fs: save unmounted without Commit; changes discarded");
     if (remove_tree(work_root)) rt_log("fs: save working copy not fully deleted (a file still open?)");
+}
+
+// ---- the live copy: <game folder>/saves/live
+// A copy of the newest save that a player can open and read while the game runs, kept apart from save/<uid> (a file
+// open there in another program holds up the swap of step (3)). After each Commit that changed the save:
+//   live/save/                    the newest save, its changed files copied over
+//   live/history/<time> <slot> <kind>/   that slot's files as this save left them (and option.sav, account.sav
+//                                 when they changed); the newest DEBUG_SAVE_HISTORY entries are kept, 0 keeps none
+//   live/saves.log                one line per save: the local time, the slot, its kind and place, the changed files
+//   live/last-save.txt            the slot of the last save and its kind ("slot_01 manual")
+//   live/slots.txt                each slot of the newest save: its kind and place
+// The kind is the game's own mark in the slot's caption.sav: "autosave" when CaptionData.IsAutoSave is set, "manual"
+// for a save from the game's System page. Any slot can hold either kind; the game picks the slot.
+// The first save mount of a run brings live/save up to date without a log line, so a profile switch or an import is
+// not taken for a save. Every file of the copy is flushed to the disk (FlushFileBuffers), as the save's own are. A
+// file of the copy that another program holds open is skipped (logged once per run); the game's own save never waits
+// for the copy. Runs with tx_lock held (newest_save does not move meanwhile).
+enum { LIVE_CHANGED_MAX = 32 };
+typedef struct { char rel[LIVE_CHANGED_MAX][64]; int n; } LiveChanged;
+static char live_last_slot[48];   // under tx_lock: the slot and kind of the last save this run, "" none yet
+static int live_skip_logged;
+
+static int live_name_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+// CaptionData keys (MurmurHash3 of the name, as the game's flag list keys them) in a caption.sav: a header of
+// 0x28 bytes, then (key, value) pairs up to the data the first word after the magic and version points to; a string's
+// value is its offset in the file.
+#define CAPTION_IS_AUTOSAVE 0x25f03caau   // CaptionData.IsAutoSave, Bool
+#define CAPTION_LOCATION 0xf74e0e8eu      // CaptionData.LocationName, String64
+
+// The kind ("autosave", "manual", "" when unknown) and place of the save in dir (a slot folder).
+static void caption_read(const char *dir, char *kind, size_t kcap, char *place, size_t pcap) {
+    if (kcap) kind[0] = 0;
+    if (pcap) place[0] = 0;
+    char *p = join(dir, "caption.sav");
+    PlatFile *h = plat_fs_open(p, 0, NULL);
+    free(p);
+    if (!h) return;
+    static uint8_t b[0x1000];
+    int64_t n = plat_file_pread(h, b, sizeof b, 0);
+    plat_file_close(h);
+    uint32_t w[3];
+    if (n < 0x30) return;
+    memcpy(w, b, sizeof w);
+    if (w[0] != 0x01020304u) return;
+    uint32_t end = w[2] < (uint64_t)n ? w[2] : (uint32_t)n;
+    for (uint32_t at = 0x28; at + 8 <= end; at += 8) {
+        uint32_t key, val;
+        memcpy(&key, b + at, 4);
+        memcpy(&val, b + at + 4, 4);
+        if (key == CAPTION_IS_AUTOSAVE) snprintf(kind, kcap, "%s", val ? "autosave" : "manual");
+        else if (key == CAPTION_LOCATION && val + 1 < (uint64_t)n)
+            snprintf(place, pcap, "%.*s", (int)strnlen((const char *)b + val, (size_t)(n - val) < 64 ? (size_t)(n - val) : 64),
+                     (const char *)b + val);
+    }
+}
+
+// live/slots.txt: each slot folder of the save at src with its kind and place.
+static void live_slots_write(const char *src, const char *root) {
+    Listing l;
+    if (list_dir(src, &l)) return;
+    char **names = malloc((size_t)(l.n ? l.n : 1) * sizeof *names), text[2048];
+    int n = 0, len = 0;
+    for (int i = 0; names && i < l.n; i++)
+        if (l.e[i].kind == PLAT_FS_DIR && !strncmp(l.e[i].name, "slot_", 5)) names[n++] = l.e[i].name;
+    if (names) qsort(names, (size_t)n, sizeof *names, live_name_cmp);
+    for (int i = 0; i < n && len < (int)sizeof text - 160; i++) {
+        char *d = join(src, names[i]), kind[16], place[64];
+        caption_read(d, kind, sizeof kind, place, sizeof place);
+        free(d);
+        len += snprintf(text + len, sizeof text - (size_t)len, "%-9s %-9s %s\n", names[i], *kind ? kind : "-", place);
+    }
+    free(names);
+    listing_free(l.e, l.n);
+    char file[PLAT_PATH_MAX + 32];
+    snprintf(file, sizeof file, "%s/slots.txt", root);
+    plat_file_write_atomic(file, text, (size_t)len);
+}
+
+static int live_root(char *out, size_t cap) {
+    char saves[PLAT_PATH_MAX];
+    if (!save_share_saves_dir(saves, sizeof saves)) return 0;
+    int n = snprintf(out, cap, "%s/live", saves);
+    return n > 0 && (size_t)n < cap;
+}
+
+// Brings dst (live/save or one of its folders) up to src; rel is the path below the save's root ("" at the root).
+static void live_sync_tree(const char *src, const char *dst, const char *rel, LiveChanged *ch) {
+    plat_file_mkdir_p(dst);
+    Listing l;
+    if (list_dir(src, &l)) return;
+    for (int i = 0; i < l.n; i++) {
+        if (l.e[i].kind == PLAT_FS_LINK) continue;
+        char *s = join(src, l.e[i].name), *d = join(dst, l.e[i].name);
+        char r[64];
+        snprintf(r, sizeof r, "%s%s%s", rel, *rel ? "/" : "", l.e[i].name);
+        if (l.e[i].kind == PLAT_FS_DIR) live_sync_tree(s, d, r, ch);
+        else if (!exists(d) || !same_file(s, d)) {
+            uint64_t bytes = 0;
+            if (exists(d)) plat_fs_unlink(d);
+            if (!exists(d) && !copy_file(s, d, 1, &bytes)) {
+                if (ch->n < LIVE_CHANGED_MAX) snprintf(ch->rel[ch->n++], sizeof ch->rel[0], "%s", r);
+            } else if (!live_skip_logged++) {
+                rt_log("fs: live save copy: %s is in use by another program; skipped (logged once)", d);
+            }
+        }
+        free(s);
+        free(d);
+    }
+    listing_free(l.e, l.n);
+}
+
+// Deletes the oldest history entries until keep are left. The names start with the date, so they sort by age.
+static void live_prune(const char *hist, int keep) {
+    Listing l;
+    if (list_dir(hist, &l)) return;
+    char **names = malloc((size_t)(l.n ? l.n : 1) * sizeof *names);
+    int n = 0;
+    for (int i = 0; names && i < l.n; i++)
+        if (l.e[i].kind == PLAT_FS_DIR && l.e[i].name[0] >= '0' && l.e[i].name[0] <= '9') names[n++] = l.e[i].name;
+    if (names) qsort(names, (size_t)n, sizeof *names, live_name_cmp);
+    for (int i = 0; names && i + keep < n; i++) {
+        char *p = join(hist, names[i]);
+        remove_tree(p);
+        free(p);
+    }
+    free(names);
+    listing_free(l.e, l.n);
+}
+
+// record: the Commit changed the save (a log line and a history entry); 0 at the first mount.
+static void live_copy(int record) {
+    char root[PLAT_PATH_MAX], dst[PLAT_PATH_MAX + 16];
+    const char *src = newest_save();
+    if (!exists(src) || !live_root(root, sizeof root)) return;
+    snprintf(dst, sizeof dst, "%s/save", root);
+    LiveChanged ch = {.n = 0};
+    live_sync_tree(src, dst, "", &ch);
+    if (ch.n || !record) live_slots_write(src, root);
+    if (!record || !ch.n) return;
+    // the slot: the folder of the first changed file inside one ("slot_00/progress.sav")
+    char slot[32] = "";
+    for (int i = 0; i < ch.n && !*slot; i++) {
+        const char *cut = strchr(ch.rel[i], '/');
+        if (cut && cut - ch.rel[i] < (int)sizeof slot) snprintf(slot, sizeof slot, "%.*s", (int)(cut - ch.rel[i]), ch.rel[i]);
+    }
+    char kind[16] = "", place[64] = "", label[48];
+    if (*slot) {
+        char *sd = join(src, slot);
+        caption_read(sd, kind, sizeof kind, place, sizeof place);
+        free(sd);
+    }
+    snprintf(label, sizeof label, "%s%s%s", *slot ? slot : "settings", *kind ? " " : "", kind);   // no slot: option.sav, account.sav
+    if (*slot) snprintf(live_last_slot, sizeof live_last_slot, "%s", label);
+    struct tm t;
+    plat_local_time(&t);
+    char when[32], line[2048];
+    snprintf(when, sizeof when, "%04d-%02d-%02d %02d.%02d.%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour,
+             t.tm_min, t.tm_sec);
+    int len = snprintf(line, sizeof line, "%s  %-16s %-24s", when, label, *place ? place : "-");
+    for (int i = 0; i < ch.n && len < (int)sizeof line - 80; i++) len += snprintf(line + len, sizeof line - len, " %s", ch.rel[i]);
+    snprintf(line + len, sizeof line - len, "\n");
+    char file[PLAT_PATH_MAX + 32];
+    snprintf(file, sizeof file, "%s/saves.log", root);
+    FILE *f = fopen(file, "ab");
+    if (f) fputs(line, f), plat_file_sync(f), fclose(f);
+    if (*slot) {
+        snprintf(file, sizeof file, "%s/last-save.txt", root);
+        plat_file_write_atomic(file, label, strlen(label));
+    }
+    const char *keep_s = cfg_get("NX2NAVI_DEBUG_SAVE_HISTORY");
+    int keep = keep_s && *keep_s ? atoi(keep_s) : 100;
+    if (keep <= 0 || !*slot) return;   // a settings write alone gets its log line, no history entry
+    char hist[PLAT_PATH_MAX + 16], entry[PLAT_PATH_MAX + 96];
+    snprintf(hist, sizeof hist, "%s/history", root);
+    snprintf(entry, sizeof entry, "%s/%s %s", hist, when, label);
+    for (int k = 2; exists(entry) && k < 100; k++) snprintf(entry, sizeof entry, "%s/%s %s (%d)", hist, when, label, k);
+    plat_file_mkdir_p(entry);
+    for (int i = 0; i < ch.n; i++) {   // the changed files, flat: the slot's and the shared ones at the root
+        char *s = join(src, ch.rel[i]);
+        const char *base = strrchr(ch.rel[i], '/');
+        char *d = join(entry, base ? base + 1 : ch.rel[i]);
+        uint64_t bytes = 0;
+        copy_file(s, d, 1, &bytes);
+        free(s);
+        free(d);
+    }
+    if (*slot) {   // the slot's unchanged files too, so the entry holds the whole slot
+        char *sd = join(src, slot);
+        Listing l;
+        if (!list_dir(sd, &l)) {
+            for (int i = 0; i < l.n; i++) {
+                if (l.e[i].kind != PLAT_FS_FILE) continue;
+                char *d = join(entry, l.e[i].name), *s = join(sd, l.e[i].name);
+                uint64_t bytes = 0;
+                if (!exists(d)) copy_file(s, d, 1, &bytes);
+                free(d);
+                free(s);
+            }
+            listing_free(l.e, l.n);
+        }
+        free(sd);
+    }
+    live_prune(hist, keep);
+}
+
+int fs_save_last_slot(char *out, size_t cap) {
+    if (cap) out[0] = 0;
+    plat_mutex_lock(&tx_lock);
+    snprintf(out, cap, "%s", live_last_slot);
+    plat_mutex_unlock(&tx_lock);
+    if (!*out) {   // none this run: the last one a run before wrote down
+        char root[PLAT_PATH_MAX], file[PLAT_PATH_MAX + 32];
+        if (!live_root(root, sizeof root)) return 0;
+        snprintf(file, sizeof file, "%s/last-save.txt", root);
+        FILE *f = fopen(file, "rb");
+        if (f) {
+            size_t n = fread(out, 1, cap - 1, f);
+            out[n] = 0;
+            fclose(f);
+            out[strcspn(out, "\r\n")] = 0;
+        }
+    }
+    return *out != 0;
 }
 
 // Commit of the save mount, tx_lock held. Steps (1) to (5) above; a failure before (2) leaves the newest save as it
@@ -559,6 +787,7 @@ static uint32_t save_commit_locked(void) {
     if (tx_dead) return FS_R_INVALID_ARGUMENT;
     rt_log("fs commit save: %d files, %d changed (%.1f MiB written), %d unchanged linked, in %.0f ms%s", nfiles,
            nfiles - linked, bytes / 1048576.0, linked, (plat_now_ns() - t0) / 1e6, waits ? "; waits in save-tx" : "");
+    live_copy(1);
     return 0;
 }
 

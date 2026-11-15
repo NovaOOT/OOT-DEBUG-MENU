@@ -4,7 +4,9 @@
 // becomes a node of one tree under the node the game was on, labelled with what changed since. A node is a real save of
 // one slot: it loads in the game and can be given to someone else. The tree holds every path ever played: something
 // else done from a node is a new branch beside the first, and a step made again from the same node (the same flags to
-// the same values in the same place) goes to the node it made before.
+// the same values in the same place) goes to the node it made before. Where the game makes no save (the escape from the
+// collapsing castle keeps its saves aside), the tree writes the running game's flags over the current node's files
+// itself (save_tree_build).
 //
 // <game folder>/saves/tree:
 //   tree.jsonl        one line per node, oldest first: {"id", "parent" (-1 for a root), "plen", "hash", "sig",
@@ -38,6 +40,10 @@ int save_tree_count(void);
 // 1 once after a node to load was staged while the game played: the render thread restarts the game, which loads it
 // (ui/debug_tab.cpp debug_overlay_draw, as for a profile switch). Not while the game writes its save.
 int save_tree_restart_due(void);
+// Writes the running game's flags over a save file's values (progress.sav or caption.sav, data of n bytes, a template
+// the game wrote), for a save where the game makes none. patched: the values it wrote, changed: those that differed.
+// 1 when it wrote any; 0 when data is not a save file or the flag stores are not found yet.
+int save_tree_build(unsigned char *data, size_t n, int *patched, int *changed);
 
 #ifdef __cplusplus
 }

@@ -19,6 +19,7 @@
 #include "platform/platform.h"
 #include "randomizer.h"
 #include "save_slots.h"
+#include "save_tree.h"
 #include "vk_debug_cam.h"
 
 #ifdef _WIN32
@@ -635,6 +636,13 @@ static void run_command(char *line) {
     } else if (!strcmp(cmd, "gamesave") && a1) {   // gamesave SLOT|auto: the game saves the running game to slot 0..5
         int slot = !strcmp(a1, "auto") ? DBG_GAME_SAVE_AUTO : atoi(a1);   // or autosaves
         out_put("gamesave %s: %s\n", a1, dbg_game_save_request(slot) ? "requested" : "refused");
+    } else if (!strcmp(cmd, "savebuild") && a1 && a2) {   // savebuild TEMPLATE OUT: a save file from the flags now
+        uint64_t n = 0;
+        uint8_t *b = plat_file_read(a1, &n);
+        int np = 0, nc = 0, ok = b && save_tree_build(b, (size_t)n, &np, &nc);
+        if (ok) ok = plat_file_write(a2, b, (size_t)n);
+        free(b);
+        out_put("savebuild: %s, %d values, %d changed\n", ok ? "written" : "failed", np, nc);
     } else if (!strcmp(cmd, "actors")) {   // actors [FILTER]: the generic class's actors whose names hold FILTER (heap scan)
         struct { const char *filter; int n; } ctx = {a1, 0};
         dbg_each_actor(actors_print, &ctx);

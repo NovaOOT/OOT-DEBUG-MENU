@@ -833,6 +833,87 @@ static void caption_stamp_now(uint8_t *b, size_t n) {
     }
 }
 
+// ---- a save made here from the running game's flags, for where the game makes none (save_tree.h save_tree_build)
+// A save file (progress.sav, caption.sav): words {0x01020304, ?, end of the table}, then from 0x28 to that end a table
+// of 8-byte entries {key, value}. A Bool, Int, Float or Enum entry holds its value; a String64 or Vector3 entry holds the
+// offset of its 64 or 12 bytes further on. Arrays and the types the flag stores lack (debug_tools.h DBG_FLAG_*) keep
+// what the template has.
+static int build_from_stores(uint8_t *b, size_t n, int *patched, int *changed) {
+    uint32_t w[3];
+    if (n < 0x30) return 0;
+    memcpy(w, b, sizeof w);
+    if (w[0] != 0x01020304u) return 0;
+    uint8_t *raw[T_TYPES] = {0};
+    uint32_t *keys[T_TYPES] = {0}, size[T_TYPES] = {0}, off[T_TYPES] = {0};
+    Map at = {0};
+    int ok = 1;
+    for (int t = 0; ok && t < T_TYPES; t++) {
+        uint64_t base;
+        int count;
+        if (!dbg_flag_store(t, &base, &count, &size[t], &off[t]) || count <= 0) continue;
+        raw[t] = malloc((size_t)count * size[t]);
+        keys[t] = malloc((size_t)count * sizeof *keys[t]);
+        if (!raw[t] || !keys[t] || !plat_mem_read(base, raw[t], (size_t)count * size[t])) {
+            ok = 0;
+            break;
+        }
+        dbg_flag_store_keys(t, keys[t], count);
+        for (int i = 0; ok && i < count; i++)
+            if (keys[t][i]) ok = map_put(&at, mix64(keys[t][i]), (int32_t)((uint32_t)t << 24 | (uint32_t)i));
+    }
+    int np = 0, nc = 0;
+    uint32_t end = w[2] < n ? w[2] : (uint32_t)n;
+    for (uint32_t e = 0x28; ok && e + 8 <= end; e += 8) {
+        uint32_t key, val;
+        memcpy(&key, b + e, 4);
+        memcpy(&val, b + e + 4, 4);
+        int v = key ? map_get(&at, mix64(key)) : -1;
+        if (v < 0) continue;
+        int t = (int)((uint32_t)v >> 24), i = v & 0xffffff;
+        const uint8_t *src = raw[t] + (size_t)i * size[t] + off[t];
+        uint8_t *dst;
+        size_t len;
+        uint32_t inl;
+        if (t == DBG_FLAG_STRING || t == DBG_FLAG_VEC3) {
+            len = t == DBG_FLAG_STRING ? 64 : 12;
+            if (val < end || (size_t)val + len > n) continue;   // not an offset past the table: not this kind of entry
+            if (t == DBG_FLAG_VEC3) src += 12;   // the copy the game saves (debug_tools.c store_info)
+            dst = b + val;
+        } else {
+            inl = t == DBG_FLAG_BOOL ? src[0] != 0 : 0;
+            if (t != DBG_FLAG_BOOL) memcpy(&inl, src, 4);
+            src = (const uint8_t *)&inl, dst = b + e + 4, len = 4;
+        }
+        np++;
+        if (memcmp(dst, src, len)) memcpy(dst, src, len), nc++;
+    }
+    for (int t = 0; t < T_TYPES; t++) free(raw[t]), free(keys[t]);
+    free(at.k), free(at.v);
+    if (patched) *patched = np;
+    if (changed) *changed = nc;
+    return ok && np > 0;
+}
+
+int save_tree_build(uint8_t *data, size_t n, int *patched, int *changed) { return build_from_stores(data, n, patched, changed); }
+
+// A node where the game makes no save (temp_saves): the current node's two files with the running game's flags written
+// over them. Arrays keep the current node's values. 1 when the node was made.
+static int built_node(void) {
+    int cur = atomic_load(&cur_node);
+    Event *e = calloc(1, sizeof *e);
+    if (!e) return 0;
+    e->kind = EV_COMMIT;
+    int ok = cur >= 0 && node_read(cur, &e->caption, &e->caption_n, &e->progress, &e->progress_n, &e->slot) &&
+             build_from_stores(e->progress, e->progress_n, NULL, NULL);
+    if (ok) {
+        build_from_stores(e->caption, e->caption_n, NULL, NULL);
+        caption_stamp_now(e->caption, e->caption_n);
+        node_from(e, "flag");
+    }
+    ev_free(e);
+    return ok;
+}
+
 // The game's UI screen (debug_move.c UI_SCREEN_KEY): the hashes of the values the route to the Load screen passes.
 #define UI_SCREEN_KEY 0x578d41e1u
 #define UI_NONE 0xb6eede09u     // in play, no menu
@@ -840,6 +921,7 @@ static void caption_stamp_now(uint8_t *b, size_t n) {
 #define UI_SYSTEM 0x76e3413eu   // its System tab
 #define UI_SAVE 0x42814d01u     // the Save list
 #define UI_LOAD 0x3b849e33u     // the Load list and the screen that asks to load a save
+#define UI_OPTION 0xa60ba395u   // Options
 
 static uint32_t ui_screen(void) {
     uint32_t v = 0;
@@ -881,15 +963,23 @@ static int load_route(void) {
         if (ui_screen() == UI_NONE) return 0;
     }
     if (!wait_screen(UI_SYSTEM, 3000, "R", 150)) return 0;
-    for (int tries = 0; tries < 2; tries++) {   // a Down lost to the tab's animation makes A open Save: back, again
-        plat_sleep_ms(tries ? 500 : 200);
-        press("DOWN");
-        plat_sleep_ms(150);
+    // Down from Save, where the tab's cursor starts, then A. A press lost to the tab's animation is made good: A again
+    // when nothing opened, back and Down when Save opened (the Down was lost), back and Up when Options did (the cursor
+    // was on Load already).
+    const char *move = "DOWN";
+    for (int tries = 0; tries < 5; tries++) {
+        plat_sleep_ms(tries ? 400 : 200);
+        if (move) press(move), plat_sleep_ms(150);
         press("A");
         uint64_t t0 = plat_now_ns();
-        while ((s = ui_screen()) != UI_LOAD && s != UI_SAVE && plat_now_ns() - t0 < 3000000000ull) plat_sleep_ms(15);
+        while ((s = ui_screen()) == UI_SYSTEM && plat_now_ns() - t0 < 1500000000ull) plat_sleep_ms(15);
         if (s == UI_LOAD) break;
-        if (s != UI_SAVE) return 0;
+        if (s == UI_SYSTEM) {
+            move = NULL;
+            continue;
+        }
+        if (s != UI_SAVE && s != UI_OPTION) return 0;
+        move = s == UI_SAVE ? "DOWN" : "UP";
         press("B");
         if (!wait_screen(UI_SYSTEM, 3000, NULL, 0)) return 0;
     }
@@ -923,6 +1013,45 @@ static int open_load_screen(void) {
     int ok = load_route();
     if (held) gfx_hold_release();
     return ok;
+}
+
+// ---- the game's temporary save mode (System_IsSaveTemporaryStorage, set by the game in the escape from the collapsing
+// castle): the game's save to a slot does nothing (it returns at once while the flag is set, and in that area the save
+// it queues with the flag cleared is never written either), and the Load list cannot read the slots meanwhile (its
+// reading waits; the list stays empty). The flag is not in the save files, only in the running game. In that mode the
+// tree makes the save itself (built_node). A load turns the mode off for the Load list (temp_off) and turns it back on
+// once the player is back in play in the same area without having loaded (temp_watch).
+#define TEMP_PLAY_MS 3000   // in play this long, in the area, nothing loading: the load was cancelled
+static int temp_restore;    // the mode was turned off for a load
+static char temp_area[64];  // the area it was turned off in
+static uint64_t temp_play_since;
+
+static int flag_on(const char *name) { return dbg_flag_get_bool(dbg_flag_key(name)) == 1; }
+static int temp_saves(void) { return flag_on("System_IsSaveTemporaryStorage"); }
+
+static void temp_off(void) {
+    if (!temp_saves() || !dbg_current_area(temp_area)) return;
+    if (!dbg_flag_set_bool(dbg_flag_key("System_IsSaveTemporaryStorage"), 0)) return;
+    temp_restore = 1;
+    temp_play_since = 0;
+}
+
+static void temp_watch(uint64_t ms) {
+    char area[64];
+    if (!temp_restore || !dbg_current_area(area)) return;
+    if (strcmp(area, temp_area)) {   // another area: the save was loaded, the mode stays off
+        temp_restore = 0;
+        return;
+    }
+    if (ui_screen() != UI_NONE || flag_on("Sequence_IsLoadingBanc") || flag_on("System_IsSaveLoading")) {
+        temp_play_since = 0;
+        return;
+    }
+    if (!temp_play_since) temp_play_since = ms;
+    if (ms - temp_play_since < TEMP_PLAY_MS) return;
+    dbg_flag_set_bool(dbg_flag_key("System_IsSaveTemporaryStorage"), 1);
+    temp_restore = 0;
+    status("No load: the game keeps its saves in this area aside again");
 }
 
 static void load_node(int id) {
@@ -961,6 +1090,7 @@ static void load_node(int id) {
     // it through its own Load screen, which reads the slot from the disk; what the game holds of the save it plays is
     // what that load replaces. Only when the save cannot be swapped now (a save being written) does the game restart.
     if (fs_save_import_now() == 0) {
+        if (!at_title) temp_off();   // before the list reads the slots again
         dbg_save_list_reload();
         if (at_title) {
             status("Node %d is the save in slot %d now: load it from the title", id, slot);
@@ -1023,10 +1153,16 @@ static void tree_thread(void *arg) {
             else snap_compare(t, ms);
         }
         if (any) rebase = 0;
+        temp_watch(ms);
         if (asked_ms && ms - asked_ms > RETRY_MS) asked_ms = 0;   // the save asked for did not come
         if (playing && npend && !asked_ms && !fs_save_busy() && (ms - last_ms >= QUIET_MS || ms - first_ms >= MAX_WAIT_MS)) {
             static uint64_t last_ask;
-            if (ms - last_ask >= MIN_GAP_MS && dbg_game_save_request(cur_slot)) asked_ms = last_ask = ms;
+            if (ms - last_ask < MIN_GAP_MS) {
+            } else if (temp_saves()) {   // the game would not save: the tree makes the save itself
+                if (built_node()) last_ask = ms;
+            } else if (dbg_game_save_request(cur_slot)) {
+                asked_ms = last_ask = ms;
+            }
         }
         plat_sleep_ns((uint64_t)POLL_MS * 1000000ull);
     }

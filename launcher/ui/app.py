@@ -257,6 +257,8 @@ class App:
         self.uninstall_game = False
         self.game_proc = None
         self.tree_window = None    # the Save Tree window (ui/savetree.py) while it is open
+        self.tree_only = False     # the launcher's window was closed while the Save Tree was open (on_close)
+        self.instance_lock = None  # the single-instance lock (main), let go of when only the Save Tree is left
         self.cursor_frames, self.cursor_k = [], 0
         self.last_second = 0
         self.gamepad = winsys.Gamepad()
@@ -744,7 +746,26 @@ class App:
         if self.bg.staging():   # what it downloaded is resumed, and its unfinished folder replaced, next time
             self.bg.job.cancel()
         self.sounds.stop()
+        tree = self.tree_window
+        if tree is not None and tree.win.winfo_exists():
+            # The Save Tree stays open: the launcher's window goes, and the process lives on for the tree alone until
+            # it is closed (tree_only_wait). It lets go of the single-instance lock, so the launcher can be started
+            # again meanwhile; this one runs no jobs and no longer watches the game.
+            self.tree_only = True
+            self.root.withdraw()
+            if self.instance_lock:
+                self.instance_lock.release()
+            self.ctx.log('launcher closed; the Save Tree window stays open')
+            self.root.after(500, self.tree_only_wait)
+            return
         self.root.destroy()
+
+    def tree_only_wait(self):
+        tree = self.tree_window
+        if tree is None or not tree.win.winfo_exists():
+            self.root.destroy()
+            return
+        self.root.after(500, self.tree_only_wait)
 
     # ---------------------------------------------------------------- screens
 
@@ -1924,6 +1945,9 @@ class App:
         self.root.after(1000, self.watch_game)
 
     def watch_game(self):
+        if self.tree_only:   # the launcher was closed (on_close): it does not come back when the game ends
+            self.game_proc = None
+            return
         # The game's own Restart ends the process started here and starts another (gfx_present.c gfx_window_closed)
         gd = self.settings.get('game_dir')
         if (self.game_proc and self.game_proc.poll() is None) or (gd and saves.game_running(gd)):
@@ -2804,6 +2828,7 @@ def main(argv=None):
     try:
         root = tk.Tk(className='OOT-DEBUG-MENU')
         app = App(root, ctx, a)
+        app.instance_lock = lock
         if a.selftest:
             from .selftest import run
             root.after(300, lambda: run(app, a.shots))

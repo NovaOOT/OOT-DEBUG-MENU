@@ -290,17 +290,22 @@ static void health_tick(void) {
 // ---- flags, magic and counted items
 
 // The flag stores, one heap array per value type. Every entry starts with a pointer to its type's class in main; the
-// value sits at `value` (int, float and enum entries keep it again 4 bytes later). The array's {key, index} hash table,
-// about two slots per entry with empty slots zero, ends right where the entries start.
+// value sits at `value`, and every entry keeps it a second time `copy` bytes after that (a bool in the next byte, an int,
+// float or enum 4 bytes on, a Vector3 12 bytes on, a string's 64 characters 0x50 bytes on). The game reads the first and
+// writes the second into the save files, so a value written only to the first is gone at the next save: a bool given
+// that way showed in play and was off in every save after (seen 2026-11-14: items given from the menu, then a load hid
+// them from the item screen while their counts, written twice, stayed). The setters below write both. The array's {key,
+// index} hash table, about two slots per entry with empty slots zero, ends right where the entries start.
 static const struct StoreInfo {
-    uint32_t cls, size, value, min;   // class (main+), entry size, value offset, fewest entries a real store has
+    uint32_t cls, size, value, copy, min;   // class (main+), entry size, value offset, the second copy's distance from
+                                            // the value, fewest entries a real store has
 } store_info[DBG_FLAG_TYPES] = {
-    [DBG_FLAG_BOOL] = {0x4c20658, 0x18, 0x16, 4000},
-    [DBG_FLAG_INT] = {0x4c20718, 0x28, 0x1c, 500},
-    [DBG_FLAG_FLOAT] = {0x4c207d8, 0x28, 0x1c, 40},
-    [DBG_FLAG_STRING] = {0x4c20c58, 0x108, 0x74, 30},
-    [DBG_FLAG_VEC3] = {0x4c20a18, 0x40, 0x28, 10},
-    [DBG_FLAG_ENUM] = {0x4c20898, 0x38, 0x1c, 60},
+    [DBG_FLAG_BOOL] = {0x4c20658, 0x18, 0x16, 1, 4000},
+    [DBG_FLAG_INT] = {0x4c20718, 0x28, 0x1c, 4, 500},
+    [DBG_FLAG_FLOAT] = {0x4c207d8, 0x28, 0x1c, 4, 40},
+    [DBG_FLAG_STRING] = {0x4c20c58, 0x108, 0x74, 0x50, 30},
+    [DBG_FLAG_VEC3] = {0x4c20a18, 0x40, 0x24, 12, 10},
+    [DBG_FLAG_ENUM] = {0x4c20898, 0x38, 0x1c, 4, 60},
 };
 #define STORE_MAX 32768                 // more entries than any store has
 #define STORE_NEAR 0x1000000ull         // the other stores lie within this distance of the int store
@@ -495,9 +500,15 @@ static int guest_write(uint64_t at, const void *src, size_t n) {
     return 1;
 }
 
+// Writes a flag's value and its second copy (store_info), so the value is also what the next save keeps.
+static int flag_write(int type, uint32_t key, const void *v, size_t n) {
+    uint64_t a = dbg_flag_addr(type, key);
+    return a && guest_write(a, v, n) && guest_write(a + store_info[type].copy, v, n);
+}
+
 int dbg_flag_set(uint32_t key, int value) {
-    uint64_t a = dbg_flag_addr(DBG_FLAG_INT, key);
-    return a && dbg_write32(a, (uint32_t)value) && dbg_write32(a + 4, (uint32_t)value);
+    uint32_t v = (uint32_t)value;
+    return flag_write(DBG_FLAG_INT, key, &v, 4);
 }
 
 int dbg_flag_get_bool(uint32_t key) {
@@ -508,7 +519,7 @@ int dbg_flag_get_bool(uint32_t key) {
 
 int dbg_flag_set_bool(uint32_t key, int on) {
     uint8_t v = on != 0;
-    return guest_write(dbg_flag_addr(DBG_FLAG_BOOL, key), &v, 1);
+    return flag_write(DBG_FLAG_BOOL, key, &v, 1);
 }
 
 int dbg_flag_get_u32(int type, uint32_t key, uint32_t *value) {
@@ -516,7 +527,9 @@ int dbg_flag_get_u32(int type, uint32_t key, uint32_t *value) {
     return a && guest_read(a, value, 4);
 }
 
-int dbg_flag_set_u32(int type, uint32_t key, uint32_t value) { return guest_write(dbg_flag_addr(type, key), &value, 4); }
+int dbg_flag_set_u32(int type, uint32_t key, uint32_t value) {
+    return type >= 0 && type < DBG_FLAG_TYPES && flag_write(type, key, &value, 4);
+}
 
 int dbg_flag_get_string(uint32_t key, char out[64]) {
     uint64_t a = dbg_flag_addr(DBG_FLAG_STRING, key);
@@ -528,7 +541,7 @@ int dbg_flag_get_string(uint32_t key, char out[64]) {
 int dbg_flag_set_string(uint32_t key, const char *text) {
     char v[64] = {0};
     strncpy(v, text, sizeof v - 1);
-    return guest_write(dbg_flag_addr(DBG_FLAG_STRING, key), v, strlen(v) + 1);
+    return flag_write(DBG_FLAG_STRING, key, v, strlen(v) + 1);
 }
 
 int dbg_flag_get_vec3(uint32_t key, float v[3]) {
@@ -536,7 +549,9 @@ int dbg_flag_get_vec3(uint32_t key, float v[3]) {
     return a && guest_read(a, v, 12);
 }
 
-int dbg_flag_set_vec3(uint32_t key, const float v[3]) { return guest_write(dbg_flag_addr(DBG_FLAG_VEC3, key), v, 12); }
+int dbg_flag_set_vec3(uint32_t key, const float v[3]) {
+    return flag_write(DBG_FLAG_VEC3, key, v, 12);
+}
 
 // The magic meter: the player's own copy is the one the game uses (it writes it over the flag on every frame), so that is
 // what is read and written. The maximum is only a flag.
@@ -614,8 +629,28 @@ static uint32_t item_key(int i) {
 
 int dbg_item_get(int i, int *value) { return i >= 0 && i < dbg_item_count() && dbg_flag_get(item_key(i), value); }
 
+// The got-it flag (IsGet.<name>) of a counted item, from its PouchData.<name>.StockNum flag; 0 for the rupees and the
+// small keys, which have none.
+static uint32_t item_get_key(int i) {
+    static uint32_t keys[sizeof items / sizeof items[0]];
+    const char *f = items[i].flag, *dot;
+    if (strncmp(f, "PouchData.", 10) || !(dot = strchr(f + 10, '.'))) return 0;
+    if (!keys[i]) {
+        char name[96];
+        snprintf(name, sizeof name, "IsGet.%.*s", (int)(dot - (f + 10)), f + 10);
+        keys[i] = dbg_flag_key(name);
+    }
+    return keys[i];
+}
+
+int dbg_item_owned(int i) {
+    if (i < 0 || i >= dbg_item_count()) return -1;
+    uint32_t got = item_get_key(i);
+    return got ? dbg_flag_get_bool(got) : 1;
+}
+
 int dbg_item_set(int i, int value) {
-    if (i < 0 || i >= dbg_item_count()) return 0;
+    if (i < 0 || i >= dbg_item_count() || dbg_item_owned(i) != 1) return 0;
     if (value < 0) value = 0;
     if (value > items[i].max) value = items[i].max;
     return dbg_flag_set(item_key(i), value);
@@ -624,9 +659,12 @@ int dbg_item_set(int i, int value) {
 void dbg_items_infinite(int on) { kept_set(&items_hold, "NX2NAVI_DEBUG_INF_ITEMS", on); }
 int dbg_items_infinite_on(void) { kept_load(); return atomic_load(&items_hold); }
 
+// Holds the used-up things at their largest count, but only those the save has: a count for something never got does
+// not give it, and the count left behind would make the game skip the item's get when the player finds it (the pouch
+// already counts one), so a chest's bow or bombs would never reach the item screen.
 static void items_tick(void) {
     if (!atomic_load(&items_hold)) return;
-    for (int i = 0, v; i < ITEMS_CONSUMED; i++)
+    for (int i = 0, v; i < ITEMS_CONSUMED; i++)   // dbg_item_set leaves what the save has not got
         if (dbg_item_get(i, &v) && v != items[i].max) dbg_item_set(i, items[i].max);
 }
 

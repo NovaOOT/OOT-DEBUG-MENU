@@ -105,7 +105,7 @@ void tab_debug(float scale);         // ui/debug_tab.cpp: the Debug tab
 void tab_mods(float scale);          // ui/mods_tab.cpp: the Mods tab
 void tab_randomizer(float scale);    // ui/randomizer_tab.cpp: the Randomizer tab
 bool debug_hotkey_waiting(void);     // ui/debug_tab.cpp: a hotkey cell waits for a press
-bool debug_force_age_asking(void);   // ui/debug_tab.cpp: the Force age warning is open
+bool debug_force_age_asking(void);   // ui/debug_tab.cpp: a box of the Debug page is open (Force age, owned items)
 void debug_hotkey_cancel(void);      // ui/debug_tab.cpp: and stops waiting (the menu opened or closed)
 void debug_overlay_draw(float scale);   // ui/debug_tab.cpp: the on-screen readout
 }

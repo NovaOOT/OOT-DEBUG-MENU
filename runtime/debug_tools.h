@@ -221,6 +221,9 @@ int dbg_item_count(void);
 const char *dbg_item_label(int i, int *max, int *step);
 int dbg_item_get(int i, int *value);
 int dbg_item_set(int i, int value);
+// 1 when the save has the thing counted by row i (its IsGet flag is on; always 1 for rupees and keys, which have none), 0
+// when not, -1 when the flags are not found yet. A count is only changed for a thing the save has.
+int dbg_item_owned(int i);
 // Infinite items: rupees and the ammunition (arrows, bombs, bombchus, sticks, nuts, seeds, beans) are set back to their
 // largest value on every presented frame. Gold tokens and small keys are left alone.
 void dbg_items_infinite(int on);

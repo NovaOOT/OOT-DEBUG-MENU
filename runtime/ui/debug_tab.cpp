@@ -442,7 +442,27 @@ static void hotkey_capture(void) {
 // yes, the row keeps its value; Cancel, B or Esc leave it so.
 static int g_age_ask = -1;   // the age that waits for the yes (DBG_AGE_CHILD or DBG_AGE_ADULT), -1 when none
 static int g_age_frame = -1;   // the last frame the warning was open: the B that closes it must not close the menu too
-extern "C" bool debug_force_age_asking(void) { return g_age_ask >= 0 || g_age_frame == ImGui::GetFrameCount(); }
+
+// Owned items change only through a box that asks: A on a thing's row opens Give / Remove / Cancel for it, A on "Give
+// all of these" or "Remove all of these" opens a yes / Cancel for the group shown. Cancel has the cursor first; B and
+// Esc cancel. The rows themselves do nothing on left or right.
+#define OWN_ASK_ALL (-2)
+static int g_own_ask = -1;          // the owned thing asked about (dbg_owned_*), OWN_ASK_ALL for the group, -1 when none
+static int g_own_all_on;            // with OWN_ASK_ALL: 1 give all, 0 remove all
+static const char *g_own_group;     // the group the list shows (OWN_ASK_ALL acts on it)
+static char g_own_row[32];          // the row to put the cursor back on
+static int g_own_frame = -1;        // the last frame the box was open, as g_age_frame
+
+static void own_ask(int item, int all_on, const char *row) {
+    g_own_ask = item, g_own_all_on = all_on;
+    snprintf(g_own_row, sizeof g_own_row, "%s", row);
+}
+
+// A box of the debug page is open (the Force age warning or an owned-items question): B closes it, not the menu.
+extern "C" bool debug_force_age_asking(void) {
+    const int f = ImGui::GetFrameCount();
+    return g_age_ask >= 0 || g_age_frame == f || g_own_ask != -1 || g_own_frame == f;
+}
 
 static bool age_profile_ok(void) {
     char prof[SAVE_NAME_MAX];
@@ -506,6 +526,66 @@ static void force_age_confirm(float scale) {
         g_age_ask = -1;
         ImGui::CloseCurrentPopup();
         opt_focus_key("##dbg_wflag");
+    }
+    ImGui::EndPopup();
+}
+
+static void own_confirm(float scale) {
+    if (g_own_ask == -1) return;
+    if (!ImGui::IsPopupOpen("##own_confirm")) ImGui::OpenPopup("##own_confirm");
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetMainViewport()->Size.x * 0.36f, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 0);
+    const bool open = ImGui::BeginPopupModal("##own_confirm", nullptr, ImGuiWindowFlags_NoDecoration);
+    ImGui::PopStyleVar();
+    if (!open) return;
+    g_own_frame = ImGui::GetFrameCount();
+    const ImVec2 box = ImGui::GetWindowPos(), box_size = ImGui::GetWindowSize();
+    skin_panel(ImGui::GetWindowDrawList(), box, ImVec2(box.x + box_size.x, box.y + box_size.y), scale);
+    const bool all = g_own_ask == OWN_ASK_ALL;
+    const char *label = all ? nullptr : dbg_owned_label(g_own_ask, nullptr);
+    const int have = all ? -1 : dbg_owned_get(g_own_ask);
+    ImGui::PushTextWrapPos(0);
+    if (all)
+        ImGui::Text("%s every thing in %s in this save?", g_own_all_on ? "Give" : "Remove", g_own_group ? g_own_group : "this list");
+    else
+        ImGui::Text("%s: %s in this save.", label ? label : "?", have == 1 ? "you have it" : "you do not have it");
+    ImGui::TextUnformatted("The change goes into the game's flags and is kept by the next save.");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    const ImGuiStyle &st = ImGui::GetStyle();
+    const char *no = "Cancel";
+    const char *yes = all ? (g_own_all_on ? "Give all" : "Remove all") : "Give", *rem = all ? nullptr : "Remove";
+    float bw = fmaxf(fmaxf(ImGui::CalcTextSize(yes).x, ImGui::CalcTextSize(no).x), rem ? ImGui::CalcTextSize(rem).x : 0) +
+               st.FramePadding.x * 4;
+    bool close = skin_widget_button(no, ImVec2(bw, 0), scale);
+    if (ImGui::IsWindowAppearing()) ImGui::SetItemDefaultFocus();
+    ImGui::SameLine(0, st.ItemSpacing.x + skin_cursor_reach(scale));
+    if (skin_widget_button(yes, ImVec2(bw, 0), scale)) {
+        if (all) {
+            for (int i = 0; i < dbg_owned_count(); i++) {
+                const char *group = nullptr;
+                dbg_owned_label(i, &group);
+                if (g_own_group && group && !strcmp(group, g_own_group)) dbg_owned_set(i, g_own_all_on);
+            }
+        } else {
+            dbg_owned_set(g_own_ask, 1);
+        }
+        close = true;
+    }
+    if (rem) {
+        ImGui::SameLine(0, st.ItemSpacing.x + skin_cursor_reach(scale));
+        if (skin_widget_button(rem, ImVec2(bw, 0), scale)) {
+            dbg_owned_set(g_own_ask, 0);
+            close = true;
+        }
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+        close = true;
+    if (close) {
+        g_own_ask = -1;
+        ImGui::CloseCurrentPopup();
+        opt_focus_key(g_own_row);
     }
     ImGui::EndPopup();
 }
@@ -1099,8 +1179,9 @@ extern "C" void tab_debug(float scale) {
         if (opt_toggle_text("##dbg_infmagic", "Infinite magic", "Fills the magic meter again on every frame.", inf)) dbg_magic_infinite(!inf);
         bool infi = dbg_items_infinite_on() != 0;
         if (opt_toggle_text("##dbg_infitems", "Infinite items", "Keeps rupees, arrows, bombs, bombchus, Deku sticks, nuts and seeds and "
-                            "magic beans at their largest value on every frame, so nothing runs out. Gold Skulltula tokens and "
-                            "small keys are not touched. Use Infinite magic above for the magic meter.", infi))
+                            "magic beans at their largest value on every frame, so nothing runs out. Only what this save already "
+                            "has is filled: it never gives you something you have not got. Gold Skulltula tokens and small keys "
+                            "are not touched. Use Infinite magic above for the magic meter.", infi))
             dbg_items_infinite(!infi);
         bool anyage = dbg_any_age_items_on() != 0;
         if (opt_toggle_text("##dbg_anyage", "Items at any age (WIP)",
@@ -1113,16 +1194,18 @@ extern "C" void tab_debug(float scale) {
             char id[32];
             int v = 0, max = 0, step = 1;
             const char *label = dbg_item_label(i, &max, &step);
-            bool have = dbg_item_get(i, &v) != 0;
+            // Only the count of something the save has can change: a count for something not got would make the
+            // game skip that thing's get later (debug_tools.c items_tick).
+            bool have = dbg_item_get(i, &v) != 0 && dbg_item_owned(i) == 1;
             snprintf(id, sizeof id, "##dbg_item%d", i);
             if (have)
                 snprintf(value, sizeof value, "%d", v);
             else
-                snprintf(value, sizeof value, "%s", wait);
+                snprintf(value, sizeof value, "%s", dbg_item_owned(i) == 0 ? "not got" : wait);
             r = opt_text_row(id, label, value, nullptr,
                              "Written to the game's own counter. Left and right change it by one step; A sets the largest value. "
-                             "The game's capacity (wallet, quiver, bag) is not checked, and a count for an item that was never "
-                             "obtained does not add the item.", false);
+                             "Only for something this save has: give it first under Owned items. The game's capacity (wallet, "
+                             "quiver, bag) is not checked.", false);
             if (have && r) dbg_item_set(i, r == 2 ? max : v + r * step);
         }
     }
@@ -1134,15 +1217,21 @@ extern "C" void tab_debug(float scale) {
         const int ng = (int)(sizeof groups / sizeof groups[0]);
         static int gi = 0;
         int r = opt_text_choice("##dbg_owngroup", "Show", groups, ng, gi,
-                                "Which things to list. Left and right choose; A opens the list.");
+                                "Which things to list. Left and right choose; A opens the list. Nothing here changes the save "
+                                "until you pick Give or Remove in the box that A opens on a row.");
         if (r >= 0) gi = r;
-        int all_on = -1;
-        if (opt_text_row("##dbg_ownall", "Give all of these", "A", nullptr, "Gives every thing listed below.", false) == 2) all_on = 1;
-        if (opt_text_row("##dbg_ownnone", "Remove all of these", "A", nullptr, "Removes every thing listed below.", false) == 2) all_on = 0;
+        g_own_group = groups[gi];
+        // Only A on a row asks (own_confirm); left and right on these rows do nothing, so moving through the list
+        // cannot give or take anything.
+        if (opt_text_row("##dbg_ownall", "Give all of these", "A", nullptr,
+                         "Asks first, then gives every thing listed below.", false) == 2)
+            own_ask(OWN_ASK_ALL, 1, "##dbg_ownall");
+        if (opt_text_row("##dbg_ownnone", "Remove all of these", "A", nullptr,
+                         "Asks first, then removes every thing listed below.", false) == 2)
+            own_ask(OWN_ASK_ALL, 0, "##dbg_ownnone");
         for (int i = 0; i < dbg_owned_count(); i++) {
             const char *group = nullptr, *label = dbg_owned_label(i, &group);
             if (strcmp(group, groups[gi])) continue;
-            if (all_on >= 0) dbg_owned_set(i, all_on);
             int have = dbg_owned_get(i);
             char id[32];
             snprintf(id, sizeof id, "##dbg_own%d", i);
@@ -1150,11 +1239,12 @@ extern "C" void tab_debug(float scale) {
                 opt_text_row(id, label, dbg_flags_locating() ? "searching..." : "not found", nullptr, "", false);
                 continue;
             }
-            if (opt_toggle_text(id, label,
-                                "Gives or removes it through the game's own item flags (the pouch count and the got-it flag). "
-                                "Removing something that is equipped leaves it in the hand until the next change.",
-                                have == 1))
-                dbg_owned_set(i, have != 1);
+            if (opt_text_row(id, label, have == 1 ? "Have" : "Not got", nullptr,
+                             "A asks whether to give or remove it, through the game's own item flags (the pouch count and "
+                             "the got-it flag); nothing changes until you choose. Removing something that is equipped leaves "
+                             "it in the hand until the next change.",
+                             false) == 2)
+                own_ask(i, -1, id);
             int content = have == 1 ? dbg_owned_bottle_content(i) : -1;
             if (content >= 0) {
                 int nc = 0;
@@ -1519,6 +1609,7 @@ extern "C" void tab_debug(float scale) {
     opt_end();
     hotkey_capture();
     force_age_confirm(scale);
+    own_confirm(scale);
 }
 
 // ---- the readout, top left, over the game

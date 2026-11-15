@@ -1054,7 +1054,7 @@
 # debug_any_age_items = 0
 # Hotkeys for the debug tools (Debug tab, Hotkeys), one line per tool: up to two keys and one controller button, in the
 # bind_ format. A key or button bound here no longer reaches the game outside its pause menu. The tools: fly hover
-# hoverboots god infmagic infitems reload ageswitch savepos loadpos slower faster fog walls loading triggers hidden death
+# hoverboots kill god infmagic infitems reload ageswitch savepos loadpos slower faster fog walls loading triggers hidden death
 # hookshot health position speed area inputs timer igt split. None is bound by default.
 # debug_hotkey_fly = key:g, pad:dpad_up
 # Volume overlay of the debug menu (Debug tab, View; docs/debug-menu.md): invisible walls (placed ones, and the air wall

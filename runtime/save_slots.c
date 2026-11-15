@@ -1,4 +1,5 @@
 // Save profiles and manual saves: the layout and the rules are in save_slots.h.
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -126,7 +127,33 @@ static int collect(const char *name, int kind, uint64_t size, void *ctx) {
     return 1;
 }
 
-static int by_name(const void *a, const void *b) { return strcmp((const char *)a, (const char *)b); }
+// Profiles in the order a player counts them: Default first, then by name with each run of digits compared as a
+// number ("Profile 2" before "Profile 10"), letters regardless of case; names equal that way fall back to strcmp.
+static int by_profile(const void *pa, const void *pb) {
+    const char *a = pa, *b = pb;
+    int da = !strcmp(a, DEFAULT_PROFILE), db = !strcmp(b, DEFAULT_PROFILE);
+    if (da != db) return db - da;
+    const char *x = a, *y = b;
+    while (*x && *y) {
+        if (isdigit((unsigned char)*x) && isdigit((unsigned char)*y)) {
+            while (*x == '0') x++;
+            while (*y == '0') y++;
+            size_t nx = 0, ny = 0;
+            while (isdigit((unsigned char)x[nx])) nx++;
+            while (isdigit((unsigned char)y[ny])) ny++;
+            if (nx != ny) return nx < ny ? -1 : 1;   // more digits (leading zeros skipped): the larger number
+            int c = memcmp(x, y, nx);
+            if (c) return c;
+            x += nx, y += ny;
+            continue;
+        }
+        int cx = tolower((unsigned char)*x), cy = tolower((unsigned char)*y);
+        if (cx != cy) return cx - cy;
+        x++, y++;
+    }
+    if (*x || *y) return *x ? 1 : -1;
+    return strcmp(a, b);
+}
 static int by_name_desc(const void *a, const void *b) { return -strcmp((const char *)a, (const char *)b); }
 
 static int save_profile_list_impl(char names[][SAVE_NAME_MAX], int max) {
@@ -134,7 +161,7 @@ static int save_profile_list_impl(char names[][SAVE_NAME_MAX], int max) {
     if (!save_profile_active_impl(active) || !root_dir(root, sizeof root)) return 0;
     Collect c = {names, 0, max, 1};
     plat_fs_list(root, collect, &c);
-    qsort(names, (size_t)c.n, SAVE_NAME_MAX, by_name);
+    qsort(names, (size_t)c.n, SAVE_NAME_MAX, by_profile);
     return c.n;
 }
 

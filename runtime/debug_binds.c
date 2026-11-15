@@ -50,6 +50,16 @@ static void a_ragdoll(void) {
     int on = dbg_ragdoll_on();
     dbg_toast_show(!dbg_ragdoll(1) ? "No player to ragdoll" : on ? "Already in ragdoll" : "Ragdoll");
 }
+// Health 0 written to the health records (dbg_health_set); the game's own death follows. Invulnerable and the health
+// lock would put the health straight back, so the hotkey says so instead of doing nothing visible.
+static void a_kill(void) {
+    if (dbg_invulnerable_on() || dbg_health_lock_value()) {
+        dbg_toast_show(dbg_invulnerable_on() ? "Invulnerable is on" : "The health lock is on");
+        return;
+    }
+    if (dbg_health_set(0)) dbg_toast_show("Killed Link");
+    else dbg_toast_show(dbg_health_locating() ? "Still finding Link's health, try again in a moment" : "No player to kill");
+}
 static void a_god(void) { dbg_invulnerable(!dbg_invulnerable_on()), say("Invulnerable", dbg_invulnerable_on()); }
 static void a_onehit(void) { dbg_one_hit(!dbg_one_hit_on()), say("One-hit kills", dbg_one_hit_on()); }
 static void a_magic(void) { dbg_magic_infinite(!dbg_magic_infinite_on()), say("Infinite magic", dbg_magic_infinite_on()); }
@@ -109,6 +119,7 @@ static const Action actions[] = {
     {{"novoid", "No void-out", "Switches No void-out on and off."}, a_novoid},
     {{"bombbug", "PastyPixel's Bomb T-Pose", "Switches PastyPixel's Bomb T-Pose on and off."}, a_bombbug},
     {{"ragdoll", "Ragdoll", "Drops Link into the game's own ragdoll; he gets back up a second after he lies still."}, a_ragdoll},
+    {{"kill", "Kill Link", "Sets Link's health to zero, so he dies as he would from damage."}, a_kill},
     {{"god", "Invulnerable", "Switches Invulnerable on and off."}, a_god},
     {{"onehit", "One-hit kills", "Switches One-hit kills on and off."}, a_onehit},
     {{"infmagic", "Infinite magic", "Switches Infinite magic on and off."}, a_magic},

@@ -111,7 +111,7 @@ static struct {
 
 static int skin_enabled(void) {
     static int on = -1;
-    if (on < 0) on = RT_V111 && cfg_bool("NX2NAVI_SKIN_MOTION");
+    if (on < 0) on = RT_OOT && cfg_bool("NX2NAVI_SKIN_MOTION");
     return on;
 }
 

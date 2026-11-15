@@ -239,8 +239,16 @@ def states(app):
     def mod_order():
         app.show('mod_order', 1)
 
+    def game_versions():   # the mods' made-up game folder as the 1.1.1 install, and a dump that holds 1.0.0 too
+        s['installs'] = [{'version': '1.1.1', 'dir': s['game_dir']}]
+        app.dump_versions, app.dump_versions_of = [('1.1.1', True), ('1.0.0', False)], s['dump']
+        app.show('versions', 0)
+
+    def version_on_home():
+        app.show('home', app.home_row('Game Version'))
+
     def restore_game():
-        s['game_dir'] = was_game
+        s['game_dir'], s['installs'] = was_game, []
         app.show('home', 0)
 
     return [('1-first-run', first_run), ('2-installing', installing), ('3-home', home),
@@ -249,7 +257,8 @@ def states(app):
             ('10-shaders', shaders), ('11-update-staged', update_staged), ('12-export-save', export_save),
             ('13-customize', customize), ('14-color-scheme', color_scheme), ('15-custom-picker', custom_picker),
             ('16-first-scheme', restore_scheme), ('17-mods', mods_screen), ('18-mod-order', mod_order),
-            ('19-home-again', restore_game)]
+            ('19-game-versions', game_versions), ('20-version-on-home', version_on_home),
+            ('21-home-again', restore_game)]
 
 
 def run(app, shots):

@@ -45,13 +45,17 @@ static const unsigned char search_bytes[] = {
 #define SEARCH_W 64
 #define SEARCH_H 16
 
-// FNV-1a over the guest code of the game's three SMAA compute programs (vk_exec_draw.c cs_guest_hash), game 1.1.1,
-// found with NX2NAVI_AA_LOG=1: the edges (a 4x4-pixel tile per invocation), the weights (an indirect dispatch over the
-// tiles with edges) and the composition (16x16 pixels per group)
+// FNV-1a over the guest code of the game's three SMAA compute programs (vk_exec_draw.c cs_guest_hash), found with
+// NX2NAVI_AA_LOG=1: the edges (a 4x4-pixel tile per invocation), the weights (an indirect dispatch over the tiles with
+// edges) and the composition (16x16 pixels per group). Each game build compiles them to other code, so each has its
+// own three hashes; a build missing here keeps the game's passes whatever the setting asks.
 static const struct { uint64_t hash; int role; } GAME_SMAA[] = {
-    {0xfcb21f2afa88378cull, VK_AA_ROLE_EDGES},
+    {0xfcb21f2afa88378cull, VK_AA_ROLE_EDGES},     // 1.1.1
     {0xe44377cbfafc1101ull, VK_AA_ROLE_WEIGHTS},
     {0x470d661afb1cb73aull, VK_AA_ROLE_COMPOSE},
+    {0xab613e7a06f56b25ull, VK_AA_ROLE_EDGES},     // 1.0.0
+    {0x63ae3f80eb15da7cull, VK_AA_ROLE_WEIGHTS},
+    {0x8728463f4d3fb81bull, VK_AA_ROLE_COMPOSE},
 };
 
 int vk_aa_role(uint64_t guest_hash) {

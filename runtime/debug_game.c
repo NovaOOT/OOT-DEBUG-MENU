@@ -46,7 +46,7 @@ __attribute__((constructor)) static void debug_resource_set_register(void) {
 // its skeleton pointer and tail-calls the world's scale-mode dispatcher. The host wrapper keeps that call's ABI,
 // including the caller's link register, and restores local translations after the resulting world pose is ready.
 #define HOST_DEBUG_LANK (RT_PATCH_PAGE + 0xe40)
-#define SKELETON_WORLD 0x70014e01c0ull
+#define SKELETON_WORLD RT_OOT_ADDR(0x70014e01c0ull, 0x700149bb60ull)   // 1.1.1, 1.0.0
 static void debug_lank_world(Cpu *c) {
     uint64_t object = c->x[0], lr = c->x[30], matrix = c->x[1];
     int changed = dbg_lank_before(object - 0xd8);

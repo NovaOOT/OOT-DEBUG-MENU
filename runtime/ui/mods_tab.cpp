@@ -29,12 +29,12 @@ static const char *mod_desc(const char *name) {
 extern "C" void tab_mods(float scale) {
     opt_begin("##mods", scale);
     opt_group_text("Misc");
-    if (!dbg_available()) opt_disable_next_text("Needs game version 1.1.1.");
+    if (!dbg_available()) opt_disable_next_text("Needs game version 1.1.1 or 1.0.0.");
     bool lank = dbg_lank_on() != 0;
     if (opt_toggle_text("##mod_lank", "Play as Lank", "Gives child Link the adult skeleton's proportions and adult Link "
                         "the child's. Keeps the current model, animations and gameplay age.", lank))
         dbg_lank(!lank);
-    if (!dbg_available()) opt_disable_next_text("Needs game version 1.1.1.");
+    if (!dbg_available()) opt_disable_next_text("Needs game version 1.1.1 or 1.0.0.");
     bool bunny = dbg_bunny_on() != 0;
     if (opt_toggle_text("##mod_bunny", "Bunny Hood", "While the Bunny Hood is worn, Link runs faster and jumps further. "
                         "Bunny speed sets how much.", bunny))
@@ -51,7 +51,7 @@ extern "C" void tab_mods(float scale) {
                                 "How much further Link gets with the Bunny Hood on: running speed and jump distance.");
         if (r >= 0) dbg_set_bunny_speed(vals[r]);
     }
-    if (!dbg_available()) opt_disable_next_text("Needs game version 1.1.1.");
+    if (!dbg_available()) opt_disable_next_text("Needs game version 1.1.1 or 1.0.0.");
     bool powers = dbg_mask_powers_on() != 0;
     if (opt_toggle_text("##mod_mask_powers", "Mask abilities", "While the Zora Mask is worn, Link swims about three times "
                         "faster and dives faster; while the Goron Mask is worn, he rolls twice as fast.", powers))

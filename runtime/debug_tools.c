@@ -17,14 +17,14 @@
 #include "platform/platform.h"
 #include "ui/menu.h"
 
-#define PLAYER_MANAGER_SLOT 0x4e371d0   // main+: pointer to the object that holds the player actor
+#define PLAYER_MANAGER_SLOT RT_OOT_ADDR(0x4e371d0, 0x4dc7210)   // main+: pointer to the object that holds the player actor
 #define PLAYER_ACTOR_FIELD 0x480        // in that object
 #define ACTOR_NAME_FIELD 0x20
 #define ACTOR_POS_FIELD 0x31c
 #define SPEED_WINDOW_NS 100000000ull    // the speed is the displacement over about this long
 #define TELEPORT_JUMP_M 20.0f
 
-int dbg_available(void) { return RT_V111; }
+int dbg_available(void) { return RT_OOT; }
 
 static int guest_read(uint64_t a, void *out, size_t n) { return a && plat_mem_read(a, out, n); }
 
@@ -307,6 +307,8 @@ static const struct StoreInfo {
     [DBG_FLAG_VEC3] = {0x4c20a18, 0x40, 0x24, 12, 10},
     [DBG_FLAG_ENUM] = {0x4c20898, 0x38, 0x1c, 4, 60},
 };
+// 1.0.0 has the same classes 0x65c08 lower (tools/version_map.py: each referenced directly or between references)
+#define STORE_SHIFT (RT_V100 ? 0x65c08ull : 0)
 #define STORE_MAX 32768                 // more entries than any store has
 #define STORE_NEAR 0x1000000ull         // the other stores lie within this distance of the int store
 #define MAGIC_HASH 0x76B18200u          // PlayerStatus.MP
@@ -349,7 +351,7 @@ static int store_index(const struct Store *s, uint32_t key) {
 }
 
 static int store_count(int t, uint64_t base) {
-    const uint64_t cls = MOD_MAIN_BASE + store_info[t].cls;
+    const uint64_t cls = MOD_MAIN_BASE + store_info[t].cls - STORE_SHIFT;
     int n = 0;
     while (n < STORE_MAX && guest_ptr(base + (uint64_t)n * store_info[t].size) == cls) n++;
     return n;
@@ -396,9 +398,9 @@ static void flags_locate_thread(void *arg) {
                 if (!plat_mem_read(at, buf, rn * 8)) continue;
                 for (uint64_t i = 0; i < n; i++) {
                     uint64_t v = buf[i];
-                    if (v - (MOD_MAIN_BASE + 0x4c20600ull) < 0x900ull) {
+                    if (v - (MOD_MAIN_BASE + 0x4c20600ull - STORE_SHIFT) < 0x900ull) {
                         for (int t = 0; t < DBG_FLAG_TYPES; t++) {
-                            uint64_t cls = MOD_MAIN_BASE + store_info[t].cls, e = at + i * 8;
+                            uint64_t cls = MOD_MAIN_BASE + store_info[t].cls - STORE_SHIFT, e = at + i * 8;
                             if (v != cls || ncand[t] >= CAND || guest_ptr(e - store_info[t].size) == cls) continue;
                             if (guest_ptr(e + store_info[t].size) != cls) continue;
                             cand[t][ncand[t]++] = e;
@@ -444,7 +446,7 @@ int dbg_flags_locating(void) { return atomic_load(&flags_locating); }
 // and loaded again): all of them are looked for again.
 static int stores_ready(void) {
     uint64_t base = atomic_load(&stores[DBG_FLAG_INT].base);
-    if (base && guest_ptr(base) == MOD_MAIN_BASE + store_info[DBG_FLAG_INT].cls) return 1;
+    if (base && guest_ptr(base) == MOD_MAIN_BASE + store_info[DBG_FLAG_INT].cls - STORE_SHIFT) return 1;
     if (base)
         for (int t = 0; t < DBG_FLAG_TYPES; t++) atomic_store(&stores[t].base, 0);
     flags_locate();

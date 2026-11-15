@@ -32,13 +32,38 @@ def has_prompt_art(layout):
     return (layout.app / 'prompt-art').is_dir()
 
 
-def install_args(layout, dump, game_dir):
+def install_args(layout, dump, game_dir, version=None):
+    """version: which game of a .nup to build (make_game.py --game-version); a folder dump is whatever its main is."""
     dump = str(dump)
     if os.path.isdir(dump):
         src = ['--exefs', os.path.join(dump, 'exefs'), '--romfs', os.path.join(dump, 'romfs')]
     else:
-        src = ['--nup', dump]
+        src = ['--nup', dump, *(['--game-version', version] if version else [])]
     return [*src, '--out', str(game_dir), '--msys', str(layout.msys)]
+
+
+def dump_versions(layout, dump, timeout=120):
+    """The game versions a .nup holds, [(version, buildable)] newest first (make_game.py --versions); [] for a
+    folder dump, which holds one game, or when the dump cannot be read."""
+    dump = str(dump)
+    if not dump or os.path.isdir(dump) or not os.path.isfile(dump):
+        return []
+    kw = {'creationflags': CREATE_NO_WINDOW} if os.name == 'nt' else {}
+    try:
+        p = subprocess.run(command(layout, ['--nup', dump, '--versions']), capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', timeout=timeout, stdin=subprocess.DEVNULL, **kw)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    for line in p.stdout.splitlines():
+        if line.startswith('@@'):
+            try:
+                ev = json.loads(line[2:])
+            except ValueError:
+                continue
+            if isinstance(ev, dict) and ev.get('ev') == 'versions':
+                return [(v['version'], bool(v.get('ported'))) for v in ev.get('versions', [])
+                        if isinstance(v, dict) and isinstance(v.get('version'), str)]
+    return []
 
 
 def rebuild_args(layout, game_dir, retune=False):

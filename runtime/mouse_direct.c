@@ -411,7 +411,7 @@ static void camera_activity_oot(Cpu *c) {
 }
 
 __attribute__((constructor)) static void mouse_direct_register(void) {
-    if (rt_game_version == 111) {   // Ocarina: two sites of its own, no orbit or held-object site
+    if (RT_OOT) {   // Ocarina: two sites of its own, no orbit or held-object site
         rt_register_host(HOST_MOUSE_DIRECT, camera_input_oot);
         rt_register_host(HOST_MOUSE_ACTIVITY, camera_activity_oot);
         return;

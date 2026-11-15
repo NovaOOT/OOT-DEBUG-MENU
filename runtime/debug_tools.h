@@ -1,8 +1,8 @@
 // Debug tools of the in-game menu's Debug tab (debug_tools.c, ui/debug_tab.cpp): the player's position and speed, saved
 // positions to return to, a game-speed scale, a timer with laps and the on-screen readout.
 //
-// Only game build 1.1.1 is supported (host.h RT_V111): its anchors into the guest's memory are the ones frame_rate.c
-// already uses. On any other build dbg_available() is 0, every reader fails and every writer does nothing.
+// Game builds 1.1.1 and 1.0.0 are supported (host.h RT_OOT): each anchor into the guest's memory names both builds'
+// addresses through RT_OOT_ADDR. On any other build dbg_available() is 0, every reader fails and every writer does nothing.
 #pragma once
 #include <stddef.h>
 #include <stdint.h>

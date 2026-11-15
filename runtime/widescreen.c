@@ -376,9 +376,9 @@ void wide_init(void) {
     float ui[2] = {2.0f / 3840.0f, 2.0f / 2160.0f}, squeeze4[4] = {squeeze, squeeze, squeeze, squeeze};
     float margin = (1.0f - squeeze) / 2;
     // the screens whose UI keeps the whole picture (recomp/patches-v111.txt, set wide_hud): the item-wheel, pause and
-    // system menu backgrounds, the event and loading fades
-    uint64_t keep[2] = {MOD_MAIN_BASE + 0x4bed098, MOD_MAIN_BASE + 0x4be4fb0},
-             keep2[2] = {MOD_MAIN_BASE + 0x4be61c8, MOD_MAIN_BASE + 0x4be7b30};
+    // system menu backgrounds, the event and loading fades (1.1.1's vtables; 1.0.0's hold the same functions)
+    uint64_t keep[2] = {MOD_MAIN_BASE + RT_OOT_ADDR(0x4bed098, 0x4b87838), MOD_MAIN_BASE + RT_OOT_ADDR(0x4be4fb0, 0x4b7f7d0)},
+             keep2[2] = {MOD_MAIN_BASE + RT_OOT_ADDR(0x4be61c8, 0x4b809e8), MOD_MAIN_BASE + RT_OOT_ADDR(0x4be7b30, 0x4b82350)};
     uint8_t *page = rt_patch_page();
     memcpy(page + 96, &out, 8);
     memcpy(page + 104, &scene, 8);

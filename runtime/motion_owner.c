@@ -38,7 +38,7 @@ static void owner_init(void *unused) {
     // submission walks the player's actor, equipment and models in guest memory (motion_owner_capture), each scene
     // draw is looked up in that list (vk_fg_pose.inc pose_owner), and the player's meshes are drawn a second time
     // into the motion vectors DLSS, FSR 3.1 and frame generation read.
-    owner_on = RT_V111 && rt_knob("SELECTIVE_MOTION", "1");
+    owner_on = RT_OOT && rt_knob("SELECTIVE_MOTION", "1");
 }
 // Hide meshes with Hide player off (the debug menu, vk_exec_draw.c hide_meshes_now) keeps the player's draws, which
 // takes the same tracking: it runs while that is so, without the motion pass (motion_owner_selective).
@@ -47,7 +47,7 @@ static int keep_player(void) {
     static volatile int on;
     unsigned v = cfg_version();
     if (v != seen)
-        on = RT_V111 && cfg_bool("NX2NAVI_DEBUG_HIDE_MESHES") && !cfg_bool("NX2NAVI_DEBUG_HIDE_PLAYER"), seen = v;
+        on = RT_OOT && cfg_bool("NX2NAVI_DEBUG_HIDE_MESHES") && !cfg_bool("NX2NAVI_DEBUG_HIDE_PLAYER"), seen = v;
     return on;
 }
 static volatile int transformed;
@@ -72,11 +72,11 @@ static uint32_t transform_mask(const char *name) {
     if (!strcmp(name, "Armor_Child_Mask_Zora")) return MOTION_OWNER_TRANSFORM | MOTION_OWNER_ZORA;
     return 0;
 }
-int motion_owner_transformed(void) { return RT_V111 ? transformed : MOTION_TRANSFORM_NONE; }
-uint64_t motion_owner_transform_model(void) { return RT_V111 && transformed ? transform_model : 0; }
+int motion_owner_transformed(void) { return RT_OOT ? transformed : MOTION_TRANSFORM_NONE; }
+uint64_t motion_owner_transform_model(void) { return RT_OOT && transformed ? transform_model : 0; }
 int motion_owner_enabled(void) {
     plat_once(&owner_once, owner_init, NULL);
-    return owner_on || keep_player() || (RT_V111 && transform_mod());
+    return owner_on || keep_player() || (RT_OOT && transform_mod());
 }
 int motion_owner_selective(void) {
     plat_once(&owner_once, owner_init, NULL);
@@ -99,7 +99,7 @@ static uint64_t component(uint64_t actor, uint32_t offset) {
     return field(field(actor, 0x270), offset);
 }
 static uint64_t player_actor(void) {
-    uint64_t p = field(ptr(MOD_MAIN_BASE + 0x4e371d0), 0x480);
+    uint64_t p = field(ptr(MOD_MAIN_BASE + RT_OOT_ADDR(0x4e371d0, 0x4dc7210)), 0x480);
     char name[7];
     return p && read_at(field(p, 0x20), name, sizeof name) && !memcmp(name, "Player", 7) ? p : 0;
 }
@@ -151,7 +151,7 @@ static int collect_models(uint64_t player, OwnerActor actor, uint32_t extra) {
     uint64_t model_component = component(actor.actor, 8);
     if (!model_component) return 1;
     // Only decode the implementation whose getter directly returns its model collection.
-    if (field(ptr(model_component), 0xf8) != MOD_MAIN_BASE + 0x9d7160) return 1;
+    if (field(ptr(model_component), 0xf8) != MOD_MAIN_BASE + RT_OOT_ADDR(0x9d7160, 0xa69e30)) return 1;
     uint64_t collection = field(model_component, 0x18), list = field(collection, 0x28);
     int32_t count;
     if (!collection || !read_at(collection + 0x20, &count, 4) || count < 0 || count > 16 || (count && !list)) return 0;
@@ -159,7 +159,7 @@ static int collect_models(uint64_t player, OwnerActor actor, uint32_t extra) {
         uint64_t model = ptr(ptr(list + (uint64_t)i * 8));
         if (!model) continue;
         // Match the model implementation used by the traced skeleton and shape binding path.
-        if (field(ptr(model), 0x40) != MOD_MAIN_BASE + 0x735430) continue;
+        if (field(ptr(model), 0x40) != MOD_MAIN_BASE + RT_OOT_ADDR(0x735430, 0x3534440)) continue;
         if (O.count == OWNER_MODELS) return 0;
         uint32_t flags = (actor.kind ? equipment_flags(actor.actor) : 0) | extra;
         // A mask taken off stays in its slot with its model hidden (bit 0x80 of the model's byte at +0x12): it is

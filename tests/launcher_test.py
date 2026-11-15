@@ -5429,7 +5429,7 @@ class WindowTest(Tmp):
         r = subprocess.run([sys.executable, '-m', 'launcher', '--root', str(self.tmp / 'w'), '--selftest'],
                            cwd=ROOT, capture_output=True, text=True, timeout=180)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('19 screens drawn', r.stdout)
+        self.assertIn('21 screens drawn', r.stdout)
 
 
 # ---------------------------------------------------------------- mods
@@ -5668,6 +5668,116 @@ class ModsTest(Tmp):
             self.assertNotEqual(with_patch['compile'], plain['compile'])
             self.assertEqual(with_patch['shaders'], plain['shaders'])
             self.assertEqual(list(make_game.mod_code(self.game)), ['Patch/exefs/E0F3CCFAF50065AE.ips'])
+
+
+class GameVersionsTest(Tmp):
+    """Several game versions side by side (launcher/installs.py): each in its own folder with its own saves, and
+    game_dir the selected one's."""
+
+    def settings(self, **kw):
+        return MemorySettings({'game_dir': '', 'installs': [], **kw})
+
+    def test_the_folder_from_before_versions_is_the_1_1_1_install(self):
+        from launcher import installs
+        s = self.settings(game_dir=str(self.tmp / 'game'))
+        self.assertEqual(installs.entries(s), [{'version': '1.1.1', 'dir': str(self.tmp / 'game')}])
+        self.assertEqual(s['installs'], [{'version': '1.1.1', 'dir': str(self.tmp / 'game')}])
+        self.assertEqual(installs.selected_version(s), '1.1.1')
+        self.assertEqual(installs.entries(self.settings()), [])
+
+    def test_adding_a_version_selects_it_and_switching_moves_game_dir(self):
+        from launcher import installs
+        new, base = str(self.tmp / 'game'), str(self.tmp / 'game-1.0.0')
+        s = self.settings(game_dir=new)
+        installs.add(s, '1.0.0', base)
+        self.assertEqual(s['game_dir'], base)
+        self.assertEqual([e['version'] for e in installs.entries(s)], ['1.1.1', '1.0.0'])
+        self.assertTrue(installs.select(s, '1.1.1'))
+        self.assertEqual(s['game_dir'], new)
+        self.assertFalse(installs.select(s, '9.9.9'))
+        self.assertEqual(s['game_dir'], new)
+        installs.forget(s, '1.1.1')
+        self.assertEqual(s['game_dir'], base)
+        self.assertEqual(installs.entries(s), [{'version': '1.0.0', 'dir': base}])
+
+    def test_bad_entries_are_dropped_and_a_version_is_listed_once(self):
+        from launcher import installs
+        s = self.settings(installs=[{'version': '1.1.1', 'dir': 'a'}, {'version': '1.1.1', 'dir': 'b'}, 'junk',
+                                    {'version': 1, 'dir': 'c'}, {'version': '1.0.0', 'dir': ''}])
+        self.assertEqual(installs.entries(s), [{'version': '1.1.1', 'dir': 'a'}])
+
+    def test_a_new_version_goes_beside_the_game_folder(self):
+        from launcher import installs
+        self.assertEqual(installs.default_dir(str(self.tmp / 'OOT-DEBUG-MENU'), '1.0.0'),
+                         str(self.tmp / 'OOT-DEBUG-MENU-1.0.0'))
+
+    def test_the_built_version_comes_from_the_build_state(self):
+        from launcher import installs
+        game = self.tmp / 'game'
+        self.assertEqual(installs.built_game_version(game), '1.1.1')
+        (game / 'build-cache').mkdir(parents=True)
+        (game / 'build-cache' / 'state.json').write_text(json.dumps({'game': '1.0.0'}), encoding='utf-8')
+        self.assertEqual(installs.built_game_version(game), '1.0.0')
+
+    def test_install_args_name_the_version_for_a_nup_only(self):
+        nup_args = build.install_args(self.layout, self.tmp / 'game.nup', self.tmp / 'g', '1.0.0')
+        self.assertEqual(nup_args[:4], ['--nup', str(self.tmp / 'game.nup'), '--game-version', '1.0.0'])
+        self.assertNotIn('--game-version', build.install_args(self.layout, self.tmp / 'game.nup', self.tmp / 'g'))
+        (self.tmp / 'dumpdir').mkdir()
+        self.assertNotIn('--game-version', build.install_args(self.layout, self.tmp / 'dumpdir', self.tmp / 'g',
+                                                              '1.0.0'))
+
+    def test_a_finished_install_becomes_the_selected_version(self):
+        App, a = mock_app(self, self.tmp / 'game')
+        a.settings['installs'] = []
+        j = mock.Mock(game_dir=str(self.tmp / 'game-1.0.0'), game_version='1.0.0', version='1.0.0')
+        App.record_install(a, j)
+        self.assertEqual(a.settings['game_dir'], str(self.tmp / 'game-1.0.0'))
+        self.assertEqual({e['version'] for e in a.settings['installs']}, {'1.1.1', '1.0.0'})
+        App.record_install(a, mock.Mock(game_dir=mock.Mock(), game_version=None, version=None))   # no folder: nothing
+        self.assertEqual(a.settings['game_dir'], str(self.tmp / 'game-1.0.0'))
+
+    def test_the_versions_screen_switches_and_offers_what_the_dump_holds(self):
+        from launcher import installs
+        game = self.tmp / 'game'
+        game.mkdir()
+        App, a = mock_app(self, game)
+        dump = self.tmp / 'game.nup'
+        a.settings.update(installs=[], dump=str(dump))
+        a.dump_versions, a.dump_versions_of = None, None
+        a.find_dump_versions = mock.Mock()
+        a.job = None
+        a.game_proc = None
+        a.tree_window = None
+        a.version_base_dir = lambda: App.version_base_dir(a)
+        a.game_dir = lambda: str(game)
+        # a dump that is no longer there is chosen again, not read
+        rows = App.rows_versions(a)
+        self.assertIn(('Install Another Version', 'Choose a Dump'), [(r.label, r.value) for r in rows])
+        a.find_dump_versions.assert_not_called()
+        # a dump chosen on the screen has its versions read
+        dump.write_bytes(b'')
+        rows = App.rows_versions(a)
+        self.assertIn(('Install Another Version', 'Looking…'), [(r.label, r.value) for r in rows])
+        a.find_dump_versions.assert_called_once_with(str(dump))
+        a.dump_versions = [('1.1.1', True), ('1.0.0', False)]
+        rows = App.rows_versions(a)
+        labels = [(r.label, r.value) for r in rows if r.kind == 'value']
+        self.assertEqual(labels, [('Ocarina of Time 1.1.1', 'Playing'), ('Install 1.0.0', 'Not Supported Yet')])
+        # with 1.0.0 installed too, its row switches to it
+        installs.add(a.settings, '1.0.0', str(self.tmp / 'game-1.0.0'))
+        installs.select(a.settings, '1.1.1')
+        rows = App.rows_versions(a)
+        row = next(r for r in rows if r.label == 'Ocarina of Time 1.0.0')
+        self.assertEqual(row.value, 'Folder Missing')
+        with mock.patch('launcher.ui.app.build.game_running', return_value=False):
+            App.switch_version(a, '1.0.0')
+        self.assertEqual(a.settings['game_dir'], str(self.tmp / 'game-1.0.0'))
+        # not while the game runs
+        with mock.patch('launcher.ui.app.build.game_running', return_value=True):
+            App.switch_version(a, '1.1.1')
+        self.assertEqual(a.settings['game_dir'], str(self.tmp / 'game-1.0.0'))
+        self.assertIn('Quit the game first', a.message)
 
 
 if __name__ == '__main__':

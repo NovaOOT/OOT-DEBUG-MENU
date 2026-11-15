@@ -27,14 +27,14 @@
 #include "debug_tools.h"
 #include "platform/platform.h"
 
-#define ACTOR_CREATE 0x7000372a70ull
-#define ACTOR_TAKE 0x7003aaefd0ull      // handle, 1, 0 -> the actor, now in the world
-#define HANDLE_RELEASE 0x7000b2fbc0ull  // handle: drops a failed creation
+#define ACTOR_CREATE RT_OOT_ADDR(0x7000372a70ull, 0x700097feb0ull)   // 1.1.1, 1.0.0
+#define ACTOR_TAKE RT_OOT_ADDR(0x7003aaefd0ull, 0x7003a4f580ull)      // handle, 1, 0 -> the actor, now in the world
+#define HANDLE_RELEASE RT_OOT_ADDR(0x7000b2fbc0ull, 0x7003a4f550ull)  // handle: drops a failed creation
 #define HANDLE_MADE 3
 #define HANDLE_FAILED 4
 #define SPAWN_WAIT_FRAMES 600
-#define MANAGER_GLOBAL 0x7004c7f3e0ull
-#define DEFAULT_SCALE 0x7004c7e0b8ull   // points to the 12-byte scale the node copies (1, 1, 1)
+#define MANAGER_GLOBAL RT_OOT_ADDR(0x7004c7f3e0ull, 0x7004c19738ull)
+#define DEFAULT_SCALE RT_OOT_ADDR(0x7004c7e0b8ull, 0x7004c18410ull)   // points to the 12-byte scale the node copies (1, 1, 1)
 #define ACTOR_POS 0x31c
 #define ACTOR_AXES 0x2f8
 
@@ -182,15 +182,15 @@ static void preview_frame(void) {
 // the component is idle (SAVE_IDLE returns 1; the node waits otherwise) it then sets a value by name hash on the object at
 // [[SAVE_DATA_GLOBAL]] (SAVE_MARK, value 0) and asks the component to save the slot (0 to 5). The game writes the
 // slot's files through its save worker over the next frames.
-#define ROOT_GLOBAL 0x7004c7e178ull
-#define SAVE_TYPE_KEY 0x7004c7e150ull
-#define SAVE_TYPE_SOURCE 0x7004c7e160ull
-#define SAVE_IDLE 0x7000f8cc10ull       // (save component) -> 1 when no save or load runs
-#define SAVE_DATA_GLOBAL 0x7004c7e180ull
-#define SAVE_MARK 0x7000ba6d10ull       // (data, 0, name hash)
+#define ROOT_GLOBAL RT_OOT_ADDR(0x7004c7e178ull, 0x7004c184d0ull)   // 1.1.1, 1.0.0
+#define SAVE_TYPE_KEY RT_OOT_ADDR(0x7004c7e150ull, 0x7004c184a8ull)
+#define SAVE_TYPE_SOURCE RT_OOT_ADDR(0x7004c7e160ull, 0x7004c184b8ull)
+#define SAVE_IDLE RT_OOT_ADDR(0x7000f8cc10ull, 0x7000f71580ull)       // (save component) -> 1 when no save or load runs
+#define SAVE_DATA_GLOBAL RT_OOT_ADDR(0x7004c7e180ull, 0x7004c184d8ull)
+#define SAVE_MARK RT_OOT_ADDR(0x7000ba6d10ull, 0x7000e59c50ull)       // (data, 0, name hash)
 #define SAVE_MARK_HASH 0x5e776346u
-#define SAVE_TO_SLOT 0x70011d4910ull    // (save component, slot)
-#define SAVE_AUTO 0x7000f8cb80ull       // (save component, 0): an autosave, to the slot the game plays
+#define SAVE_TO_SLOT RT_OOT_ADDR(0x70011d4910ull, 0x700116e290ull)    // (save component, slot)
+#define SAVE_AUTO RT_OOT_ADDR(0x7000f8cb80ull, 0x7000f714f0ull)       // (save component, 0): an autosave, to the slot the game plays
 static atomic_int gsave_slot = -1;
 int dbg_game_save_request(int slot) {
     int none = -1;
@@ -200,18 +200,55 @@ static uint64_t rd64(uint64_t a) {
     uint64_t v = 0;
     return a && plat_mem_read(a, &v, 8) ? v : 0;
 }
-// The game's load of a slot, as its load node does (SeqExecuteLoadSaveData, its action 0x7000d64460): a message to the
-// save system at [[LOAD_TARGET_GLOBAL]] with the slot (LOAD_POST), which reads the slot's save into the game's flags.
-#define LOAD_TARGET_GLOBAL 0x7004c7fcd8ull
-#define LOAD_POST 0x7000d645f0ull       // (save system, slot)
+// The game's load of a slot, as its load node does (SeqExecuteLoadSaveData). Its enter method (1.1.1 main+0x32c1db0,
+// 1.0.0 main+0x3262c40) asks the save component, the one gsave_run finds: unless the component is busy (bit 2 of
+// +0x158) it clears the component's bits 0 and 1 there, sets the request bit 1 << kind (the node's parameter) in the
+// byte at [component+0x148]+0x138 and the slot at [component+0x148]+0x10, six more when bit 0 of +0x151 is set and the
+// byte +0x150 is not 0 (the second copies). In 1.0.0 that is the load: with kind 0 the component's worker reads the
+// slot's progress.sav into the game's flags (kind 2 reads only its caption.sav, what the load screen lists). 1.1.1's
+// update method (0x7000d64460) then also sends a message with the slot to the save system at [[LOAD_TARGET_GLOBAL]]
+// (LOAD_POST), which reads the slot's save into the game's flags; 1.0.0 has neither, and 1.1.1 needs only the message.
+#define LOAD_TARGET_GLOBAL 0x7004c7fcd8ull   // 1.1.1
+#define LOAD_POST 0x7000d645f0ull       // (save system, slot), 1.1.1
+#define LOAD_KIND 0   // 1.0.0: read progress.sav
 static atomic_int gload_slot = -1;
 int dbg_game_load_request(int slot) {
     int none = -1;
     return slot >= 0 && slot < 6 && atomic_compare_exchange_strong(&gload_slot, &none, slot);
 }
+static uint64_t save_component(Cpu *c, const char *who);
+
+static void gload_run_v100(Cpu *c, int slot) {
+    uint64_t comp = save_component(c, "debug load");
+    if (!comp) return;
+    volatile uint32_t *flags = (volatile uint32_t *)(uintptr_t)(comp + 0x158);
+    if (*flags & 4) {
+        rt_log("debug load: the game is busy saving or loading; slot %d not loaded", slot);
+        return;
+    }
+    __atomic_fetch_and(flags, ~3u, __ATOMIC_SEQ_CST);
+    uint64_t data = rd64(comp + 0x148);
+    uint8_t second = 0, has_second = 0;
+    plat_mem_read(comp + 0x150, &second, 1);
+    plat_mem_read(comp + 0x151, &has_second, 1);
+    if (!data) {
+        rt_log("debug load: the save component has no request block");
+        return;
+    }
+    volatile uint8_t *req = (volatile uint8_t *)(uintptr_t)(data + 0x138);
+    *req |= 1u << LOAD_KIND;
+    uint32_t at = (uint32_t)slot + ((has_second & 1) && second ? 6 : 0);
+    memcpy((void *)(uintptr_t)(data + 0x10), &at, 4);
+    rt_log("debug load: slot %d requested (save component %#llx)", slot, (unsigned long long)comp);
+}
+
 static void gload_run(Cpu *c) {
     int slot = atomic_exchange(&gload_slot, -1);
     if (slot < 0) return;
+    if (RT_V100) {
+        gload_run_v100(c, slot);
+        return;
+    }
     uint64_t sys = 0, var = 0;
     if (!plat_mem_read(LOAD_TARGET_GLOBAL, &var, 8) || !var || !plat_mem_read(var, &sys, 8) || !sys) {
         rt_log("debug load: no save system");
@@ -222,17 +259,16 @@ static void gload_run(Cpu *c) {
     rt_log("debug load: slot %d requested (save system %#llx)", slot, (unsigned long long)sys);
 }
 
-static void gsave_run(Cpu *c) {
-    int slot = atomic_exchange(&gsave_slot, -1);
-    if (slot < 0) return;
+// The save component, found as the save and load nodes find it (the comment above gsave_run); 0 with a line in the log.
+static uint64_t save_component(Cpu *c, const char *who) {
     uint64_t root = rd64(rd64(ROOT_GLOBAL)), arr = rd64(root + 0x1f0), key = rd64(SAVE_TYPE_KEY);
     uint32_t n = 0;
     uint64_t holder = arr && plat_mem_read(arr + 0x50, &n, 4) && n >= 13 ? rd64(rd64(arr + 0x58) + 0x60) : 0;
-    uint64_t get = rd64(rd64(holder)), data = rd64(rd64(SAVE_DATA_GLOBAL));
-    if (!holder || !get || !key || !data) {
-        rt_log("debug save: the save component is not there (root %#llx, holder %#llx, key %#llx)",
+    uint64_t get = rd64(rd64(holder));
+    if (!holder || !get || !key) {
+        rt_log("%s: the save component is not there (root %#llx, holder %#llx, key %#llx)", who,
                (unsigned long long)root, (unsigned long long)holder, (unsigned long long)key);
-        return;
+        return 0;
     }
     uint64_t tv = 0;
     if (plat_mem_read(key, &tv, 8) && !tv) {   // the game sets it the same way on its first use
@@ -241,8 +277,17 @@ static void gsave_run(Cpu *c) {
     }
     uint64_t a[8] = {holder, key};
     uint64_t comp = dbg_frame_call(c, get, a);
-    if (!comp) {
-        rt_log("debug save: no save component");
+    if (!comp) rt_log("%s: no save component", who);
+    return comp;
+}
+
+static void gsave_run(Cpu *c) {
+    int slot = atomic_exchange(&gsave_slot, -1);
+    if (slot < 0) return;
+    uint64_t comp = save_component(c, "debug save"), data = rd64(rd64(SAVE_DATA_GLOBAL));
+    if (!comp) return;
+    if (!data) {
+        rt_log("debug save: no save data object");
         return;
     }
     uint64_t i[8] = {comp};

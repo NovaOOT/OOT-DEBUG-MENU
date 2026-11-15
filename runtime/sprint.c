@@ -36,7 +36,7 @@ static const uint64_t button_bits[] = {0, 1u << 1, 1u << 4};   // HidNpadButton 
 #define BUTTON_ZL (1u << 8)
 
 #define DASH_INPUT 0x10u
-#define LINK_VTABLE 0x4b4dfc0ull   // main offset: Link's actor class
+#define LINK_VTABLE RT_OOT_ADDR(0x4b4dfc0ull, 0x4ae8fb8ull)   // main offset: Link's actor class (1.1.1, 1.0.0)
 #define GAMEPLAY_POLLS 8           // the button is kept from the game while Link's update ran within this many polls
 // Standing still this long ends a toggled sprint that has moved, or this long after a press while standing, which has
 // not moved yet. In 60 Hz frames: above 60 fps Link updates once a rendered frame, each step frame_step_frames() of
@@ -88,13 +88,14 @@ static int32_t ld32(uint64_t a) { return a && mem_readable(a, 4) ? *(const int32
 
 // 1 when x19 is the Link the player controls. Link's class has one more instance the player does not control: the
 // game's actor manager ([[main+0x4c7e0d0]], class main+0x4bdfe68) names the controlled one at +0x470 (class
-// main+0x4b49698), whose +0x18 must be Link's own +0x18.
+// main+0x4b49698), whose +0x18 must be Link's own +0x18. 1.0.0: [[main+0x4c18428]], classes main+0x4b7aa20 and
+// main+0x4ae4690.
 static int is_link(uint64_t link) {
     if (!link || ld64(link) != MOD_MAIN_BASE + LINK_VTABLE) return 0;
-    uint64_t slot = ld64(MOD_MAIN_BASE + 0x4c7e0d0), mgr = slot ? ld64(slot) : 0;
-    if (!mgr || ld64(mgr) != MOD_MAIN_BASE + 0x4bdfe68) return 1;
+    uint64_t slot = ld64(MOD_MAIN_BASE + RT_OOT_ADDR(0x4c7e0d0, 0x4c18428)), mgr = slot ? ld64(slot) : 0;
+    if (!mgr || ld64(mgr) != MOD_MAIN_BASE + RT_OOT_ADDR(0x4bdfe68, 0x4b7aa20)) return 1;
     uint64_t ctl = ld64(mgr + 0x470);
-    if (!ctl || ld64(ctl) != MOD_MAIN_BASE + 0x4b49698) return 1;
+    if (!ctl || ld64(ctl) != MOD_MAIN_BASE + RT_OOT_ADDR(0x4b49698, 0x4ae4690)) return 1;
     return ld64(ctl + 0x18) == ld64(link + 0x18);
 }
 
@@ -193,7 +194,7 @@ static void sprint_stance(Cpu *c) {
 
 #ifdef RT_PATCH_PAGE
 __attribute__((constructor)) static void sprint_register(void) {
-    if (!RT_V111) return;   // the set's sites are in 1.1.1's main only
+    if (!RT_OOT) return;   // the set's sites are in Ocarina's main only
     rt_register_host(RT_PATCH_PAGE + 0xf40, sprint_link);
     rt_register_host(RT_PATCH_PAGE + 0xf30, sprint_stance);
 }

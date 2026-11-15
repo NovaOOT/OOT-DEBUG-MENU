@@ -3,11 +3,11 @@
 // The boot driver: the guest main thread runs the game's own nn::init::Start
 // with three host callbacks, the second of which runs DT_INIT of main, subsdk0 and sdk; Start then calls nnMain.
 // --boot checks two checkpoints on the way and ends at the first nvnBootstrapLoader call, at the return address of
-// each in main (1.1.1; 1.1.0, 1.2.1, 1.4.3 in brackets):
-//   SetFocusHandlingMode   main+0x1202d44 (+0xeb8c14, +0xe7a954, +0xbdb48c) in nnMain, every module's constructor
+// each in main (1.1.1; 1.0.0, 1.1.0, 1.2.1, 1.4.3 in brackets):
+//   SetFocusHandlingMode   main+0x1202d44 (+0x11c2024, +0xeb8c14, +0xe7a954, +0xbdb48c) in nnMain, every module's constructor
 //                          flag reads 2. 1.1.1's SDK calls it first, from nn::oe::InitializeApplet before DT_INIT; a
 //                          call from outside main is not the checkpoint.
-//   nvnBootstrapLoader     main+0x346bf8c (+0xebcdec, +0xe7eb2c, +0xbe0360) in the graphics bring-up; logs the run
+//   nvnBootstrapLoader     main+0x346bf8c (+0x340b31c, +0xebcdec, +0xe7eb2c, +0xbe0360) in the graphics bring-up; logs the run
 //                          statistics, exits 0
 // With --seconds S the run continues past that call; rt_frame_presented ends it once the world clock passed S.
 #include <stdio.h>
@@ -32,18 +32,22 @@
 #define SYM_INIT_START "_ZN2nn4init5StartEmmPFvvES2_S2_"
 // main: return addresses of nnMain's SetFocusHandlingMode call and of the first nvnBootstrapLoader call, per game
 // version (from the analysis of each build's main; 1.1.1's are the x30 both host functions see in a normal start).
-#define CHECKPOINT_RET (RT_V111 ? 0x1202d44ull : RT_V143 ? 0xbdb48cull : RT_V110 ? 0xeb8c14ull : 0xe7a954ull)
-#define NVN_RET (RT_V111 ? 0x346bf8cull : RT_V143 ? 0xbe0360ull : RT_V110 ? 0xebcdecull : 0xe7eb2cull)
+#define CHECKPOINT_RET \
+    (RT_V111 ? 0x1202d44ull : RT_V100 ? 0x11c2024ull : RT_V143 ? 0xbdb48cull : RT_V110 ? 0xeb8c14ull : 0xe7a954ull)
+#define NVN_RET \
+    (RT_V111 ? 0x346bf8cull : RT_V100 ? 0x340b31cull : RT_V143 ? 0xbe0360ull : RT_V110 ? 0xebcdecull : 0xe7eb2cull)
 #define CTOR_DONE 2                      // a module's constructor flag after its DT_INIT ran the init_array
 
-// The init_array sizes (1.1.0 and 1.2.1: counted in the modules; 1.1.1 and 1.4.3: DT_INIT_ARRAYSZ).
+// The init_array sizes (1.1.0 and 1.2.1: counted in the modules; 1.0.0, 1.1.1 and 1.4.3: DT_INIT_ARRAYSZ).
 // The four tables carry the same rows, so cb_module_inits walks them by the size of one.
 typedef struct { const char *name; uint64_t entries; } InitCount;
 static const InitCount inits_110[] = {{"main", 10668}, {"subsdk0", 45}, {"sdk", 116}};
 static const InitCount inits_111[] = {{"main", 9783}, {"subsdk0", 0}, {"sdk", 96}};
+static const InitCount inits_100[] = {{"main", 9738}, {"subsdk0", 0}, {"sdk", 96}};
 static const InitCount inits_121[] = {{"main", 10673}, {"subsdk0", 45}, {"sdk", 116}};
 static const InitCount inits_143[] = {{"main", 10717}, {"subsdk0", 45}, {"sdk", 83}};
-#define expected_inits (RT_V111 ? inits_111 : RT_V143 ? inits_143 : RT_V110 ? inits_110 : inits_121)
+#define expected_inits \
+    (RT_V111 ? inits_111 : RT_V100 ? inits_100 : RT_V143 ? inits_143 : RT_V110 ? inits_110 : inits_121)
 
 static volatile int32_t inits_done, checkpoint_seen;
 uint64_t rt_guest_start_ns;

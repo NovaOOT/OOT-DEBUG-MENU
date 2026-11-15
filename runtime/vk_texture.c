@@ -4928,6 +4928,27 @@ static Tex *slot_resolve(TexSlot *s, view_t *view, int *has_view) {
             *has_view = 1;
         }
     }
+    // A descriptor of raw 32-bit words over another 4-byte image: its own format as the view's, which a storage binding
+    // writes through (vk_exec_draw.c storage_view_format) and the shader translation declares (format_of_handle). Ocarina
+    // 1.0.0's SMAA composition packs its picture into RGB9E5 words and writes them through an RGB9E5 or R32UI
+    // descriptor of the R11G11B10F scene target, where 1.1.1 sets an R32UI view on it (nvnTextureViewSetFormat). The
+    // descriptor's format followed the image's instead: the store converted each packed word as a float into the red
+    // channel and the whole scene was red.
+    uint32_t df = s->t.d.format;
+    if (e && (df == NVN_FORMAT_R32UI || df == NVN_FORMAT_RGB9E5F) && e->key.d.format != df &&
+        !(*has_view && view->set_format)) {
+        int bw, bh;
+        if (nvn_fmt_bpb(e->key.d.format, &bw, &bh) == 4 && bw == 1 && bh == 1) {
+            static int told;
+            if (!told++)
+                rt_log("vk: texture slot of format %#x over a %ux%u image of format %#x: an R32UI view, as raw words",
+                       df, e->pub.width, e->pub.height, e->key.d.format);
+            if (!*has_view) memset(view, 0, sizeof *view);
+            view->format = NVN_FORMAT_R32UI;
+            view->set_format = 1;
+            *has_view = 1;
+        }
+    }
     return e;
 }
 

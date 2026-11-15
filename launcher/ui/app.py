@@ -37,7 +37,7 @@ import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import filedialog
 
-from .. import NAME, build, feed, gameini, gamefiles, jobs, locks, mods, saves, steam, versions, winsys
+from .. import NAME, build, feed, gameini, gamefiles, installs, jobs, locks, mods, saves, steam, versions, winsys
 from ..context import Context
 from ..paths import long_path_problem
 from . import art, picture, sound
@@ -54,7 +54,7 @@ DESC = (614, 336)               # x, width
 P = art.PALETTE                 # the colour scheme in use: art.set_theme changes it in place
 FRAME_MS = 15                   # between two steps of the animations; they move by the time that really passed
 SPARKS = 22                     # the dust drifting over the backdrop
-DEPTH = {'first_run': 0, 'home': 0, 'job': 1, 'saves': 1, 'settings': 1, 'customize': 1, 'uninstall': 2,
+DEPTH = {'first_run': 0, 'home': 0, 'job': 1, 'saves': 1, 'settings': 1, 'customize': 1, 'uninstall': 2, 'versions': 1,
          'color': 2, 'mods': 1, 'mod_order': 2}
 MODS_PAGE = 7     # mods on a page of the Mods screen, beside its other rows
 ORDER_PAGE = 10   # ... of the Load Order screen
@@ -254,6 +254,10 @@ class App:
         self.look_after = None   # the redraw a picked colour waits for (look_soon)
         self.dumps = None
         self.dump_search = None
+        self.dump_versions = None   # the game versions the dump holds, [(version, buildable)] (find_dump_versions)
+        self.dump_versions_of = ''  # the dump they were read from
+        if self.settings.get('installs') != installs.entries(self.settings):   # the folder from before versions
+            self.settings.save()
         self.uninstall_game = False
         self.game_proc = None
         self.tree_window = None    # the Save Tree window (ui/savetree.py) while it is open
@@ -629,7 +633,8 @@ class App:
         return next((i for i, r in enumerate(self.rows_home()) if r.label == label), None)
 
     def back(self):
-        if self.screen in ('settings', 'uninstall', 'saves', 'customize', 'job', 'color', 'mods', 'mod_order'):
+        if self.screen in ('settings', 'uninstall', 'saves', 'customize', 'job', 'color', 'mods', 'mod_order',
+                           'versions'):
             self.sounds.play('back')
         if self.screen == 'color':
             self.pick_done()
@@ -641,6 +646,8 @@ class App:
             self.show('home', self.home_row('Saves'))
         elif self.screen == 'mods':
             self.show('home', self.home_row('Mods'))
+        elif self.screen == 'versions':
+            self.show('home', self.home_row('Game Version'))
         elif self.screen == 'mod_order':
             self.show('mods', self.mods_back_focus())
         elif self.screen == 'customize':
@@ -1058,6 +1065,7 @@ class App:
             Row('value', 'Play', play_value, big=True, icon='play', on=self.play, desc=play_desc),
             upd,
             Row('divider'),
+            self.version_row(),
             Row('value', 'Game Folder', gd, on=lambda: self.open(gd),
                 desc=('Open the game folder. The game keeps your save in its profile folder, its settings in '
                       'nx2navi.ini and its logs in logs. Its saves folder holds backups and the save tree, and saves '
@@ -1079,6 +1087,168 @@ class App:
             Row('value', 'Settings', '', 'arrow', on=lambda: self.show('settings'),
                 desc=('Updates, the game folder, the logs and uninstalling.',)),
         ]
+
+    # ---- game versions (launcher/installs.py): each in its own folder, with its own saves
+
+    def version_row(self):
+        listed = installs.entries(self.settings)
+        sel = installs.selected_version(self.settings)
+        others = [e['version'] for e in listed if e['version'] != sel]
+        desc = (f'You are playing Ocarina of Time {sel}. Select this row to switch to another version of the game, '
+                'or to install one more from your dump.',
+                'Each version is a game of its own in its own folder: its own saves, settings, mods and save tree.')
+        if others:
+            desc += (f'Also installed: {", ".join(others)}.',)
+        return Row('value', 'Game Version', sel, 'arrow', on=self.open_versions, desc=desc)
+
+    def open_versions(self):
+        dump = self.settings.get('dump')
+        if dump != self.dump_versions_of:
+            self.dump_versions, self.dump_versions_of = None, dump
+            self.find_dump_versions(dump)
+        self.show('versions')
+
+    def find_dump_versions(self, dump):
+        """Reads the game versions the dump holds on a thread (make_game.py --versions reads each main's head)."""
+        import threading
+
+        def work():
+            try:
+                found = build.dump_versions(self.layout, dump) if dump else []
+            except Exception as e:   # noqa: BLE001 - the list stays empty, the screen says so
+                self.ctx.log(f'dump versions: {e}')
+                found = []
+            self.root.after(0, lambda: self.dump_versions_found(dump, found))
+        threading.Thread(target=work, daemon=True).start()
+
+    def dump_versions_found(self, dump, found):
+        if dump != self.dump_versions_of:
+            return
+        self.dump_versions = found
+        if self.screen == 'versions':
+            self.show('versions', self.focus)
+
+    def rows_versions(self):
+        listed = installs.entries(self.settings)
+        sel = installs.selected(self.settings)
+        rows = []
+        for e in listed:
+            v, d = e['version'], e['dir']
+            here = bool(sel) and sel['version'] == v
+            if not Path(d).is_dir():
+                value, style = 'Folder Missing', 'salmon'
+            elif here:
+                value, style = 'Playing', 'normal'
+            else:
+                value, style = 'Switch', 'arrow'
+            built = build.built_version(d)
+            desc = (f'Ocarina of Time {v}, in {d}.',
+                    'Its saves, settings and mods are its own: switching versions never touches the other one\'s.')
+            if here:
+                desc += ('This is the version Play, Saves, Mods and the Save Tree act on now.',)
+            else:
+                desc += ('Select this row to play this version instead.',)
+            if built and versions.display(built) != versions.display(self.layout.version):
+                desc += (f'It was built with {versions.display(built)}: after switching, Rebuild the Game brings it '
+                         f'to {versions.display(self.layout.version)}.',)
+            rows.append(Row('value', f'Ocarina of Time {v}', value, style, check=here,
+                            on=(lambda v=v: self.switch_version(v)), desc=desc))
+        rows.append(Row('divider'))
+        have = {e['version'] for e in listed}
+        dump = self.settings.get('dump')
+        if not dump or not Path(dump).is_file():
+            # a dump moved or renamed since the first install is chosen again here, not read as holding nothing
+            rows.append(Row('value', 'Install Another Version', 'Choose a Dump', 'arrow', on=self.choose_dump,
+                            desc=('Choose your .nup dump first: the versions it holds can then be installed.',)
+                            if not dump else
+                            (f'{Path(dump).name} is no longer where it was. Choose your .nup dump again: the '
+                             'versions it holds can then be installed.',)))
+        elif dump != self.dump_versions_of:   # a dump chosen on this screen: read its versions
+            self.dump_versions, self.dump_versions_of = None, dump
+            self.find_dump_versions(dump)
+            rows.append(Row('value', 'Install Another Version', 'Looking…', 'dim', on=lambda: None,
+                            desc=(f'Reading which versions of the game {Path(dump).name} holds.',)))
+        elif self.dump_versions is None:
+            rows.append(Row('value', 'Install Another Version', 'Looking…', 'dim', on=lambda: None,
+                            desc=(f'Reading which versions of the game {Path(dump).name} holds.',)))
+        else:
+            more = [(v, ok) for v, ok in self.dump_versions if v not in have]
+            for v, ok in more:
+                where = installs.default_dir(self.version_base_dir(), v)
+                if ok:
+                    rows.append(Row('value', f'Install {v}', 'Install', 'orange_arrow',
+                                    on=(lambda v=v: self.install_version(v)),
+                                    desc=(f'Build Ocarina of Time {v} from your dump into {where}, beside the game '
+                                          'you have. It gets its own saves; your other version stays as it is.',
+                                          'It takes as long and as much space (about 34 GB) as the first install.')))
+                else:
+                    rows.append(Row('value', f'Install {v}', 'Not Supported Yet', 'dim', on=lambda: None,
+                                    desc=(f'Your dump holds Ocarina of Time {v}, but OOT-DEBUG-MENU cannot build it '
+                                          'yet: the port to this version is still being made.',)))
+            if not more:
+                found = ', '.join(v for v, _ in self.dump_versions) or 'no version this launcher knows'
+                rows.append(Row('value', 'Install Another Version', 'All Installed' if self.dump_versions else
+                                'None Found', 'dim', on=lambda: None,
+                                desc=(f'{Path(dump).name} holds {found}; each one it holds is installed.'
+                                      if self.dump_versions else
+                                      f'{Path(dump).name} holds no other version of the game that can be built.',)))
+        rows.append(Row('action', 'Back', on=lambda: self.show('home', self.home_row('Game Version')), height=40,
+                        desc=('Back to the main menu.',)))
+        return rows
+
+    def record_install(self, j):
+        """A finished install becomes its version's entry and the selected game: the version make_game.py's check
+        found, else the one asked for, else 1.1.1 (the only version a build before versions made)."""
+        gd = getattr(j, 'game_dir', None)
+        if not isinstance(gd, str) or not gd:
+            return
+        version = next((v for v in (getattr(j, 'game_version', None), getattr(j, 'version', None))
+                        if isinstance(v, str) and v), installs.DEFAULT_VERSION)
+        installs.add(self.settings, version, gd)
+
+    def version_base_dir(self):
+        """The folder a new version's folder is named after: the 1.1.1 install's, else the selected one's."""
+        e = installs.find(self.settings, installs.DEFAULT_VERSION)
+        return e['dir'] if e else self.game_dir()
+
+    def switch_version(self, version):
+        sel = installs.selected(self.settings)
+        if sel and sel['version'] == version:
+            self.show('home', self.home_row('Play'))
+            return
+        gd = self.settings.get('game_dir')
+        if self.job and self.job.result is None:
+            self.message = 'Wait until the current job has finished, then switch.'
+        elif self.game_proc is not None and self.game_proc.poll() is None or (gd and build.game_running(gd)):
+            self.message = 'Quit the game first: then switch to another version.'
+        elif self.tree_window is not None:
+            self.message = 'Close the Save Tree window first: it shows the saves of the version you play now.'
+        elif not installs.select(self.settings, version):
+            self.message = f'Ocarina of Time {version} is not installed.'
+        else:
+            self.message = f'Switched to Ocarina of Time {version}: its own saves, settings and mods.'
+            self.show('home', self.home_row('Play'))
+            return
+        self.show('versions', self.focus)
+
+    def install_version(self, version):
+        dump = self.settings.get('dump')
+        if self.job and self.job.result is None:
+            self.message = 'Wait until the current job has finished.'
+            self.show('versions', self.focus)
+            return
+        gd = installs.default_dir(self.version_base_dir(), version)
+        too_long = long_path_problem(gd)
+        if too_long:
+            self.message = App.friendly(too_long)
+            self.show('versions', self.focus)
+            return
+        drop_partial_image(gd)
+        if free_gb(gd) < 34 and not (Path(gd) / 'romfs' / 'romfs.bin').is_file():
+            self.message = f'{drive_of(gd)} has {free_gb(gd):.0f} GB free; another version needs about 34 GB.'
+            self.show('versions', self.focus)
+            return
+        self.run_job(jobs.InstallJob(self.ctx, dump, gd, version), 'home', back='versions')
 
     # ---- customize
 
@@ -2208,7 +2378,7 @@ class App:
     def retry_job(self):
         j = self.job
         if isinstance(j, jobs.InstallJob):
-            self.run_job(jobs.InstallJob(self.ctx, j.dump, j.game_dir), self.job_return, self.job_back)
+            self.run_job(jobs.InstallJob(self.ctx, j.dump, j.game_dir, j.version), self.job_return, self.job_back)
         elif isinstance(j, jobs.ContinueUpdateJob):
             self.run_job(jobs.ContinueUpdateJob(self.ctx, j.game_dir, j.old, j.dump), self.job_return)
         elif isinstance(j, jobs.RebuildJob):
@@ -2242,6 +2412,8 @@ class App:
         if j.result in ('ok', 'failed'):
             self.sounds.play('select' if j.result == 'ok' else 'back')
         if j.result == 'ok':
+            if j.kind == 'install':   # first, as what follows acts on the selected game folder, now this one
+                self.record_install(j)
             if j.after == 'restart':
                 if winsys.restart(self.layout, ['--continue-update', versions.display(self.layout.version)]):
                     self.root.after(200, self.root.destroy)

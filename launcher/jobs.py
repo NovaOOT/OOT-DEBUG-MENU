@@ -147,6 +147,7 @@ class Job:
         self.finished = None
         self.after = None           # what the window does next ('restart', ...)
         self.note = ''              # a sentence for the home screen after the job (note_scan)
+        self.game_version = ''      # the game version make_game.py's check found ('check' event)
         # Held for every change of a step and of rev, and by a reader that wants the steps as one change left them
         # (locked). The worker, the thread that reads the build's output and the window's thread (cancel) all change
         # the job. Reentrant: progress() begins a step, and every change ends in _touch().
@@ -414,7 +415,7 @@ class Job:
                     self.begin(sid)
                 elif st == 'done':
                     if sid == 'check':
-                        self.finish(sid, 'Version 1.1.1')
+                        self.finish(sid, f'Version {self.game_version or "1.1.1"}')
                     elif link_step and sid in ('compile', 'compile_changed'):
                         self.finish(sid)
                         self.finish(link_step)
@@ -443,6 +444,8 @@ class Job:
                     self.progress(sid or 'compile', 0.99, 'Linking')
             elif kind == 'error':
                 self.error = ev.get('message', '')
+            elif kind == 'check' and isinstance(ev.get('version'), str):
+                self.game_version = ev['version']
 
         # Cancel pressed before the build started (while the tools were checked) found no process to stop: it stops
         # here, and one pressed while the process starts stops it at once
@@ -466,10 +469,11 @@ class InstallJob(Job):
     claims = ('game',)
     task = 'the installation of the game'
 
-    def __init__(self, ctx, dump, game_dir):
+    def __init__(self, ctx, dump, game_dir, version=None):
+        """version: the game version to build from the dump (launcher/installs.py); None builds the default, 1.1.1."""
         super().__init__(ctx, ['tools', 'check', 'exefs', 'romfs', 'lift', 'compile', 'shaders', *prompt_rows(ctx),
                                'scan', 'ready'])
-        self.dump, self.game_dir = str(dump), str(game_dir)
+        self.dump, self.game_dir, self.version = str(dump), str(game_dir), version
 
     def args(self):
         """make_game.py's arguments. A game folder whose game files an earlier run already unpacked and checked
@@ -478,7 +482,7 @@ class InstallJob(Job):
         was moved or deleted since, and the 26 GB image is not packed a second time."""
         if build.can_rebuild(self.game_dir) and build.unpacked(self.game_dir):
             return build.rebuild_args(self.ctx.layout, self.game_dir, retune=True)
-        return build.install_args(self.ctx.layout, self.dump, self.game_dir)
+        return build.install_args(self.ctx.layout, self.dump, self.game_dir, self.version)
 
     def run(self):
         too_long = paths.long_path_problem(self.game_dir)   # the window asks first (begin_install); the command line here

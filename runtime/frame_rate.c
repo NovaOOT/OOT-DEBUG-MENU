@@ -367,14 +367,19 @@ static uint64_t read_ptr(uint64_t a) {
 // The 1.1.0 slot was measured from its own dereference chain: 181 scene accesses in that build
 // read it, and one of them reproduces this walk (the 14-component check, component 13, the 0x70 stride and the name
 // compare) instruction for instruction.
+// Ocarina's main offsets (1.1.1, 1.0.0): the player manager's slot, the time manager's slot and the engine's global step.
+#define OOT_PLAYER_MANAGER RT_OOT_ADDR(0x4e371d0, 0x4dc7210)
+#define OOT_TIME_MANAGER RT_OOT_ADDR(0x4c7e890, 0x4c18be8)
+#define OOT_GLOBAL_STEP RT_OOT_ADDR(0x4d41fc8, 0x4cd20e8)
+
 static int player_name(uint64_t name) {
     char text[7];
     return name && read_guest(name, text, 7) && !memcmp(text, "Player", 7);
 }
 
 static int player_pos(float xyz[3]) {
-    if (RT_V111) {
-        uint64_t manager = read_ptr(MOD_MAIN_BASE + 0x4e371d0), actor = manager ? read_ptr(manager + 0x480) : 0;
+    if (RT_OOT) {
+        uint64_t manager = read_ptr(MOD_MAIN_BASE + OOT_PLAYER_MANAGER), actor = manager ? read_ptr(manager + 0x480) : 0;
         return actor && player_name(read_ptr(actor + 0x20)) && read_guest(actor + 0x31c, xyz, 12) && isfinite(xyz[0]) &&
                isfinite(xyz[2]);
     }
@@ -393,11 +398,11 @@ static int player_pos(float xyz[3]) {
     return 0;
 }
 
-// Ocarina 1.1.1's time manager, **[main+0x4c7e890]: +0x1c0 the frame's base step in 60 Hz frames, +0x10 the game
+// Ocarina 1.1.1's time manager, **[main+0x4c7e890] (1.0.0: main+0x4c18be8): +0x1c0 the frame's base step in 60 Hz frames, +0x10 the game
 // speed (main+0x2c84c makes each time category's {frames, 1/frames, seconds, 1/seconds} from them and the category's
 // factor). Read by the speed lines of a free-running build: the game seconds a frame stepped, or -1.
 static double ocarina_step_s(void) {
-    uint64_t slot = read_ptr(MOD_MAIN_BASE + 0x4c7e890), mgr = slot ? read_ptr(slot) : 0;
+    uint64_t slot = read_ptr(MOD_MAIN_BASE + OOT_TIME_MANAGER), mgr = slot ? read_ptr(slot) : 0;
     float base = 0, speed = 0;
     if (!mgr || !read_guest(mgr + 0x1c0, &base, 4) || !read_guest(mgr + 0x10, &speed, 4) || !isfinite(base) || !isfinite(speed))
         return -1;
@@ -689,7 +694,7 @@ static int sound_gate_take(SoundGate *g, uint32_t phase, float step) {
 
 // The step the job's phase 0 loads (1 when the time manager is not there: the gate then lets the phase run).
 static float sound_job_step(void) {
-    uint64_t slot = read_ptr(MOD_MAIN_BASE + 0x4c7e890), mgr = slot ? read_ptr(slot) : 0;
+    uint64_t slot = read_ptr(MOD_MAIN_BASE + OOT_TIME_MANAGER), mgr = slot ? read_ptr(slot) : 0;
     float step = 1.0f;
     if (mgr && !read_guest(mgr + 0x10, &step, 4)) step = 1.0f;
     return step;
@@ -756,7 +761,7 @@ static void ocarina_step_write(double dt) {
         ostep_last = f;
         return;
     }
-    uint64_t slot = read_ptr(MOD_MAIN_BASE + 0x4c7e890), mgr = slot ? read_ptr(slot) : 0;
+    uint64_t slot = read_ptr(MOD_MAIN_BASE + OOT_TIME_MANAGER), mgr = slot ? read_ptr(slot) : 0;
     if (!mgr || !mem_host_readable(mgr + 0x1c0, 4)) return;
     _Atomic uint32_t *word = (_Atomic uint32_t *)(uintptr_t)(mgr + 0x1c0);
     uint32_t now_bits = atomic_load_explicit(word, memory_order_relaxed);
@@ -782,7 +787,7 @@ static void time_dump(void) {
     const char *e = cfg_get("NX2NAVI_TIME_DUMP");
     if (done || !e || strcmp(e, "1") || !rt_guest_start_ns || kern_now_ns() - rt_guest_start_ns < 30000000000ull) return;
     done = 1;
-    uint64_t slot = read_ptr(MOD_MAIN_BASE + 0x4c7e890), mgr = slot ? read_ptr(slot) : 0;
+    uint64_t slot = read_ptr(MOD_MAIN_BASE + OOT_TIME_MANAGER), mgr = slot ? read_ptr(slot) : 0;
     uint32_t w[160];
     if (!mgr || !read_guest(mgr, w, sizeof w)) return;
     for (int i = 0; i < 160; i += 8) {
@@ -821,8 +826,8 @@ static void speed_report(uint64_t now, double step, int interval) {
         memcpy(last_pos, p, sizeof p);
         last_pos_ns = now;
     }
-    float global_step;   // Ocarina 1.1.1: the engine's global step (patches-v111.txt, the set ostep's second site)
-    if (probe && ostep_page && read_guest(MOD_MAIN_BASE + 0x4d41fc8, &global_step, 4)) {
+    float global_step;   // Ocarina: the engine's global step (patches-v111.txt, the set ostep's second site)
+    if (probe && ostep_page && read_guest(MOD_MAIN_BASE + OOT_GLOBAL_STEP, &global_step, 4)) {
         size_t o = strlen(pos);
         snprintf(pos + o, sizeof pos - o, "; global step %.3f frames", (double)global_step);
     }
@@ -1000,7 +1005,7 @@ static void floor_probe(void) {
         // the time manager **[main+0x4c7e890] the game steps by: +0x1c0 the base step and +0x10 the game speed in 60 Hz
         // frames, and the first two time categories (+0x20 and +0x50: frames, 1 / frames, seconds, 1 / seconds, as
         // main+0x2c84c makes them), so a line shows whether what the physics reads matches the step
-        uint64_t tslot = direct_ptr(MOD_MAIN_BASE + 0x4c7e890), tm = tslot ? direct_ptr(tslot) : 0;
+        uint64_t tslot = direct_ptr(MOD_MAIN_BASE + OOT_TIME_MANAGER), tm = tslot ? direct_ptr(tslot) : 0;
         float tb[2] = {0}, tc[8] = {0};
         if (tm && direct_read(tm + 0x1c0, &tb[0], 4) && direct_read(tm + 0x10, &tb[1], 4) &&
             direct_read(tm + 0x20, tc, 16) && direct_read(tm + 0x50, tc + 4, 16) && o > 0 && o < (int)sizeof line)

@@ -4409,7 +4409,7 @@ static int hide_meshes_now(void) {
     static volatile int on;
     unsigned v = cfg_version();
     if (v != seen)
-        on = cfg_bool("NX2NAVI_DEBUG_HIDE_MESHES") ? (cfg_bool("NX2NAVI_DEBUG_HIDE_PLAYER") || !RT_V111 ? 1 : 2) : 0,
+        on = cfg_bool("NX2NAVI_DEBUG_HIDE_MESHES") ? (cfg_bool("NX2NAVI_DEBUG_HIDE_PLAYER") || !RT_OOT ? 1 : 2) : 0,
         seen = v;
     return on;
 }
@@ -5207,7 +5207,7 @@ static PlatMutex mo_lock = PLAT_MUTEX_INIT;
 
 static void mvobj_draw(VkExec *ex, const p_draw_idx *d, VkBuffer ib, VkDeviceSize ib_off) {
     if (MO.failed || !ex->dc->B.st_valid) return;
-    if (RT_V111) {
+    if (RT_OOT) {
         // the upscaler, or frame generation without one (vk_dlaa_fg_only), takes the motion
         if (!(vk_dlaa_available() || vk_dlaa_fg_only()) || (!pose_enabled() && !skin_enabled())) return;
     } else if (!vk_mvprev_on()) return;
@@ -5399,10 +5399,10 @@ static int mvobj_pick(VkExec *ex, const p_draw_idx *d, const GfxShader **vs_out,
     // solid geometry only, which tests and writes the scene depth: effects, particles and screen quads write none, and
     // drawn again they would put their motion on the surfaces behind them (DLSS takes those from the surface)
     if (!cx->B.st.ds.dt) return 0;
-    if (!cx->B.st.ds.dw && !(RT_V111 && cx->B.st.ds.df == NVN_DEPTH_FUNC_EQUAL && ex->color[0].image &&
+    if (!cx->B.st.ds.dw && !(RT_OOT && cx->B.st.ds.df == NVN_DEPTH_FUNC_EQUAL && ex->color[0].image &&
                          (vk_pipeline_target_wmask(&cx->B.st, 0) & 7))) return 0;
     // An opaque colour pass can use EQUAL against a depth prepass. Its geometry is already in the scene depth.
-    if (RT_V111) {
+    if (RT_OOT) {
         VkViewport v = base_viewport(ex);
         if (ex->ubo[0][0].size != 0x3500 || d->instances > 1 || d->base_instance || cx->B.st.color.blend_en || cx->B.st.ds.st ||
             ex->pass_layers != 1 || z->level || z->base_layer || z->layers != 1 ||
@@ -5444,7 +5444,7 @@ static int mvobj_pick(VkExec *ex, const p_draw_idx *d, const GfxShader **vs_out,
         uint32_t extra = gfx_shader_outputs(v, io) & ~gfx_shader_outputs(cx->B.st.vs, io);
         uint32_t banks = extra ? gfx_shader_mvprev_banks(v) & 0x1fff8u : 0;
         vmemo[vi].of = cx->B.st.vs, vmemo[vi].vs = v, vmemo[vi].banks = banks;
-        if (!RT_V111) vk_mvprev_want((banks & ~(1u << 4)) >> 3);   // binding index = bank - 3
+        if (!RT_OOT) vk_mvprev_want((banks & ~(1u << 4)) >> 3);   // binding index = bank - 3
     }
     const GfxShader *vs = vmemo[vi].vs;
     uint32_t banks = vmemo[vi].banks;
@@ -5499,8 +5499,8 @@ static void mvobj_draw_(VkExec *ex, const p_draw_idx *d, VkBuffer ib, VkDeviceSi
     if (MQ.frame != frame || MQ.fence != ex->fence || MQ.depth_fmt != z->format) mo_begin(ex, frame);
     mo_mask_note(banks, cx->B.st.vs);
     // last frame's camera and blocks; held still when none of the position's blocks changed (most of the scenery)
-    PoseRange *pose = RT_V111 && !skin ? pose_match(ex, d, owner) : NULL;
-    if (RT_V111 && !pose && !skin) return;
+    PoseRange *pose = RT_OOT && !skin ? pose_match(ex, d, owner) : NULL;
+    if (RT_OOT && !pose && !skin) return;
     SkinDraw skin_draw;
     SkinEntry skin_entry;
     uint64_t skin_listed = 0;
@@ -5684,7 +5684,7 @@ static void mvobj_draw_(VkExec *ex, const p_draw_idx *d, VkBuffer ib, VkDeviceSi
 }
 
 int vk_fg_pose_prepare(VkExec *ex, uint64_t cam, VkImage depth, uint32_t w, uint32_t h) {
-    if (!RT_V111 || (!pose_enabled() && !skin_enabled())) return 0;
+    if (!RT_OOT || (!pose_enabled() && !skin_enabled())) return 0;
     uint64_t frame = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
     pose_select(frame, cam, depth);
     skin_resolve(ex, frame, cam, depth, w, h);

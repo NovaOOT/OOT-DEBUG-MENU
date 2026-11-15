@@ -5,7 +5,9 @@ import shutil
 from pathlib import Path
 
 DEFAULTS = {
-    'game_dir': '',               # the built game; empty until the first install picks one
+    'game_dir': '',               # the built game; empty until the first install picks one. With several game
+                                  # versions installed, the selected one's folder (launcher/installs.py)
+    'installs': [],               # [{'version': '1.1.1', 'dir': ...}]: every game version installed, each in its own folder
     'dump': '',                   # the .nup (or the folder with exefs/ and romfs/) the game was built from
     'auto_check': True,           # look for a new version when the launcher opens, and every hour while it runs
     'auto_install': True,         # install a downloaded update by itself whenever the game is not running
@@ -60,7 +62,7 @@ class Settings(dict):
 
     def reset(self):
         """Default Settings: the choices go back to their defaults; the game folder, dump and history stay."""
-        keep = {k: self[k] for k in ('game_dir', 'dump', 'last_check', 'last_seen', 'feed_repo', 'github_token',
+        keep = {k: self[k] for k in ('game_dir', 'installs', 'dump', 'last_check', 'last_seen', 'feed_repo', 'github_token',
                                      'rolled_back')}
         self.clear()
         self.update(DEFAULTS)

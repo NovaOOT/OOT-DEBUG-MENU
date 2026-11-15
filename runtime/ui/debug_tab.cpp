@@ -593,7 +593,7 @@ static void own_confirm(float scale) {
 extern "C" void tab_debug(float scale) {
     opt_begin("##debug", scale);
     if (!dbg_available()) {
-        opt_text_str("These tools need game build 1.1.1: the game's memory is only mapped for that build so far.", true);
+        opt_text_str("These tools need game build 1.1.1 or 1.0.0: the game's memory is only mapped for those builds so far.", true);
         opt_end();
         return;
     }
@@ -1534,7 +1534,7 @@ extern "C" void tab_debug(float scale) {
     opt_group_text("Change monitor");
     {
         bool on = dbg_watch_on() != 0;
-        if (!dbg_available()) opt_disable_next_text("Needs game build 1.1.1.");
+        if (!dbg_available()) opt_disable_next_text("Needs game build 1.1.1 or 1.0.0.");
         if (opt_toggle_text("##watch_on", "Watch changes",
                             "Logs every change to the game's flags (items, counters, events, the area, the age) and to the "
                             "actors loaded (what appears and disappears), as it happens. For glitch hunting: do one thing in "

@@ -37,7 +37,8 @@
 
 #ifdef RT_PATCH_PAGE
 
-#define GUEST_MULTIFRAME (rt_game_version == 111 ? 0x70000eb380ull : 0x700003a1f0ull)   // ZSTD_decompressMultiFrame: 1.1.1, 1.4.3
+// ZSTD_decompressMultiFrame: 1.1.1, 1.0.0 (the same zstd release, compiled with other registers), 1.4.3
+#define GUEST_MULTIFRAME (RT_V111 ? 0x70000eb380ull : RT_V100 ? 0x7000204740ull : 0x700003a1f0ull)
 #define GUEST_USING_DDICT 0x700003a1e0ull  // 1.4.3 main: ZSTD_decompress_usingDDict (1.1.1 has no site for it)
 #define HOST_MULTIFRAME (RT_PATCH_PAGE + 0xff0)
 #define HOST_USING_DDICT (RT_PATCH_PAGE + 0xfe0)
@@ -303,7 +304,7 @@ static void decode(Cpu *c, uint64_t dict, uint64_t dict_size, uint64_t ddict, ui
 // buffer of its own, and the two outputs are compared when the game ends the stream or has all its content out
 // ("zstd check: stream ..."). The check also reports a game output that did not advance through one buffer.
 // --probe-zstd (probe_zstd, at the end) runs host streams on frames it makes itself.
-#define GUEST_STREAM 0x70000f5c80ull
+#define GUEST_STREAM RT_OOT_ADDR(0x70000f5c80ull, 0x700020df60ull)   // 1.1.1, 1.0.0
 #define HOST_STREAM (RT_PATCH_PAGE + 0xf80)
 #define NSTREAM 16
 

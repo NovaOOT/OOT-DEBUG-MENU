@@ -1,18 +1,20 @@
-"""Build Ocarina of Time (Switch 2, game 1.1.1) natively for Windows or Linux from the player's own game files.
+"""Build Ocarina of Time (Switch 2, game 1.1.1, or its base game 1.0.0 once ported) natively for Windows or Linux from the player's own game files.
 
     python -I tools/make_game.py --nup "C:\\path\\game.nup" --out "C:\\Games\\Ocarina"
     python -I tools/make_game.py --exefs "C:\\path\\exefs" --romfs "C:\\path\\romfs" --out "C:\\Games\\Ocarina"
     python -I tools/make_game.py --nup "C:\\path\\game.nup" --check          # only checks the game's version
     python -I tools/make_game.py --rebuild --out "C:\\Games\\Ocarina"         # a newer kit, the files of the last build
+    python -I tools/make_game.py --nup "C:\\path\\game.nup" --versions       # the game versions the .nup holds
+    python -I tools/make_game.py --nup "C:\\path\\game.nup" --game-version 1.0.0 --out ...   # its base game
 
 Steps, each skipped when a run before finished it for the same inputs (state in <out>/build-cache/state.json):
-  1. check    the title (0400486024DEC000) and main's build id (game 1.1.1)
+  1. check    the title (0400486024DEC000) and main's build id (GAME_VERSIONS; the version must be ported)
   2. exefs    the five ExeFS files, every module's segments unpacked (ZBIC through the player's own `zbic` package)
               and stored plainly, as the runtime's loader reads them -> <out>/exefs
   3. romfs    every RomFS file, checked against the container's sha256, into one image -> <out>/romfs/romfs.bin and
               index.json (16-byte aligned, in the byte order of the paths). When the lift and the compile follow, it
               runs on a thread of its own beside them: only the RomFS index and romfs.c wait for the image
-  4. lift     recomp/gen.py with recomp/patches-v111.txt -> <out>/build-cache/lift, plus the two SDK bring-up fixes.
+  4. lift     recomp/gen.py with recomp/patches-v<code>.txt (111 for 1.1.1) -> <out>/build-cache/lift, plus the two SDK bring-up fixes.
               The code cheats and ExeFS patch files of the mods in <out>/mods (tools/mod_files.py) become patch sets
               first (tools/cheats.py, tools/exefs_patches.py), which the game switches on with their mod; the step's
               key names those files, and build-cache/mod-code.json records the ones it took up (the launcher
@@ -100,7 +102,16 @@ import mod_files  # noqa: E402
 import prompt_art  # noqa: E402
 
 TITLE_ID = 0x0400486024DEC000
-MAIN_BUILD_ID = 'e0f3ccfaf50065ae4ea01eb5aeb13b1a'   # main of game 1.1.1
+# The game versions a dump can hold, by the build id of their main: a .nup carries the base game (1.0.0, package kind
+# 0) and the update (1.1.1, kind 1) side by side, each whole. code: rt_game_version and the patch table's name
+# (recomp/patches-v<code>.txt); ported: the recomp has that table and the runtime that version's addresses.
+GAME_VERSIONS = {
+    '1.1.1': dict(build='e0f3ccfaf50065ae4ea01eb5aeb13b1a', kind=1, code=111, ported=True),
+    '1.0.0': dict(build='33fa6c2c23848282a77e8b88a0a93f48', kind=0, code=100, ported=True),
+}
+DEFAULT_GAME_VERSION = '1.1.1'
+GAME_VERSION = DEFAULT_GAME_VERSION   # the version this run builds, set by check()
+MAIN_BUILD_ID = GAME_VERSIONS['1.1.1']['build']   # main of game 1.1.1
 EXEFS_FILES = ('main', 'main.npdm', 'sdk', 'subsdk0', 'rtld')
 MODULES = ('main', 'sdk', 'subsdk0', 'rtld')
 ALIGN = 16
@@ -135,13 +146,25 @@ SCAN_TOOL = '55ea0c150aaf9dac93a2e6fd3b4ca11e1c572b5eee8b6bd74960535964384634'
 # is. tests/launcher_test.py test_the_prompt_tools_logic_is_the_recorded_one asks the question when the logic changes.
 PROMPT_TOOLS = 'ad59f2c4533f6ea2630b916ef5f3695f72daffe9b2b7663eea4168a4f08e4249'
 
-# Bring-up fixes in the lifted SDK, each anchored on exact generated text that must occur once.
+# Bring-up fixes in the lifted SDK, each anchored on exact generated text that must occur once (lift_fixes).
+# nn::oe::SetupGpuErrorHandler registers a system worker the host does not provide: GPU error reporting is not needed,
+# so it returns at once. Its address in each version's sdk (the symbol _ZN2nn2oe20SetupGpuErrorHandlerEv): 1.1.1 ships
+# SDK 22.2.8, 1.0.0 SDK 22.2.5.
+GPU_ERROR_HANDLER = {'1.1.1': 0x700579a430, '1.0.0': 0x700579a410}
+
+
+def gpu_error_fix(a):
+    return ('sdk', f'void f_{a:x}(Cpu *c) {{\n    FN_ENTER({a:#x}ull);\n',
+            f'void f_{a:x}(Cpu *c) {{\n    c->x[0] = 0; return;   /* bring-up: GpuErrorHandler (make_game.py) */\n'
+            f'    FN_ENTER({a:#x}ull);\n')
+
+
+def lift_fixes():
+    """The bring-up fixes of the lifted C for the version this run builds."""
+    return [gpu_error_fix(GPU_ERROR_HANDLER[GAME_VERSION]), *LIFT_FIXES]
+
+
 LIFT_FIXES = [
-    # nn::oe::SetupGpuErrorHandler (sdk+0x59a430) registers a system worker the host does not provide: GPU error
-    # reporting is not needed, so it returns at once.
-    ('sdk', 'void f_700579a430(Cpu *c) {\n    FN_ENTER(0x700579a430ull);\n',
-     'void f_700579a430(Cpu *c) {\n    c->x[0] = 0; return;   /* bring-up: GpuErrorHandler (make_game.py) */\n'
-     '    FN_ENTER(0x700579a430ull);\n'),
     # The thread-start path loads TPIDR_EL0 from TLR+0x1F0 before the SDK stored its TLS there for a host-created
     # thread: a zero slot keeps the TLS pointer the host seeded.
     ('sdk', '    { uint64_t ea = c->x[19] + 0x1b8ull; ST64(ea, x8); }\n    x8 = (uint64_t)(c->tpidrro);\n'
@@ -268,20 +291,24 @@ def tree_digest(root, patterns):
 class Source:
     """The game files, from a .nup container or from extracted exefs/romfs folders."""
 
-    def __init__(self, a):
+    def __init__(self, a, version=DEFAULT_GAME_VERSION):
         self.n = None
         if a.nup:
             try:
                 self.n = nup.Nup(a.nup)
             except (OSError, nup.NupError) as e:
                 fail(f'cannot read {a.nup}: {e}')
-            # The base title and its update (title id + 0x800), the update first and the newest of each kind first.
-            # A module comes from the first of them that holds it whole: an update's ExeFS may leave a module out or
-            # hold something else under its name.
-            pkgs = [p for p in self.n.packages if p['title_id'] in (TITLE_ID, TITLE_ID | 0x800)]
+            pkgs = game_packages(self.n)
             if not pkgs:
                 ids = ', '.join(f"{p['title_id']:016X}" for p in self.n.packages)
                 fail(f'this .nup holds {ids}, not Ocarina of Time (0400486024DEC000)')
+            # The update (1.1.1): the update first and the newest of each kind first; a module comes from the first
+            # of them that holds it whole, as an update's ExeFS may leave a module out or hold something else under
+            # its name. The base game (1.0.0): its own package alone, so that nothing of the update mixes in.
+            if GAME_VERSIONS[version]['kind'] == 0:
+                pkgs = [p for p in pkgs if p['kind'] == 0]
+                if not pkgs:
+                    fail(f'this .nup holds no base game, so it cannot build Ocarina of Time {version}')
             pkgs.sort(key=lambda p: (p['kind'] != 1, -p['version']))
             self.exefs = {}
             for name in EXEFS_FILES:
@@ -299,6 +326,8 @@ class Source:
                     break
             st = os.stat(a.nup)
             self.identity = f'nup {os.path.abspath(a.nup)} {st.st_size} {int(st.st_mtime)}'
+            if version != DEFAULT_GAME_VERSION:   # the same .nup builds two versions; 1.1.1 keeps its old identity
+                self.identity += f' game {version}'
         else:
             self.exefs_dir, self.romfs_dir = Path(a.exefs), Path(a.romfs)
             for d in (self.exefs_dir, self.romfs_dir):
@@ -356,15 +385,55 @@ class BuiltSource:
         return (self.out / 'exefs' / name).read_bytes()
 
 
-def check(src):
+def game_packages(n):
+    """The packages of a .nup that are Ocarina of Time: the base title and its update (title id + 0x800)."""
+    return [p for p in n.packages if p['title_id'] in (TITLE_ID, TITLE_ID | 0x800)]
+
+
+def version_of_build(build):
+    return next((v for v, g in GAME_VERSIONS.items() if g['build'] == build), None)
+
+
+def dump_versions(path):
+    """The game versions a .nup can build, in GAME_VERSIONS order: [(version, ported)]. A package counts by the build
+    id of its main, so an update or base game this recomp does not know is left out."""
+    n = nup.Nup(path)
+    found = set()
+    for p in game_packages(n):
+        fi = dict(n.tree(p['exefs'])).get('main') if p['exefs'] < n.ndir else None
+        if fi is not None and n.size(fi) >= 0x50:
+            head = next(n.chunks(fi))
+            if head[:4] == b'NSO0':
+                v = version_of_build(head[0x40:0x50].hex())
+                if v:
+                    found.add(v)
+    return [(v, g['ported']) for v, g in GAME_VERSIONS.items() if v in found]
+
+
+def check(src, want=None):
+    """The main's game version, which must be want when given, and one the recomp is ported to. Sets GAME_VERSION."""
+    global GAME_VERSION
     main = src.read_exefs('main')
     if main[:4] != b'NSO0':
         fail('main is not an NSO module')
     build = main[0x40:0x50].hex()
-    if build != MAIN_BUILD_ID:
-        fail(f'this is not game version 1.1.1: main has build {build[:8]}, the recomp supports build {MAIN_BUILD_ID[:8]}. '
+    version = version_of_build(build)
+    if version is None:
+        known = ', '.join(f'{v} (build {g["build"][:8]})' for v, g in GAME_VERSIONS.items())
+        fail(f'this is no game version the recomp knows: main has build {build[:8]}; it knows {known}. '
              'Install the 1.1.1 update and dump the game again.')
+    if want and version != want:
+        fail(f'this is game version {version}, not {want}')
+    if not GAME_VERSIONS[version]['ported']:
+        fail(f'Ocarina of Time {version} is not supported yet: the recomp has no code patches and runtime addresses '
+             f'for it. Build 1.1.1 for now.')
+    GAME_VERSION = version
     return main
+
+
+def game_code():
+    """rt_game_version of the version this run builds: 111 for 1.1.1, 100 for 1.0.0."""
+    return GAME_VERSIONS[GAME_VERSION]['code']
 
 
 # ---------------------------------------------------------------- exefs
@@ -529,14 +598,14 @@ EMITTED = re.compile(r'emitted (\d+)/(\d+) chunks')
 def lift_digest():
     """The lifter's code, the patch table and the bring-up fixes: what the lifted C depends on besides the ExeFS."""
     h = hashlib.sha256(recomp_digest().encode())
-    h.update(repr(LIFT_FIXES).encode())
+    h.update(repr(lift_fixes()).encode())
     return h.hexdigest()
 
 
 def recomp_digest(kit=None):
     """The lifter's code and the patch table by content: what names the generator in the lift's key and in an
     execution profile's record (pgo_record). kit: another checkout or kit folder than this one."""
-    return tree_digest((kit or KIT) / 'recomp', ('*.py', 'patches-v111.txt'))
+    return tree_digest((kit or KIT) / 'recomp', ('*.py', f'patches-v{game_code()}.txt'))
 
 
 # The mods' code (tools/mod_files.py): the tools that make patch sets of it, the patch file each writes, the status
@@ -609,7 +678,7 @@ def step_lift(out, cache):
     removes the ones it no longer writes. The mods' code cheats and ExeFS patches go in as patch sets (mod_patches);
     should the lifter refuse those, the game is lifted without them."""
     lift = cache / 'lift'
-    plain = KIT / 'recomp' / 'patches-v111.txt'
+    plain = KIT / 'recomp' / f'patches-v{game_code()}.txt'
     (cache / MOD_RECORD).unlink(missing_ok=True)
     patches, done, code = mod_patches(out, cache, plain)
     if run_lifter(out, lift, patches):
@@ -622,7 +691,7 @@ def step_lift(out, cache):
             fail('the code generator failed (see above)')
     if code:
         (cache / MOD_RECORD).write_text(json.dumps(code, indent=1, sort_keys=True), encoding='utf-8')
-    for mod, old, new in LIFT_FIXES:
+    for mod, old, new in lift_fixes():
         hits = [p for p in sorted((lift / mod).glob('*.c')) if old in p.read_text(encoding='utf-8')]
         if len(hits) != 1 or hits[0].read_text(encoding='utf-8').count(old) != 1:
             fail(f'a bring-up fix found its anchor {len(hits)} times in the lifted {mod}, not once')
@@ -662,7 +731,7 @@ def modules_c(lift, out, gen):
           f'const char rt_default_exefs[] = {c_string(str(out / "exefs"))};',
           f'const char rt_default_romfs[] = {c_string(str(out / "romfs"))};',
           f'const char rt_default_profile[] = {c_string(str(out / "profile"))};',
-          'const int rt_game_version = 111;',
+          f'const int rt_game_version = {game_code()};',
           'const unsigned long long rt_app_pool_bytes = 9809ull << 20;   /* the Switch 2 application pool */',
           'const int rt_nvn_api_version[2] = {231, 40};   /* NVN2: main asks for major 231, minor 40 or later */',
           f'const char rt_port_version[] = {c_string(kit_version())};']
@@ -1451,7 +1520,7 @@ def fast_clang(msys, clang, env):
 # optimises the functions that never ran for size. The file names the lifted functions by their address and the
 # runtime's by their name, each with a hash of its control flow: a function whose C differs from the one that was
 # trained gets no counts, and the compiler says nothing about it.
-PGO_NAME = 'pgo-v111.profdata'   # in the kit's data/ (a release) or build/pgo/ (a source checkout, tools/pgo.py)
+# pgo-v<code>.profdata (pgo_name) in the kit's data/ (a release) or build/pgo/ (a source checkout, tools/pgo.py)
 PGO_RAW = 'pgo'                  # in the game folder: where an instrumented game adds its counts, *.profraw
 PGO_TRAINING = 'training.json'   # beside the counts: what the instrumented game was built from (pgo_gen_record)
 PGO_USE = '-fprofile-use='
@@ -1459,6 +1528,11 @@ PGO_USE = '-fprofile-use='
 # equal between the folder the profile was trained in and this kit's (tools/build_game.py PGO_NAMES).
 PGO_NAMES = ['-mllvm', '-static-func-full-module-prefix=false']
 PGO_MODE = ''                    # --pgo; without it NX2NAVI_PGO decides (pgo_mode)
+
+
+def pgo_name():
+    """The execution profile's file name for the version this run builds: each version's code is its own."""
+    return f'pgo-v{game_code()}.profdata'
 
 
 def pgo_mode():
@@ -1472,8 +1546,8 @@ def pgo_file():
     """The kit's execution profile, or None: data/ of a release, else build/pgo/ of a source checkout, where
     tools/pgo.py merge writes it."""
     for d in (KIT / 'data', KIT / 'build' / 'pgo'):
-        if (d / PGO_NAME).is_file():
-            return d / PGO_NAME
+        if (d / pgo_name()).is_file():
+            return d / pgo_name()
     return None
 
 
@@ -1617,7 +1691,7 @@ def pgo_gen_record(out, clang, env):
     checkout holds when the counts are merged."""
     raw = Path(out) / PGO_RAW
     raw.mkdir(parents=True, exist_ok=True)
-    record = {'version': 'v111', 'recomp_digest': recomp_digest(), 'compiler': clang_version(clang, env),
+    record = {'version': f'v{game_code()}', 'recomp_digest': recomp_digest(), 'compiler': clang_version(clang, env),
               'kit': kit_version()}
     (raw / PGO_TRAINING).write_text(json.dumps(record, indent=1) + '\n', encoding='utf-8')
 
@@ -2639,6 +2713,11 @@ def build_main():
                          'kept from before an update were compiled for another (Rebuild the Game)')
     ap.add_argument('--out', help='the folder for the finished game')
     ap.add_argument('--check', action='store_true', help='only check the game\'s version; builds nothing')
+    ap.add_argument('--game-version', choices=tuple(GAME_VERSIONS),
+                    help='with --nup: which of its games to build, the base game (1.0.0) or the update (1.1.1; the '
+                         'default). --rebuild takes the version of the last build; --exefs takes what main is')
+    ap.add_argument('--versions', action='store_true',
+                    help='with --nup: list the game versions it holds and whether each can be built; builds nothing')
     ap.add_argument('--msys', default=r'C:\msys64\ucrt64',
                     help='MSYS2 UCRT64 folder (default C:\\msys64\\ucrt64; Windows only: Linux takes clang and lld from PATH)')
     ap.add_argument('--jobs', type=int,
@@ -2660,7 +2739,20 @@ def build_main():
     if a.make_runtime_lib:
         make_runtime_lib(a.make_runtime_lib, Path(a.msys), a.jobs, a.obj)
         return
-    given = bool(a.nup) + bool(a.exefs or a.romfs) + bool(a.rebuild)
+    if a.versions:
+        if not a.nup:
+            ap.error('--versions needs --nup')
+        try:
+            found = dump_versions(a.nup)
+        except (OSError, nup.NupError) as e:
+            fail(f'cannot read {a.nup}: {e}')
+        for v, ported in found:
+            say(f'{v}: {"can be built" if ported else "not supported yet"}')
+        emit('versions', versions=[{'version': v, 'ported': ported} for v, ported in found])
+        return
+    if a.game_version and not a.nup:
+        ap.error('--game-version goes with --nup')
+    given =bool(a.nup) + bool(a.exefs or a.romfs) + bool(a.rebuild)
     if given != 1 or (not a.nup and not a.rebuild and not (a.exefs and a.romfs)):
         ap.error('give --nup, both --exefs and --romfs, or --rebuild')
     if a.rebuild and not a.out:
@@ -2671,10 +2763,12 @@ def build_main():
     state = load_state(state_path) if state_path else {}
 
     emit('step', step='check', state='start')
-    src = BuiltSource(out, state) if a.rebuild else Source(a)
-    check(src)
-    say('check: Ocarina of Time 1.1.1 (build e0f3ccfa)')
-    emit('check', version='1.1.1', build=MAIN_BUILD_ID[:8])
+    want = a.game_version or (DEFAULT_GAME_VERSION if a.nup else None)
+    src = BuiltSource(out, state) if a.rebuild else Source(a, want or DEFAULT_GAME_VERSION)
+    check(src, want)
+    build_id = GAME_VERSIONS[GAME_VERSION]['build'][:8]
+    say(f'check: Ocarina of Time {GAME_VERSION} (build {build_id})')
+    emit('check', version=GAME_VERSION, build=build_id)
     emit('step', step='check', state='done')
     if a.check:
         return
@@ -2707,6 +2801,7 @@ def build_main():
     if reset:
         state = {'version': STATE_VERSION, 'input': src.identity, 'steps': {}}
     state['kit'] = kit_version()
+    state['game'] = GAME_VERSION   # the launcher's list of installs reads it (launcher/installs.py built_game_version)
     if a.rebuild and a.retune and retune_due(cache / 'obj', msys):
         # the compile step's key does not name the level: without this a finished compile reads as done before
         state['steps'].pop('compile', None)

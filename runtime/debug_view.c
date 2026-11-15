@@ -26,7 +26,7 @@
 #include "layout.h"
 #include "platform/platform.h"
 
-#define ACTOR_CLASS 0x4b25e18ull   // the generic actor class (debug_warp.c)
+#define ACTOR_CLASS RT_OOT_ADDR(0x4b25e18ull, 0x4ac0e30ull)   // the generic actor class (debug_warp.c)
 #define ACT_NAME 0x20
 #define ACT_POS 0x31c
 #define ACT_ROT 0x328
@@ -265,7 +265,7 @@ int dbg_view_volumes(DbgVolume *out, int max, float range) {
 // class, then the current and maximum values.
 #define LIFE_HOLDER 0x270
 #define LIFE_COMPONENT 0x2b8
-#define LIFE_CLASS 0x4b4c460ull
+#define LIFE_CLASS RT_OOT_ADDR(0x4b4c460ull, 0x4ae7458ull)
 #define LIFE_CUR 0x1c10
 #define LIFE_MAX 0x1c18
 

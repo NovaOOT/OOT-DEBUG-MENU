@@ -231,7 +231,7 @@ static void boots_frame(void) {
 #define OWNER_LAYERS 0x198       // the owner's layers, LAYER_STEP apart
 #define LAYER_STEP 0x48
 #define LAYER_MAX 12
-#define LAYER_CLASS 0x4c29788    // a layer's vtable, main+
+#define LAYER_CLASS RT_OOT_ADDR(0x4c29788, 0x4bc3b80)   // a layer's vtable, main+ (1.1.1, 1.0.0)
 #define LAYER_MASK 0x50          // the layer's bone mask (MASK_*)
 #define LAYER_STATE_NAMES 0x250  // the names of the layer's two state slots
 // A layer's mask: its bits (from the pointer at +0x10, 0x80 bytes) are built from a definition that follows them (the
@@ -428,9 +428,9 @@ static void air_step(struct Cpu *c, const float p[3], uint64_t b, int32_t lx, in
 // main+0x837620 reads it), found by main+0x5f88c0. Its request (RD_START) takes a block of the actor, a weight of 1 and
 // the two modes the node gives (1 and 2) and sets the controller's state to 3; its end (RD_END, the node's leave) puts
 // the body back under the animation, the player standing, and the state to 0. The state is not 0 while a ragdoll runs.
-#define RD_FIND 0x70005f88c0ull    // physics owner -> ragdoll controller
-#define RD_START 0x7003218d30ull   // controller, &request
-#define RD_END 0x7003219090ull     // controller, &{actor, 0}; returns at once with no ragdoll running
+#define RD_FIND RT_OOT_ADDR(0x70005f88c0ull, 0x7000587460ull)    // physics owner -> ragdoll controller
+#define RD_START RT_OOT_ADDR(0x7003218d30ull, 0x70031c1580ull)   // controller, &request
+#define RD_END RT_OOT_ADDR(0x7003219090ull, 0x70031c18e0ull)     // controller, &{actor, 0}; returns at once with no ragdoll running
 #define RD_STATE 0x17c
 static _Atomic int rd_req = -2;    // -2 nothing asked; else dbg_ragdoll's how
 static _Atomic uint64_t rd_actor, rd_ctrl;   // the controller found for that actor

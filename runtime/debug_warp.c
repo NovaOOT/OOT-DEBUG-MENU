@@ -560,9 +560,9 @@ int dbg_guest_result(uint64_t *r) {
 // start. The variable at SAVELIST_GLOBAL points to the one holding the list object; the object starts with
 // SAVELIST_CLASS and has two entry arrays of six (counts at +0x08 and +0x48), its phase at +0x8c (4: read) and the
 // bit at +0x8d.
-#define SAVELIST_GLOBAL 0x7004c81660ull
-#define SAVELIST_CLASS 0x7004bdffd8ull
-#define SAVELIST_RESET 0x7000bb0010ull
+#define SAVELIST_GLOBAL RT_OOT_ADDR(0x7004c81660ull, 0x7004c1b9b0ull)   // 1.1.1, 1.0.0
+#define SAVELIST_CLASS RT_OOT_ADDR(0x7004bdffd8ull, 0x7004b7ab90ull)
+#define SAVELIST_RESET RT_OOT_ADDR(0x7000bb0010ull, 0x7000963fa0ull)
 #define SAVELIST_PHASE 0x8c
 #define SAVELIST_READ 0x8d
 enum { LIST_IDLE, LIST_QUEUED, LIST_READING, LIST_REFUSED };
@@ -572,7 +572,7 @@ static uint64_t call_saved(Cpu *c, uint64_t fn, const uint64_t a[8]);
 static uint64_t save_list(void) {
     uint64_t var = 0, obj = 0, cls = 0;
     uint32_t na = 0, nb = 0;
-    if (!RT_V111 || !plat_mem_read(SAVELIST_GLOBAL, &var, 8) || !var || !plat_mem_read(var, &obj, 8) ||
+    if (!RT_OOT || !plat_mem_read(SAVELIST_GLOBAL, &var, 8) || !var || !plat_mem_read(var, &obj, 8) ||
         !obj || !plat_mem_read(obj, &cls, 8) || cls != SAVELIST_CLASS || !plat_mem_read(obj + 0x08, &na, 4) ||
         !plat_mem_read(obj + 0x48, &nb, 4) || na != 6 || nb != 6)
         return 0;
@@ -645,7 +645,7 @@ uint64_t dbg_frame_call(Cpu *c, uint64_t fn, const uint64_t a[8]) { return call_
 // Teleport: the game's own warp of an actor to a pose (the routine its "warp to target position" event nodes call), so
 // the physics body moves with the actor and the game does not pull it back. The pose is a 3x4 row-major matrix, the
 // translation in the last column; the rotation is left upright.
-#define GUEST_WARP_ACTOR 0x7000c6fb30ull   // actor, &matrix, 0
+#define GUEST_WARP_ACTOR RT_OOT_ADDR(0x7000c6fb30ull, 0x7000c35500ull)   // actor, &matrix, 0
 #define FRAME_HOOK_ALIVE_NS 1000000000ull
 static _Atomic int tp_pending;
 static float tp_pos[3], tp_face[3];
@@ -712,7 +712,7 @@ int dbg_player_facing(float face[3]) {
 // through [[area+0x3d8]+0x160]. A helper thread finds the triggers in the heap and tries them nearest first, each for up
 // to two seconds, as some are off (locked doors, story conditions) or left over from an earlier area. The player goes
 // back if none starts a change.
-#define ACTOR_CLASS 0x4b25e18ull
+#define ACTOR_CLASS RT_OOT_ADDR(0x4b25e18ull, 0x4ac0e30ull)
 #define ENTRANCE_NAME "FieldAndDungeonEntranceEventRequestActor"
 #define TRIGGER_NAME "Area"
 #define TRIGGER_LINK 0x3d8
@@ -775,7 +775,7 @@ static int cmp_u64(const void *a, const void *b) {
     uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
     return x < y ? -1 : x > y;
 }
-#define EXE_DATA_FROM 0x3c47000ull   // the executable's read-only data and data, where the method tables are
+#define EXE_DATA_FROM RT_OOT_ADDR(0x3c47000ull, 0x3be7000ull)   // the executable's read-only data and data, where the method tables are
 int dbg_find_named(const char *name, uint64_t *out, int max) {
     enum { CHUNK = 1 << 20 };
     static uint8_t buf[CHUNK + 8];

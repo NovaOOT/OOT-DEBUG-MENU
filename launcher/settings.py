@@ -28,6 +28,7 @@ DEFAULTS = {
     'last_check': 0.0,
     'last_seen': '',              # the newest version the player was told about
     'rolled_back': '',            # the last version that failed to start; it is never downloaded or installed by itself
+    'tree_details': 'right',      # where the Save Tree window shows the selected save: bottom, left or right
 }
 
 

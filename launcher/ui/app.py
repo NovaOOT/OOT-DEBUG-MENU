@@ -1060,7 +1060,8 @@ class App:
             Row('divider'),
             Row('value', 'Game Folder', gd, on=lambda: self.open(gd),
                 desc=('Open the game folder. The game keeps your save in its profile folder, its settings in '
-                      'nx2navi.ini and its logs in logs. Its saves folder holds saves to import and backups.',)),
+                      'nx2navi.ini and its logs in logs. Its saves folder holds backups and the save tree, and saves '
+                      'to import go into saves\\import.',)),
             self.saves_row(gd),
             Row('value', 'Save Tree', 'Open', 'arrow', on=self.open_save_tree,
                 desc=('A window of its own beside the game: every time a flag of the game changes while you play, '
@@ -1451,7 +1452,8 @@ class App:
         self.show('customize', 1)
 
     def save_waiting(self, gd):
-        """A save put into the game folder's saves folder (a shared zip, a save folder), waiting to be imported."""
+        """A save put into the game folder's saves\\import folder (a shared zip, a save folder), waiting to be
+        imported."""
         if gd and Path(gd).is_dir():
             try:
                 saves.ensure_saves_dir(gd)
@@ -1474,12 +1476,13 @@ class App:
         self.sounds.play('select')
 
     def saves_row(self, gd):
-        """Saves: the screen that exports and imports saves; orange while a save waits in the saves folder."""
+        """Saves: the screen that exports and imports saves; orange while a save waits in the import folder."""
         ready = self.save_waiting(gd)
         desc = ('Export your save into one zip, to attach to a bug report or give to another player, or import a '
                 'save someone shared, a Switch save backup or an emulator\'s save.',)
         if ready:
-            desc += ('A save waits in the saves folder of the game folder: select this row, then Import a Save.',)
+            desc += ('A save waits in the import folder (saves\\import in the game folder): select this row, then '
+                     'Import a Save.',)
         return Row('value', 'Saves', 'Import Waiting' if ready else '', 'orange_arrow' if ready else 'arrow',
                    on=lambda: self.show('saves'), desc=desc)
 
@@ -1499,8 +1502,8 @@ class App:
         if self.export_message:
             export_desc = (self.export_message,) + export_desc
         import_desc = ('Make a save someone shared (an OOT-DEBUG-MENU-save zip) your save: every slot is replaced. Put the zip '
-                       'into the saves folder of the game folder and select this row, or select this row and choose '
-                       'the zip.', 'Your current save is copied to the saves folder first.')
+                       'into the import folder (saves\\import in the game folder) and select this row, or select this '
+                       'row and choose the zip.', 'Your current save is copied to the saves folder first.')
         if gd and saves.pending_import(gd):
             import_desc += ('A save imported in the game\'s menu waits for the game\'s next start; an import here '
                             'replaces it.',)
@@ -1523,14 +1526,18 @@ class App:
             Row('value', 'Export To', str(out), on=self.choose_export_dir,
                 desc=(f'Export Save writes into {out}.', 'Select this row to choose another folder.')),
             Row('divider'),
-            Row('value', 'Import a Save', 'From the Saves Folder' if ready else 'Choose a Zip',
+            Row('value', 'Import a Save', 'From the Import Folder' if ready else 'Choose a Zip',
                 'orange_arrow' if ready else 'arrow', on=lambda: self.import_saves(folder=False), desc=import_desc),
             Row('value', 'Import a Save Folder', 'Choose a Folder', 'arrow',
                 on=lambda: self.import_saves(folder=True), desc=folder_desc),
+            Row('value', 'Open Import Folder', '', 'arrow',
+                on=lambda: gd and Path(gd).is_dir() and (saves.ensure_saves_dir(gd), self.open(saves.import_dir(gd))),
+                desc=('The import folder (saves\\import in the game folder): put a save here, then select Import a '
+                      'Save.',)),
             Row('value', 'Open Saves Folder', '', 'arrow',
                 on=lambda: gd and Path(gd).is_dir() and self.open(saves.ensure_saves_dir(gd)),
-                desc=('The saves folder of the game folder: saves to import, and a backup of each save an import '
-                      'replaced.',)),
+                desc=('The saves folder of the game folder: a backup of each save an import replaced, the saves it '
+                      'took in, the save tree, and the import folder.',)),
             Row('action', 'Back', on=lambda: self.show('home'), height=40, desc=('Back to the main menu.',)),
         ]
 
@@ -1566,8 +1573,9 @@ class App:
         self.show('saves', self.focus)
 
     def import_saves(self, folder):
-        """Import a Save (folder False): what waits in the saves folder, else a zip the player picks. Import a Save
-        Folder (folder True): a folder the player picks; the saves folder itself takes what waits there."""
+        """Import a Save (folder False): what waits in the import folder, else a zip the player picks. Import a Save
+        Folder (folder True): a folder the player picks; the saves or the import folder itself takes what waits
+        there."""
         gd = self.settings.get('game_dir')
         if not gd or not Path(gd).is_dir():
             self.save_message = 'Install the game first.'
@@ -1578,7 +1586,8 @@ class App:
                 src = None
                 if folder:
                     src = filedialog.askdirectory(parent=self.root, title='Choose the folder with the save',
-                                                  initialdir=str(saves.ensure_saves_dir(gd)), mustexist=True)
+                                                  initialdir=str(saves.ensure_saves_dir(gd) / saves.IMPORT),
+                                                  mustexist=True)
                     if not src:
                         return
                 elif saves.waiting(gd)[0] is None:

@@ -4231,19 +4231,26 @@ class SavesTest(unittest.TestCase):
         self.assertEqual((acct / 'slot_00' / 'progress.sav').read_bytes(), b'p')
         self.assertFalse((acct / 'save-tx').exists())
 
-    def test_import_from_the_saves_folder(self):
+    def test_import_from_the_import_folder(self):
         d = saves.ensure_saves_dir(self.game)
-        self.assertIsNone(saves.waiting(self.game)[0])                 # README.txt alone is no save
-        self.files(d, {'emu/0000000000000000/' + 'c' * 32 + '/0100000000010000/save.dat': b'emu'})
+        inbox = saves.import_dir(self.game)
+        self.assertTrue(inbox.is_dir())
+        self.assertIsNone(saves.waiting(self.game)[0])                 # an empty import folder holds no save
+        # what the launcher and the game write into saves/ is never a save waiting to be imported
+        self.files(d, {'tree/Market/000001 - Loaded save/slot_00/progress.sav': b't', 'tree/tree.jsonl': b'{}',
+                       'live/slot_00 autosave/progress.sav': b'l', 'stray.sav': b's'})
+        self.assertIsNone(saves.waiting(self.game)[0])
+        self.files(inbox, {'emu/0000000000000000/' + 'c' * 32 + '/0100000000010000/save.dat': b'emu'})
         self.assertIsNotNone(saves.waiting(self.game)[0])
         r = saves.import_save(self.game, log=lambda m: None)
         self.assertIsNone(r['backup'])                                 # there was no save yet
         self.assertEqual((saves.account_dir(self.game) / 'save.dat').read_bytes(), b'emu')
-        left = sorted(e.name for e in d.iterdir())
-        self.assertEqual(left[0], 'README.txt')
-        self.assertTrue(left[1].startswith('imported '))
+        self.assertEqual(list(inbox.iterdir()), [])                    # moved out of the import folder
+        done = [e for e in d.iterdir() if e.name.startswith('imported ')]
+        self.assertEqual([e.name for e in done[0].iterdir()], ['emu'])
+        self.assertTrue((d / 'tree' / 'tree.jsonl').is_file())         # the rest of saves/ is left alone
         self.assertIsNone(saves.waiting(self.game)[0])                 # not imported twice
-        self.files(d, {'save.dat': b'loose'})                          # files put straight into saves/
+        self.files(inbox, {'save.dat': b'loose'})                      # files put straight into the import folder
         r = saves.import_save(self.game, log=lambda m: None)
         self.assertEqual((saves.account_dir(self.game) / 'save.dat').read_bytes(), b'loose')
         self.assertEqual((r['backup'] / 'save.dat').read_bytes(), b'emu')
@@ -4256,7 +4263,7 @@ class SavesTest(unittest.TestCase):
         with self.assertRaises(saves.SaveError):                      # README.txt alone is no save
             saves.import_save(self.game, d, log=lambda m: None)
         self.assertEqual((acct / 'save.dat').read_bytes(), b'mine')
-        self.files(d, {'save.dat': b'put there'})
+        self.files(saves.import_dir(self.game), {'save.dat': b'put there'})
         r = saves.import_save(self.game, d, log=lambda m: None)
         self.assertEqual(sorted(p.name for p in acct.iterdir()), ['save.dat'])   # not README.txt or a backup
         self.assertEqual((acct / 'save.dat').read_bytes(), b'put there')
@@ -4564,11 +4571,12 @@ class SaveShareTest(unittest.TestCase):
         self.assertEqual(list((self.game / 'profile' / 'save-tx').iterdir()), [])
         self.assertTrue(shared.is_file())                              # a picked zip is left where it was
 
-    def test_a_zip_in_the_saves_folder_is_taken_first(self):
+    def test_a_zip_in_the_import_folder_is_taken_first(self):
         self.game_with_save(self.game)
         shared = saves.export_save(self.game_with_save(self.tmp / 'other', {'option.sav': b'theirs'}), self.out,
                                    log=lambda m: None)['path']
-        d = saves.ensure_saves_dir(self.game)
+        saves_d = saves.ensure_saves_dir(self.game)
+        d = saves.import_dir(self.game)
         self.files(d, {'loose.sav': b'x'})
         shutil.copy2(shared, d / shared.name)
         src, _ = saves.waiting(self.game)
@@ -4576,7 +4584,7 @@ class SaveShareTest(unittest.TestCase):
         r = saves.import_save(self.game, log=lambda m: None)
         self.assertEqual((saves.account_dir(self.game) / 'option.sav').read_bytes(), b'theirs')
         self.assertFalse((saves.account_dir(self.game) / shared.name).exists())   # not copied in as a file
-        done = [e for e in d.iterdir() if e.name.startswith('imported ')]
+        done = [e for e in saves_d.iterdir() if e.name.startswith('imported ')]
         self.assertEqual([p.name for p in done[0].iterdir()], [shared.name])   # moved out: not imported twice
         self.assertEqual(saves.waiting(self.game)[0], d)              # the loose file waits on its own
         self.assertIsNotNone(r['backup'])
@@ -4584,6 +4592,9 @@ class SaveShareTest(unittest.TestCase):
         shutil.copy2(shared, d / 'again.zip')
         r = saves.import_save(self.game, d, log=lambda m: None)
         self.assertEqual(r['source'].name, 'again.zip')
+        shutil.copy2(shared, d / 'third.zip')                          # and so does the saves folder above it
+        r = saves.import_save(self.game, saves_d, log=lambda m: None)
+        self.assertEqual(r['source'].name, 'third.zip')
 
     def test_an_import_in_the_launcher_drops_the_game_menus_waiting_import(self):
         self.game_with_save(self.game)

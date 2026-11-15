@@ -7,10 +7,11 @@ no account yet; the import makes one as the game would. Saves are committed thro
 a finished commit (ready-<n>) is newer than save/<account>: an import clears that folder, so the game loads the
 imported save.
 
-<game>/saves is the player's side. Import Saves takes a save put there first (a shared save's zip, its files, or the
-folder that holds them); otherwise the player picks a zip or a folder. Before the save is replaced it is copied to
-saves/backup <time>, and a save taken from saves/ moves to saves/imported <time>, so nothing is lost and nothing is
-imported twice.
+<game>/saves is the player's side. Import Saves takes a save put into saves/import first (a shared save's zip, its
+files, or the folder that holds them); otherwise the player picks a zip or a folder. Only saves/import is looked in:
+the rest of saves/ holds what the launcher and the game write there (backups, the save tree, live copies of the
+game's saves), none of it waiting to be imported. Before the save is replaced it is copied to saves/backup <time>, and
+a save taken from saves/import moves to saves/imported <time>, so nothing is lost and nothing is imported twice.
 
 A shared save is one zip (export_save, import_zip; section "sharing a save" below): a player attaches it to a bug
 report, and whoever fixes it imports it to reach the same place in the game. The game's settings menu exports and
@@ -50,14 +51,16 @@ def _rmtree(path):
 
 README = '''OOT-DEBUG-MENU saves folder
 
-To import a save, put it here and select Saves, then Import a Save, in the OOT-DEBUG-MENU launcher:
+To import a save, put it into the "import" folder here and select Saves, then Import a Save, in the OOT-DEBUG-MENU
+launcher:
 - a save someone shared: the OOT-DEBUG-MENU-save-....zip that OOT-DEBUG-MENU exported
 - the files of a Switch save backup, or the folder that holds them
 - one save slot (a folder such as slot_00): only that slot is replaced
 - an emulator's save folder for the game
 - the profile folder (or the whole game folder) of another OOT-DEBUG-MENU install
 
-You can also select Import a Save and choose the zip or the folder instead.
+You can also select Import a Save and choose the zip or the folder instead. Only the import folder is looked in:
+the other folders here are written by OOT-DEBUG-MENU and the game.
 
 Before a save is imported, the game's current save is copied here into a folder named "backup" and the date. An
 imported save moves into a folder named "imported" and the date. The game itself keeps its save in profile\\save.
@@ -66,7 +69,7 @@ HEX32 = re.compile(r'^[0-9a-fA-F]{32}$')
 SLOT = re.compile(r'^slot_\d\d$')
 SLOT_FILES = ('progress.sav', 'caption.sav')
 MAX_FILES, MAX_BYTES = 4000, 1 << 30   # a save is a few files of a few MB; more is a folder picked by mistake
-OURS = re.compile(r'^(backup|imported) \d{4}-\d\d-\d\d')   # what this module writes into saves/
+IMPORT = 'import'   # saves/import: where a save to import is put
 
 
 class SaveError(Exception):
@@ -77,10 +80,14 @@ def saves_dir(game):
     return Path(game) / 'saves'
 
 
+def import_dir(game):
+    return saves_dir(game) / IMPORT
+
+
 def ensure_saves_dir(game):
-    """<game>/saves with its README.txt."""
+    """<game>/saves with its README.txt and its import folder."""
     d = saves_dir(game)
-    d.mkdir(parents=True, exist_ok=True)
+    (d / IMPORT).mkdir(parents=True, exist_ok=True)
     readme = d / 'README.txt'
     try:
         current = readme.read_text(encoding='utf-8')
@@ -154,13 +161,12 @@ def _one_slot(src):
 
 
 def waiting(game):
-    """(source, names to leave out) of a save put into <game>/saves, or (None, ()). A zip there (export_save's) comes
-    first, the newest one; its source is the zip file."""
-    d = saves_dir(game)
+    """(source, names to leave out) of a save put into <game>/saves/import, or (None, ()). A zip there (export_save's)
+    comes first, the newest one; its source is the zip file."""
+    d = import_dir(game)
     if not d.is_dir():
         return None, ()
-    skip = {'README.txt'} | {e.name for e in d.iterdir() if e.is_dir() and OURS.match(e.name)}
-    entries = _entries(d, skip)
+    entries = _entries(d)
     if not entries:
         return None, ()
     zips = [e for e in entries if e.is_file() and e.suffix.lower() == '.zip']
@@ -168,7 +174,7 @@ def waiting(game):
         return max(zips, key=lambda e: e.stat().st_mtime), ()
     if len(entries) == 1 and entries[0].is_dir():
         return find_save(entries[0])
-    return (d, tuple(sorted(skip))) if any(e.is_file() or _has_file(e) for e in entries) else (None, ())
+    return (d, ()) if any(e.is_file() or _has_file(e) for e in entries) else (None, ())
 
 
 def _has_file(folder):
@@ -291,16 +297,17 @@ def import_save(game, folder=None, log=print):
     export_save (import_zip). Returns {'files', 'source', 'backup', 'slot'}; backup is the folder the replaced save
     went to, or None when there was none."""
     game = Path(game)
-    if folder is not None and Path(folder).resolve() == saves_dir(game).resolve():
-        folder = None   # the saves folder itself, picked in the dialog: what waits in it, as the button takes it
+    if folder is not None and Path(folder).resolve() in (saves_dir(game).resolve(), import_dir(game).resolve()):
+        folder = None   # the saves or the import folder, picked in the dialog: what waits there, as the button takes it
     if folder is not None and Path(folder).is_file():
         return import_zip(game, folder, log=log)
     from_saves = folder is None
     src, skip = waiting(game) if from_saves else find_save(folder)
     if src is None:
-        raise SaveError('the saves folder holds no save' if from_saves else f'{folder} holds no save files')
+        raise SaveError('the import folder (saves\\import) holds no save' if from_saves else
+                        f'{folder} holds no save files')
     stamp = time.strftime('%Y-%m-%d %H.%M.%S')
-    if Path(src).is_file():   # a shared save's zip put into saves/: it moves out once imported, as a folder does
+    if Path(src).is_file():   # a shared save's zip put into saves/import: it moves out once imported, as a folder does
         r = import_zip(game, src, log=log, stamp=stamp)
         _put_away(game, [Path(src).name], stamp)
         return r
@@ -310,12 +317,12 @@ def import_save(game, folder=None, log=print):
     files = _files(src, set(skip))
     slot = _one_slot(src)
     account, backup = _replace(game, src, files, slot, stamp, log)
-    if from_saves:   # what was put into saves/ moves out whole, so the next import does not take any of it again
-        saves = saves_dir(game)
-        if Path(src) == saves:
+    if from_saves:   # what was put into saves/import moves out whole, so the next import does not take it again
+        inbox = import_dir(game)
+        if Path(src) == inbox:
             top = sorted({rel.parts[0] for rel in files})
         else:   # the save sits in a folder that was put there (a game folder, an emulator's id folders)
-            top = [Path(src).relative_to(saves).parts[0]]
+            top = [Path(src).relative_to(inbox).parts[0]]
         _put_away(game, top, stamp)
     log(f'saves: imported {len(files)} files from {src} into {account / slot if slot else account}' +
         (f'; the old save is in {backup}' if backup else ''))
@@ -323,12 +330,11 @@ def import_save(game, folder=None, log=print):
 
 
 def _put_away(game, names, stamp):
-    """Move names (in <game>/saves) into saves/imported <stamp>."""
-    saves = saves_dir(game)
-    done = _fresh(saves, f'imported {stamp}')
+    """Move names (in <game>/saves/import) into saves/imported <stamp>."""
+    done = _fresh(saves_dir(game), f'imported {stamp}')
     done.mkdir()
     for name in names:
-        shutil.move(str(saves / name), str(done / name))
+        shutil.move(str(import_dir(game) / name), str(done / name))
 
 
 def _replace(game, src, files, slot, stamp, log):

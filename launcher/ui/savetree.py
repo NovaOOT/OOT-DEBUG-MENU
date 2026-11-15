@@ -149,10 +149,18 @@ class SaveTreeWindow:
                       cursor='hand2').pack(side='right', padx=3)
         self.zoom_label = tk.Label(tools, text='100%', bg=P['window'], fg=P['gold'], font=self.f_small)
         self.zoom_label.pack(side='right', padx=10)
+        self.side_buttons = {}
+        for side in ('right', 'bottom', 'left'):   # packed from the right, so they read Left, Bottom, Right
+            b = tk.Button(tools, text=side.capitalize(), command=lambda s=side: self.place_details(s),
+                          fg=P['text'], activebackground=P['button_hover'], activeforeground=P['text_bright'],
+                          font=self.f_small, relief='flat', bd=0, padx=10, pady=5, cursor='hand2')
+            b.pack(side='right', padx=1)
+            self.side_buttons[side] = b
+        tk.Label(tools, text='Details', bg=P['window'], fg=P['muted'], font=self.f_small).pack(side='right', padx=(16, 4))
 
         self.pane = tk.PanedWindow(w, orient='vertical', bg=P['line'], sashwidth=5, bd=0)
         self.pane.pack(fill='both', expand=True)
-        top = tk.Frame(self.pane, bg=P['window'])
+        top = self.tree_frame = tk.Frame(self.pane, bg=P['window'])
         c = self.canvas = tk.Canvas(top, bg=P['window'], highlightthickness=0, bd=0)
         ys = tk.Scrollbar(top, orient='vertical', command=c.yview)
         xs = tk.Scrollbar(top, orient='horizontal', command=c.xview)
@@ -169,8 +177,6 @@ class SaveTreeWindow:
         c.bind('<MouseWheel>', self.wheel)
         c.bind('<Shift-MouseWheel>', self.horizontal_wheel)
         c.bind('<Control-MouseWheel>', self.zoom_wheel)
-        self.pane.add(top, stretch='always', minsize=int(200 * self.s))
-
         # search results, over the tree while a search is typed
         self.results = tk.Listbox(top, bg=P['desc'], fg=P['text'], selectbackground=P['orange_dark'],
                                   selectforeground=P['on_text'], font=self.f_ui, relief='flat', activestyle='none',
@@ -181,13 +187,13 @@ class SaveTreeWindow:
         self.results_shown = False
         self.result_ids = []
 
-        info = tk.Frame(self.pane, bg=P['panel'])
-        self.pane.add(info, stretch='never', minsize=int(150 * self.s), height=int(220 * self.s))
+        info = self.info = tk.Frame(self.pane, bg=P['panel'])
         self.title = tk.Label(info, text='', bg=P['panel'], fg=P['text_bright'], font=self.f_title, anchor='w',
                               justify='left', wraplength=int(520 * self.s))
         self.title.pack(fill='x', padx=12, pady=(10, 0))
         self.meta = tk.Label(info, text='', bg=P['panel'], fg=P['muted'], font=self.f_small, anchor='w', justify='left')
         self.meta.pack(fill='x', padx=12)
+        info.bind('<Configure>', self.wrap_details)
         btns = tk.Frame(info, bg=P['panel'])
         btns.pack(side='bottom', fill='x', padx=10, pady=8)
 
@@ -207,7 +213,44 @@ class SaveTreeWindow:
                                   highlightthickness=0, activestyle='none', selectbackground=P['desc'],
                                   selectforeground=P['desc_text'])
         self.changes.pack(fill='both', expand=True, padx=12, pady=(6, 0))
+        side = self.app.settings.get('tree_details', 'right')
+        self.place_details(side if side in self.side_buttons else 'right', remember=False)
         self.show_details()
+
+    def place_details(self, side, remember=True):
+        """Put the details of the selected save below the tree or beside it, on the left or the right. The tree grows
+        mostly upwards, so a pane at the side covers less of it. The choice is kept in the launcher's settings."""
+        P, pane = self.P, self.pane
+        for child in pane.panes():
+            pane.forget(child)
+        tree_opts = dict(stretch='always', minsize=int(200 * self.s))
+        if side == 'bottom':
+            pane.configure(orient='vertical')
+            pane.add(self.tree_frame, **tree_opts)
+            pane.add(self.info, stretch='never', minsize=int(150 * self.s), height=int(220 * self.s))
+        else:
+            pane.configure(orient='horizontal')
+            info_opts = dict(stretch='never', minsize=int(280 * self.s), width=int(420 * self.s))
+            if side == 'left':
+                pane.add(self.info, **info_opts)
+                pane.add(self.tree_frame, **tree_opts)
+            else:
+                pane.add(self.tree_frame, **tree_opts)
+                pane.add(self.info, **info_opts)
+        for name, b in self.side_buttons.items():
+            b.configure(bg=P['orange_dark'] if name == side else P['panel'])
+        if remember and self.app.settings.get('tree_details') != side:
+            self.app.settings['tree_details'] = side
+            try:
+                self.app.settings.save()
+            except OSError:
+                pass
+
+    def wrap_details(self, event):
+        """Wrap the title and the line under it to the width the details pane has now."""
+        width = max(100, event.width - int(30 * self.s))
+        self.title.configure(wraplength=width)
+        self.meta.configure(wraplength=width)
 
     def close(self):
         for pending in (self.after, self.search_after, self.resize_after):

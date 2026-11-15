@@ -756,14 +756,22 @@ extern "C" void tab_debug(float scale) {
         int ne = (int)ents.size();
         if (r >= 0) entrance_k = r;
         int pick = ne ? ents[entrance_k] : -1;
-        const char *age_txt = !has_age ? (pick >= 0 ? "set by the area" : "-")
-                              : dbg_warp_age(pick) == DBG_AGE_CHILD ? "child" : "adult";
-        r = opt_text_row("##dbg_wage", "Age", age_txt, nullptr,
-                         "Child or adult at the destination. Areas with a child and an adult version switch the player's age; "
-                         "dungeons and other single-version areas keep the age the area itself asks for. Left and right switch.",
-                         false);
-        if (r == -1 || r == 1) {
-            want_child = want_child == 1 ? 0 : 1;
+        // Areas with a child and an adult file choose between them here, as a list like the rows above; an area with
+        // one file only shows what it sets.
+        static const char *const age_names[] = {"child", "adult"};
+        const char *age_desc = "Which version of the area to warp to, the child's or the adult's map, and the player becomes "
+                               "that age with it. Dungeons and other single-version areas keep the age the area itself "
+                               "asks for. Left and right switch; A opens the list.";
+        const int cur_age = pick >= 0 && dbg_warp_age(pick) == DBG_AGE_CHILD ? 0 : 1;
+        bool flip = false;
+        if (has_age) {
+            int ra = opt_text_choice("##dbg_wage", "Age", age_names, 2, cur_age, age_desc, true);
+            flip = ra >= 0 && ra != cur_age;
+        } else {
+            opt_text_row("##dbg_wage", "Age", pick >= 0 ? "set by the area" : "-", nullptr, age_desc, false);
+        }
+        if (flip) {
+            want_child = cur_age == 1 ? 1 : 0;   // the other one of what is shown
             int other = dbg_warp_other_age(pick);
             entrance_k = 0;
             if (other >= 0) {

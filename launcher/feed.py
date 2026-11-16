@@ -21,7 +21,7 @@ from pathlib import Path
 from . import net, versions
 
 MANIFEST = 'OOT-DEBUG-MENU-update.json'
-DEFAULT = {'type': 'github', 'repo': 'ProjectNovaAI/OOT-DEBUG-MENU'}
+DEFAULT = {'type': 'github', 'repo': 'NovaOOT/OOT-DEBUG-MENU'}
 GITHUB_API = 'https://api.github.com'
 
 

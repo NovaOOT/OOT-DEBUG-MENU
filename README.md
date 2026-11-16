@@ -3,15 +3,16 @@
 # OOT-DEBUG-MENU
 
 > [!NOTE]
-> **This is a fork of [NX2navi](https://github.com/tangerineturtle1/NX2navi) that adds a live in-game debug menu** for speedrun
-> practice, testing and bug hunting. The game, build and licence are otherwise unchanged. Everything below the line is the
-> original NX2navi README from before the fork: it describes the port itself and is not part of this fork's debug menu
-> changes. Details of the debug menu: [docs/debug-menu.md](docs/debug-menu.md).
+> **OOT-DEBUG-MENU is based on [NX2navi](https://github.com/tangerineturtle1/NX2navi) and adds a live in-game debug menu**
+> for speedrun practice, testing and bug hunting. It is developed on its own and no longer follows NX2navi. NX2navi's code
+> stays under its MIT licence (`LICENSE`); this project's additions are covered by `LICENSE-ADDITIONS`. Everything below the
+> line is the NX2navi README from the time this project started: it describes the port itself, not the debug menu.
+> Details of the debug menu: [docs/debug-menu.md](docs/debug-menu.md).
 
 ### Download and play
 
 1. Download `OOT-DEBUG-MENU-Setup-<version>.exe` from the
-   [Releases](https://github.com/ProjectNovaAI/OOT-DEBUG-MENU/releases) page. It is the only file you need.
+   [Releases](https://github.com/NovaOOT/OOT-DEBUG-MENU/releases) page. It is the only file you need.
 2. Put it in the folder that holds your own `.nup` dump of the game, then start it. It installs the launcher into
    `%LOCALAPPDATA%\Programs\OOT-DEBUG-MENU` without administrator rights, with its own Start menu entry and its own
    entry in Settings > Apps. Windows SmartScreen warns once: the programs are not signed.
@@ -23,7 +24,7 @@ OOT-DEBUG-MENU installs beside an NX2navi install and never touches it: each has
 The launcher looks for new versions on this repository's Releases page. No game files are in the download: the game is
 built from your own dump.
 
-### What this fork adds
+### What this project adds
 
 <!-- DEBUG-MENU-FEATURES:START (keep this list current whenever a feature is added) -->
 - **Debug tab** in the in-game menu (usable live while playing)
@@ -114,8 +115,8 @@ down can be given to a hotkey; the accessory and the boots can still be put on f
 ---
 
 > [!NOTE]
-> **The original NX2navi description, from before the fork.** Everything from here down was written for the NX2navi
-> project and describes the port itself. It is not part of this fork's debug menu changes.
+> **The original NX2navi description.** Everything from here down was written for the NX2navi project and describes the
+> port itself. It is not part of this project's debug menu changes.
 
 # NX2navi
 

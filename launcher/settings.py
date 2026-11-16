@@ -25,7 +25,7 @@ DEFAULTS = {
     'background_dim': 40,         # how much that picture is darkened, in percent
     'animations': True,           # the cursor glides, screens slide in, sparks drift, Navi bobs
     'sounds': 'low',              # the game's select and back sounds: off, low (sound.py DEFAULT_LEVEL), medium, high
-    'feed_repo': '',              # owner/name overriding feed.json, for testing a fork's releases
+    'feed_repo': '',              # owner/name overriding feed.json, for testing another repository's releases
     'github_token': '',           # only for a private release repository; stored as plain text
     'last_check': 0.0,
     'last_seen': '',              # the newest version the player was told about

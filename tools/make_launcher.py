@@ -94,7 +94,7 @@ TOP = ('LICENSE', 'LICENSE-ADDITIONS', 'THIRD_PARTY_NOTICES.md', 'nx2navi.ini.ex
 SKIP_DIRS = {'__pycache__', '.pytest_cache', 'native'}
 SKIP_SUFFIXES = {'.o', '.obj', '.pyc', '.exe', '.dll', '.a', '.lib'}
 TCLTK_FILES = ('_tkinter.pyd', 'tcl90.dll', 'tcl9tk90.dll', 'zlib1.dll', 'libtommath.dll')
-DEFAULT_FEED = 'ProjectNovaAI/OOT-DEBUG-MENU'
+DEFAULT_FEED = 'NovaOOT/OOT-DEBUG-MENU'
 
 
 def say(msg):

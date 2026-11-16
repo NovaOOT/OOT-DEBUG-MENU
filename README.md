@@ -1,26 +1,27 @@
-<p align="center"><img src="docs/images/navi.png" alt="OOT-DEBUG-MENU" width="160"></p>
+<p align="center"><img src="art/icon.jpeg" alt="OOT-PC" width="160"></p>
 
-# OOT-DEBUG-MENU
+# OOT-PC
+
+**OOT-PC** (The Legend of Zelda: Ocarina of Time PC) is a native PC port of *The Legend of Zelda: Ocarina of Time* (Nintendo Switch 2, game version
+1.1.1): a static recompilation into a Windows x86-64 program with a Vulkan renderer, and a live in-game debug menu for
+speedrun practice, testing and bug hunting. Details of the debug menu: [docs/debug-menu.md](docs/debug-menu.md).
 
 > [!NOTE]
-> **OOT-DEBUG-MENU is based on [NX2navi](https://github.com/tangerineturtle1/NX2navi) and adds a live in-game debug menu**
-> for speedrun practice, testing and bug hunting. It is developed on its own and no longer follows NX2navi. NX2navi's code
-> stays under its MIT licence (`LICENSE`); this project's additions are covered by `LICENSE-ADDITIONS`. Everything below the
-> line is the NX2navi README from the time this project started: it describes the port itself, not the debug menu.
-> Details of the debug menu: [docs/debug-menu.md](docs/debug-menu.md).
+> OOT-PC is based on [NX2navi](https://github.com/tangerineturtle1/NX2navi) by chrg6 and is now developed as its own
+> project. Most of its code is still NX2navi's; see [License](#license) for the terms that cover it.
 
 ### Download and play
 
-1. Download `OOT-DEBUG-MENU-Setup-<version>.exe` from the
-   [Releases](https://github.com/NovaOOT/OOT-DEBUG-MENU/releases) page. It is the only file you need.
+1. Download `OOT-PC-Setup-<version>.exe` from the
+   [Releases](https://github.com/NovaOOT/OOT-PC/releases) page. It is the only file you need.
 2. Put it in the folder that holds your own `.nup` dump of the game, then start it. It installs the launcher into
-   `%LOCALAPPDATA%\Programs\OOT-DEBUG-MENU` without administrator rights, with its own Start menu entry and its own
+   `%LOCALAPPDATA%\Programs\OOT-PC` without administrator rights, with its own Start menu entry and its own
    entry in Settings > Apps. Windows SmartScreen warns once: the programs are not signed.
 3. The launcher finds your dump. Select **Begin Installation**: it downloads the build tools (about 170 MB, once) and
    builds the game on your PC, which takes 20 to 45 minutes. Then select **Play**, press F1 (or D-pad right) in the
    game and open the Debug tab.
 
-OOT-DEBUG-MENU installs beside an NX2navi install and never touches it: each has its own folder, game, saves and updates.
+OOT-PC installs beside an NX2navi install and never touches it: each has its own folder, game, saves and updates.
 The launcher looks for new versions on this repository's Releases page. No game files are in the download: the game is
 built from your own dump.
 
@@ -45,7 +46,7 @@ built from your own dump.
 - **Keyboard hotkeys** with the menu closed: F2 start/stop the speedrun timer, F3 split, F4 reset, F5 save, F6 load, F7/F8 game speed, F9 timer, F12 reload area
 - **Your own hotkeys**: bind fly, hover, invulnerable, infinite magic and items, the overlays, reload area, switch age and more to two keys and a controller button each; D-pad up and down can be taken over from the game
 - **D-pad right opens the menu** on the Debug tab (the game only talks to Navi with it); any other controller button can be chosen instead, or none. LB and RB (or LT and RT) turn the menu's pages. In the game's pause menu the button stays the game's
-- **Memory scanner** (find and edit values) and a **remote console** for inspecting the running game (`NX2NAVI_DEBUG_REMOTE=1`), with hardware watchpoints and execution breakpoints
+- **Memory scanner** (find and edit values) and a **remote console** for inspecting the running game (`OOTPC_DEBUG_REMOTE=1`), with hardware watchpoints and execution breakpoints
 - **Save profiles and manual saves**: as many profiles as you like, each with its own save (a new one starts a new game), and any number of manual saves per profile, named with the date, time and area; switching or loading restarts the game into it, and the save it replaces is backed up. On the game's title screen and its Load page LB and RB (Q and R on the keyboard) change between profiles, with the profile in use shown; profiles with saved slots switch and refresh the list immediately; switches to or from an empty profile ask A to confirm a restart (B cancels). On the Save screen the same buttons choose where to save your current session; that profile becomes active, with its previous progress kept as a manual backup
 - **Change monitor**: logs every change to the game's flags and every actor that appears or disappears, as it happens, for glitch and arbitrary code execution hunting
 - **Health**: live health readout, invulnerable (always full; it, infinite magic and infinite items stay on from one start to the next), hold health at a chosen number of hearts, refill, set to a quarter heart, add or remove heart containers
@@ -112,17 +113,9 @@ button for each. A key or button bound there no longer reaches the game, except 
 down can be given to a hotkey; the accessory and the boots can still be put on from the equipment menu. Full list:
 [docs/controls.md](docs/controls.md) and [docs/debug-menu.md](docs/debug-menu.md).
 
----
+## The port
 
-> [!NOTE]
-> **The original NX2navi description.** Everything from here down was written for the NX2navi project and describes the
-> port itself. It is not part of this project's debug menu changes.
-
-# NX2navi
-
-**Join the official NX2navi update discord server: https://discord.com/invite/uf6gSrsPpq** 
-
-**NX2navi** is a static recompilation of *The Legend of Zelda: Ocarina of Time* for Nintendo Switch 2 (game
+**OOT-PC** is a static recompilation of *The Legend of Zelda: Ocarina of Time* for Nintendo Switch 2 (game
 version 1.1.1) into a native x86-64 application for Windows, with a Vulkan renderer
 ([docs/architecture.md](docs/architecture.md)).
 
@@ -170,7 +163,7 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - Stereo or 5.1 surround sound output, on the output device of your choice; the default microphone for the game's
   microphone input
 - The monitor the game opens on, straight in fullscreen when fullscreen is on
-- Your Discord status shows "Playing NX2navi" with the play time (on by default; the Game tab of the menu or the
+- Your Discord status shows "Playing The Legend of Zelda: Ocarina of Time PC" with the play time (on by default; the Game tab of the menu or the
   launcher's Settings turns it off)
 - Docked or handheld console mode
 - The game's textures stay compressed (BC3, about half the video memory at the same speed) unless the PC has 20 GiB of
@@ -178,12 +171,12 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Installing
 
-Download `NX2navi-Setup-<version>.exe` from the releases and start it next to your `.nup` dump. It is the only file
+Download `OOT-PC-Setup-<version>.exe` from the releases and start it next to your `.nup` dump. It is the only file
 you need. The launcher it
 installs finds the dump, downloads the build tools, builds the game on your PC (20 to 45 minutes, once) and starts
 it; afterwards it keeps the port up to date and rebuilds only what changed ([docs/launcher.md](docs/launcher.md)).
 [docs/README-BuildKit.md](docs/README-BuildKit.md) describes the same build by hand, [docs/building.md](docs/building.md)
-building from source. Settings are in the in-game menu and in `nx2navi.ini` ([nx2navi.ini.example](nx2navi.ini.example)
+building from source. Settings are in the in-game menu and in `OOT-PC.ini` ([OOT-PC.ini.example](OOT-PC.ini.example)
 lists every key). Controls: [docs/controls.md](docs/controls.md).
 
 Requirements: Windows 10 or later; an x86-64 CPU with SSE4.2 (AVX2/FMA machines get a faster build); 16 GB of RAM; about
@@ -200,12 +193,17 @@ and `VK_EXT_mesh_shader`. The setup is not signed, so SmartScreen warns on its f
 
 ## License
 
-The source is public to read. Its additions and changes are all rights reserved ([LICENSE-ADDITIONS](LICENSE-ADDITIONS)):
-no part of them may be copied or published without written permission. The base import stays under its
-[MIT License](LICENSE), and third-party code keeps its own license ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
-No license grants anything for Nintendo's game.
+OOT-PC is based on NX2navi, and its code is under NX2navi's terms:
 
-NX2navi is an independent, non-commercial fan project, not affiliated with or endorsed by Nintendo. *The Legend
+- The base import (the first commit of the history) is under the [MIT License](LICENSE), Copyright (c) 2026 Valiantsin
+  Dzerakh.
+- The additions and changes made after it are Copyright (c) 2026 chrg6, all rights reserved
+  ([LICENSE-ADDITIONS](LICENSE-ADDITIONS)): no part of them may be copied or published without written permission.
+- Third-party code keeps its own license ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+
+The source is public to read. No license grants anything for Nintendo's game.
+
+OOT-PC is an independent, non-commercial fan project, not affiliated with or endorsed by Nintendo. *The Legend
 of Zelda*, *Ocarina of Time* and *Nintendo Switch* are trademarks of Nintendo.
 
 ## Building from source

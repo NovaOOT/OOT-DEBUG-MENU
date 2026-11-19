@@ -50,6 +50,7 @@
 #include "mem_need.h"
 #include "nvn_hmap.h"
 #include "platform/platform.h"
+#include "prep_mem.h"
 #include "prp_file.h"
 #include "spirv_opt.h"
 #include "spirv_water.h"
@@ -6867,8 +6868,11 @@ static void skip_count(void) {
 }
 
 // Journal slot `slot`: the variant e its worker hands to the driver next, or zeros (e NULL) when the build returned.
+static uint64_t jr_since[JR_SLOTS];   // when slot k's build was handed to the driver, 0 between builds (lb_watchdog)
+
 static void journal_mark(int slot, const GfxWarmEnt *e) {
     if (slot < 0 || slot >= JR_SLOTS) return;
+    __atomic_store_n(&jr_since[slot], e ? plat_now_ns() : 0, __ATOMIC_RELAXED);
     uint8_t rec[JR_SLOT] = {0};
     if (e) memcpy(rec, e->iid, 32), rec[32] = e->stage;
     plat_mutex_lock(&SK.jlock);
@@ -8205,9 +8209,14 @@ static void bf_wait(void) {
 // the worker's journal slot.
 static void lb_warm_worker(void *arg) {
     int slot = (int)(intptr_t)arg;
+    prep_mem_enter();
     for (;;) {
+        prep_mem_gate();
         size_t i = (size_t)plat_inc64(&LB.next) - 1;
-        if (i >= LB.n) return;
+        if (i >= LB.n) {
+            prep_mem_leave();
+            return;
+        }
         int owned = 0, skip = skip_listed(LB.e[i].iid);
         const GfxShader *sh = skip ? NULL : gfx_shader_load_private(LB.e[i].iid, &owned);
         int st = sh ? gfx_shader_stage(sh) : -1;
@@ -8270,6 +8279,69 @@ static int prep_sample_warm(int *fast, int *got) {
 // It took 10 to 20 s on a player's PC at every update, all of it 42,000 libraries the driver gave back at once, and
 // it still takes the minutes of a full build when the driver no longer has them (a driver update, or a change of what
 // they are built with: 380 s on that PC once). OOTPC_LIB_WARM=force builds the whole list whatever the sample says.
+// ---- the preparation's watchdog. A driver build is one call into the driver's shader compiler, and nothing can stop
+// it from outside but the end of the process. One shader can send the compiler into a build that never returns and
+// takes memory without end: on a 64 GB PC (RTX 5090) --warm-shaders sat on the last 2 of 42,142 variants for over
+// 35 minutes while its private memory climbed past 62 GB at about 35 MB/s, leaving the system nothing; a PC with less
+// memory fails outright. So while lb_warm_prepared builds, this thread ends the run when a build in the driver's hands
+// has taken longer than OOTPC_SHADER_BUILD_MAX_S seconds (default 600, 0 never; the slowest builds of the default variants measured 77-153 s), when the system is critically short of
+// memory for 5 s (prep_mem.h PREP_MEM_CRIT_*), or when the preparation has stayed over its memory cap for a minute
+// while a build had been running for that minute. The journal then names the builds that are to blame: those running
+// for WD_BLAME_S or longer, else the oldest; the others are cleared from it. The process ends with WD_EXIT and the
+// journal left: tools/prepare_shaders.py runs the build again (--warm-shaders) and skip_init skips the named ones,
+// which build at their first draw instead, as after a driver crash.
+#define WD_EXIT 3
+#define WD_BLAME_S 30.0
+static volatile int wd_stop;
+
+static void lb_watchdog(void *arg) {
+    (void)arg;
+    double max_s = cfg_double("OOTPC_SHADER_BUILD_MAX_S");
+    uint64_t over_since = 0, crit_since = 0;
+    while (!__atomic_load_n(&wd_stop, __ATOMIC_ACQUIRE)) {
+        plat_sleep_ms(1000);
+        uint64_t now = plat_now_ns(), oldest = 0;
+        int busy = 0;
+        for (int k = 0; k < JR_SLOTS; k++) {
+            uint64_t t = __atomic_load_n(&jr_since[k], __ATOMIC_RELAXED);
+            if (t) busy++, oldest = !oldest || t < oldest ? t : oldest;
+        }
+        int over = 0, crit = 0;
+        double use = 0, cap = 0;
+        prep_mem_status(&over, &crit, &use, &cap);
+        over_since = over && busy ? (over_since ? over_since : now) : 0;
+        crit_since = crit && busy ? (crit_since ? crit_since : now) : 0;
+        double age = busy ? (double)(now - oldest) / 1e9 : 0;
+        char why[160];
+        if (busy && max_s > 0 && age > max_s)
+            snprintf(why, sizeof why, "a shader build has taken %.0f s, over the limit of %.0f s", age, max_s);
+        else if (crit_since && now - crit_since > 5000000000ull)
+            snprintf(why, sizeof why, "the system is almost out of memory (the preparation uses %.0f MB)", use);
+        else if (over_since && now - over_since > 60000000000ull && age > 60)
+            snprintf(why, sizeof why, "the preparation has used %.0f MB, over its cap of %.0f MB, for a minute", use, cap);
+        else
+            continue;
+        int blamed = 0;
+        for (int k = 0; k < JR_SLOTS; k++) {
+            uint64_t t = __atomic_load_n(&jr_since[k], __ATOMIC_RELAXED);
+            if (!t) continue;
+            if ((double)(now - t) / 1e9 >= WD_BLAME_S || t == oldest) blamed++;
+            else journal_mark(k, NULL);
+        }
+        rt_log("vk_pipeline: watchdog: %s; the run ends, and the %d variant(s) in the driver's hands that long are "
+               "skipped from now on (shader-prepare-skip.txt; they build at their first draw)", why, blamed);
+        printf("prepare-shaders: %s: stopped, and %d stuck shader(s) are skipped; the rest is built again\n", why, blamed);
+        fflush(stdout);
+        rt_log_sync();
+        plat_exit(WD_EXIT);
+    }
+}
+
+static void lb_watchdog_end(PlatThread *wd) {
+    __atomic_store_n(&wd_stop, 1, __ATOMIC_RELEASE);
+    if (wd) plat_thread_join(wd);
+}
+
 static void lb_warm_prepared(const char *dir, int sample) {
     char path[PLAT_PATH_MAX * 2 + 32];
     snprintf(path, sizeof path, "%s/shader-prepared.bin", dir);
@@ -8285,11 +8357,14 @@ static void lb_warm_prepared(const char *dir, int sample) {
     snprintf(jp, sizeof jp, "%s/shader-prepare-journal.bin", dir);
     SK.journal = plat_fs_create(jp, NULL);   // skip_init removed a leftover one
     if (!SK.journal) rt_log("vk_pipeline: cannot create %s: a driver crash in this run will not be recorded", jp);
+    __atomic_store_n(&wd_stop, 0, __ATOMIC_RELEASE);
+    PlatThread *wd = SK.journal ? plat_thread_new(lb_watchdog, NULL, "prep watchdog") : NULL;
     LB.n = n, LB.idle = 0, LB.t0 = now_ms();
     static const uint32_t no_pr[16], no_fs[4];
     lb_state(no_pr, no_fs);
     int fast = 0, got = 0;
     if (sample && P.gpl && strcmp(cfg_value("OOTPC_LIB_WARM"), "force") && prep_sample_warm(&fast, &got)) {
+        lb_watchdog_end(wd);
         if (SK.journal) plat_file_close(SK.journal), SK.journal = NULL, plat_file_delete(jp);
         printf("prepare-shaders: progress build %zu %zu\n", n, n);
         printf("prepare-shaders: the graphics driver's cache still has the prepared shaders (%d of %d sampled came from "
@@ -8319,6 +8394,7 @@ static void lb_warm_prepared(const char *dir, int sample) {
         }
     printf("prepare-shaders: progress build %zu %zu\n", n, n);
     fflush(stdout);
+    lb_watchdog_end(wd);
     if (SK.journal) plat_file_close(SK.journal), SK.journal = NULL, plat_file_delete(jp);   // every build returned
     lb_report("preparation done");
     // with gpl off only compute variants are built: say so, rather than count the skipped ones as built
@@ -8505,6 +8581,7 @@ static int seed_pipelines(const char *dir) {
 // ocarina.exe --prepare-pipelines: the list's pipelines alone, for a folder whose shaders are prepared already.
 int vk_pipeline_prepare_pipelines(void) {
     prep_mode = 1;   // builds into pipeline-cache.bin alone (cache_load)
+    prep_mem_begin("--prepare-pipelines");   // the memory cap (prep_mem.h), before any worker starts
     if (!ensure_init()) {
         fprintf(stderr, "prepare-pipelines: no Vulkan device\n");
         return 1;
@@ -8525,6 +8602,7 @@ int vk_pipeline_prepare_pipelines(void) {
 // compute pipeline is built once into the driver's disk cache (lb_warm_prepared). No game runs.
 int vk_pipeline_prepare_shaders(void) {
     prep_mode = 1;   // builds into pipeline-cache.bin alone (cache_load)
+    prep_mem_begin("--prepare-shaders");   // the memory cap (prep_mem.h), before any worker starts
     if (!ensure_init()) {
         fprintf(stderr, "prepare-shaders: no Vulkan device\n");
         return 1;
@@ -8548,6 +8626,7 @@ int vk_pipeline_prepare_shaders(void) {
 // needed then took 40-220 ms in play instead of 0.2 ms. Seconds when the libraries are still there.
 int vk_pipeline_warm_shaders(void) {
     prep_mode = 1;   // builds into pipeline-cache.bin alone (cache_load)
+    prep_mem_begin("--warm-shaders");   // the memory cap (prep_mem.h), before any worker starts
     if (!ensure_init()) {
         fprintf(stderr, "warm-shaders: no Vulkan device\n");
         return 1;

@@ -84,6 +84,7 @@ def slow_unused(s):
     return any(s['source'].endswith(suffix) and len(s['code']) > limit for suffix, limit in SLOW_UNUSED)
 JOURNAL = 'shader-prepare-journal.bin'   # vk_pipeline.c skip_init: a 64-byte slot per worker, input id first
 RETRIES = 3
+WATCHDOG_EXIT = 3   # runtime/vk_pipeline.c WD_EXIT: a stuck build was stopped, the journal names it
 
 
 BUNDLED_LIST = ROOT / 'tools' / 'data' / 'shader_list.tsv'   # the installer archive carries a copy (no git, no refs/)
@@ -315,8 +316,10 @@ def main():
     for _ in range(RETRIES):
         if not r.returncode or not driver_crashed(out):
             break
-        print(f'prepare_shaders: the graphics driver crashed while building shaders (rc={r.returncode}); building them '
-              'again without the variants it was building (ocarina.exe --warm-shaders)', flush=True)
+        what = ('a shader build got stuck and the watchdog stopped it' if r.returncode == WATCHDOG_EXIT
+                else 'the graphics driver crashed while building shaders')
+        print(f'prepare_shaders: {what} (rc={r.returncode}); building them again without the variants it was '
+              'building (ocarina.exe --warm-shaders)', flush=True)
         r = subprocess.run([str(exe), '--warm-shaders'], cwd=str(out))
     print(f'{a.exe} --prepare-shaders: rc={r.returncode}; total {time.monotonic() - t0:.1f} s')
     return r.returncode

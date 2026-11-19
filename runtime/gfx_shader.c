@@ -88,6 +88,7 @@
 #include "host.h"
 #include "mem_budget.h"
 #include "platform/platform.h"
+#include "prep_mem.h"
 #include "prof.h"
 #include "prp_file.h"
 #include "spv_store.h"
@@ -2908,9 +2909,14 @@ void gfx_shader_prewarm_progress(int64_t *done, int64_t *total, int64_t *transla
 
 static void warm_worker(void *arg) {
     Warm *w = arg;
+    prep_mem_enter();
     for (;;) {
+        prep_mem_gate();
         size_t i = (size_t)plat_inc64(&w->next) - 1;
-        if (i >= w->n_named + w->n_other) return;
+        if (i >= w->n_named + w->n_other) {
+            prep_mem_leave();
+            return;
+        }
         if (i < w->n_named) {
             if (!(w->out[i] = gfx_shader_load_input(w->named[i], 1))) plat_inc32(&w->missing);
         } else {
@@ -3362,7 +3368,9 @@ static void prg_collect(const uint8_t *rec, void *ctx) {
 static void prep_worker(void *arg) {
     Prep *p = arg;
     preparing = &p->jobs;
+    prep_mem_enter();
     for (;;) {
+        prep_mem_gate();
         size_t i = (size_t)plat_inc64(&p->next) - 1;
         if (i >= p->n_ans) break;
         const uint8_t *r = p->ans + i * ANS_REC;
@@ -3386,6 +3394,7 @@ static void prep_worker(void *arg) {
         else if (p->iid) memcpy(p->iid[i], s->iid, 32);
         plat_inc64(&p->done);
     }
+    prep_mem_leave();
     preparing = NULL;
 }
 

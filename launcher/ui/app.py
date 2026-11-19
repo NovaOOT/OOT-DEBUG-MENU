@@ -993,6 +993,44 @@ class App:
                    desc=('Show "Playing The Legend of Zelda: Ocarina of Time PC" with your play time in your Discord status while the game runs. '
                          'The game\'s menu switches it too (Game tab).',))
 
+    # The choices of Max RAM for Shaders, in GB; 0 is the game's default, half the installed memory.
+    SHADER_RAM_GB = (0, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64)
+
+    def shader_ram_row(self, game_dir):
+        """The game's shader_prepare_ram_gb (OOT-PC.ini, runtime/prep_mem.h): the most memory preparing the shaders
+        may take, read by ocarina.exe --prepare-shaders at the install, an update or a rebuild."""
+        total = winsys.installed_ram_gb()
+        choices = [g for g in self.SHADER_RAM_GB if not g or total is None or g <= total]
+
+        def current():
+            try:
+                v = float(gameini.get(game_dir, 'shader_prepare_ram_gb') or 0)
+            except (OSError, ValueError):   # unreadable file or value: the game's default
+                v = 0
+            return min(choices, key=lambda g: abs(g - v)) if v > 0 else 0
+
+        def label():
+            g = current()
+            if g:
+                return f'{g} GB'
+            return f'Automatic ({max(1, round(total / 2))} GB)' if total else 'Automatic'
+
+        def step(d):
+            if self.game_busy(game_dir):   # the game writes the same file while it runs (discord_row)
+                self.message = 'Quit the game first: the game writes its settings file while it runs.'
+                return
+            i = (choices.index(current()) + d) % len(choices)
+            try:
+                gameini.put(game_dir, 'performance', 'shader_prepare_ram_gb', str(choices[i]))
+                self.message = ''
+            except OSError as e:
+                self.message = f'The game\'s settings could not be written: {e}'
+        return Row('enum', 'Max RAM for Shaders', get=label, left=lambda: step(-1), right=lambda: step(1),
+                   desc=('The most memory that preparing the shaders may take, after an install, an update or Rebuild '
+                         'the Game. A lower limit makes that step slower but leaves the rest of your PC its memory. '
+                         'Automatic takes at most half of it, and the step also slows down whenever the PC is nearly '
+                         'out of memory.',))
+
     def choose_dump(self):
         start = str(Path(self.settings.get('dump')).parent) if self.settings.get('dump') else str(Path.home())
         path = filedialog.askopenfilename(parent=self.root, title='Choose your Ocarina of Time dump',
@@ -2368,6 +2406,7 @@ class App:
                         'compiles only what changed. Off: they are deleted after each build.'),
             self.channel_row(),
             *([self.discord_row(gd)] if gd and Path(gd).is_dir() else []),
+            *([self.shader_ram_row(gd)] if gd and Path(gd).is_dir() else []),
             Row('divider'),
             Row('value', 'Game Folder', gd or 'Not chosen', on=lambda: gd and self.open(gd),
                 desc=('Open the game folder: saves in profile, the game\'s settings in OOT-PC.ini, its logs in '

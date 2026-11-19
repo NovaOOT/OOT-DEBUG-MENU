@@ -419,3 +419,17 @@ def is_windows():
 
 def frozen_python():
     return Path(sys.executable).parent
+
+
+def installed_ram_gb():
+    """The installed physical memory in GB (GlobalMemoryStatusEx), None when it cannot be read."""
+    import ctypes.wintypes as wt
+
+    class Status(ctypes.Structure):
+        _fields_ = [('dwLength', wt.DWORD), ('dwMemoryLoad', wt.DWORD)] +                    [(n, ctypes.c_ulonglong) for n in ('total', 'avail', 'tpf', 'apf', 'tv', 'av', 'aev')]
+    try:
+        st = Status()
+        st.dwLength = ctypes.sizeof(st)
+        return st.total / 2 ** 30 if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)) else None
+    except (AttributeError, OSError):   # not Windows
+        return None

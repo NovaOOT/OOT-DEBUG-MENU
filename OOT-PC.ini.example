@@ -350,6 +350,16 @@
 # the new translator cannot translate keeps its old translation. 0: shaders the new translator has not translated yet
 # are translated before they are used (at start or when the game first draws them), as earlier versions did.
 # shader_carry = 1
+# The most memory, in GB, that preparing the shaders (after an install, an update or a rebuild) may take, 1 to 256.
+# Over it, fewer shaders are prepared at once until memory is free again, so it takes longer but the PC keeps room for
+# everything else. Whatever it is set to, the preparation also slows down while the PC has less than 1 GB of memory
+# free. 0: half the installed memory. The launcher's Settings set it ("Max RAM for Shaders").
+# shader_prepare_ram_gb = 0
+# The most seconds one shader may take to build into the graphics driver's cache while the shaders are prepared
+# (0: no limit). A build past it, or one still running while the PC is almost out of memory or the preparation has
+# stayed over the memory limit above for a minute, stops the step: the stuck shaders are skipped from then on (they
+# build when the game first draws them) and the step goes on with the rest.
+# shader_build_max_s = 600
 # 1 keeps a shader's translation (its SPIR-V) compressed in memory once no pipeline was made of it for
 # shader_compress_idle_s seconds (1 to 3600), and decompresses it when one is made again (about 0.06 ms for most
 # shaders): about 570 MiB less memory with 7,000 shaders in memory, the picture unchanged. 0 keeps every translation

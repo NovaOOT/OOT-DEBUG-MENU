@@ -293,6 +293,9 @@ def build_runtime_lib(folder, ver, out, wine):
         return
     if not (app / 'lib' / 'libootpcrt.a').is_file():
         sys.exit('the prebuilt runtime was not written')
+    # The compile packed the menu skin's PNGs into generated/menu-ui/forest_pixels.h (build_menu_art.py), a generated
+    # file the release never carries: make_game.py packs it again from the PNGs on the player's PC
+    (app / 'generated' / 'menu-ui' / 'forest_pixels.h').unlink(missing_ok=True)
     # The release's compiler is the one players build with (toolchain.lock.json): a profile it left out of the
     # runtime (make_game.py pgo_profile says why in the lines above) their builds would leave out too
     built = json.loads((app / 'lib' / 'runtime-lib.json').read_text(encoding='utf-8'))

@@ -76,7 +76,7 @@ static const char *const known[] = {
     "PRESNAP_PLACE",
     "REPLAY_CHECK", "RESOLVE_CHECK", "RESTART_WAIT", "ROMFS", "ROMFS_INDEX", "ROMFS_MMAP", "ROMFS_MODS", "ROMFS_PATCHES",
     "ROMFS_PROOF_DIR", "ROMFS_VERIFY", "RSTICK_DEADZONE", "RUMBLE", "RUMBLE_CURVE", "RUMBLE_HD", "RUMBLE_HD_MS", "RUMBLE_STRENGTH", "RUMBLE_TRIGGERS", "SHADER_CACHE",
-    "SHADER_CACHE_FLUSH", "BG_YIELD", "SHADER_CARRY", "SHADER_PREPARE_RAM_GB", "SHADER_BUILD_MAX_S", "SHADER_COMPRESS", "SHADER_COMPRESS_IDLE_S", "SHADER_MEMO", "SHADOW_BULK_WRITE", "SHADOW_CHECK", "SHADOW_COMPARE", "SHADOW_PCF", "SHADOW_RANGE", "SHADOW_RES", "SHADOW_SCALE", "SHADOW_TABLE_STORES", "SHARED_FONTS", "SHARPNESS", "SHOTS", "SHOTS_DIR",
+    "SHADER_CACHE_FLUSH", "BG_YIELD", "SHADER_CARRY", "SHADER_CARRY_PASS", "SHADER_UPDATE", "SHADER_PREPARE_RAM_GB", "SHADER_BUILD_MAX_S", "SHADER_COMPRESS", "SHADER_COMPRESS_IDLE_S", "SHADER_MEMO", "SHADOW_BULK_WRITE", "SHADOW_CHECK", "SHADOW_COMPARE", "SHADOW_PCF", "SHADOW_RANGE", "SHADOW_RES", "SHADOW_SCALE", "SHADOW_TABLE_STORES", "SHARED_FONTS", "SHARPNESS", "SHOTS", "SHOTS_DIR",
     "SVC_SLOW_MS",
     "SHOTS_FULL", "SPEED_PROBE", "SPIN", "SPIN_HANDOFF_US", "SPLIT_DRAWS", "SPLIT_IDLE", "SPLIT_IN_PASS", "SPLIT_US", "SPV_MARK_TEST", "SPV_OVERRIDE", "STICK_DEADZONE", "STICK_SENS",
     "SWKBD_ANSWER",
@@ -166,7 +166,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"PREWARM_XLATE", "performance"}, {"GPL", "performance"}, {"ASTC", "performance"}, {"MEMORY", "performance"},
     {"TEX_ALIAS", "performance"}, {"DEPTH_INIT_INLINE", "performance"}, {"DEPTH_ALIAS_LOG", "diagnostics"}, {"TEX_DISUSE", "performance"}, {"TEX_DISUSE_EVICT", "performance"}, {"TEX_GEN_UNDO", "performance"}, {"TEX_REUSE", "performance"}, {"TEX_SPLIT_FILL", "performance"}, {"TEX_VRAM_PRESSURE", "performance"}, {"TEX_RELEASED_HOLD", "performance"}, {"TEX_PROC_COMMIT_MB", "performance"}, {"ASTC_BC", "performance"}, {"LOD_GUARD", "performance"}, {"FIX_C0", "performance"}, {"FIX_ZERO", "performance"}, {"WATER_PROJECTIVE", "performance"},
     {"SHADER_COMPRESS", "performance"}, {"SHADER_COMPRESS_IDLE_S", "performance"},
-    {"BIND_SKIP", "performance"}, {"SHADER_CACHE_FLUSH", "performance"}, {"SHADER_CARRY", "performance"}, {"BG_YIELD", "performance"}, {"SHADER_PREPARE_RAM_GB", "performance"}, {"SHADER_BUILD_MAX_S", "performance"}, {"PIPELINE_CACHE_PLAY", "performance"}, {"PIPELINE_CACHE_PLAY_MB", "performance"}, {"FFX_PIPE_CACHE", "performance"}, {"SHADER_MEMO", "performance"}, {"PIPE_MEMO", "performance"}, {"TEX_MEMO", "performance"}, {"DESC_TEMPLATE", "performance"},
+    {"BIND_SKIP", "performance"}, {"SHADER_CACHE_FLUSH", "performance"}, {"SHADER_CARRY", "performance"}, {"SHADER_CARRY_PASS", "performance"}, {"SHADER_UPDATE", "performance"}, {"BG_YIELD", "performance"}, {"SHADER_PREPARE_RAM_GB", "performance"}, {"SHADER_BUILD_MAX_S", "performance"}, {"PIPELINE_CACHE_PLAY", "performance"}, {"PIPELINE_CACHE_PLAY_MB", "performance"}, {"FFX_PIPE_CACHE", "performance"}, {"SHADER_MEMO", "performance"}, {"PIPE_MEMO", "performance"}, {"TEX_MEMO", "performance"}, {"DESC_TEMPLATE", "performance"},
     {"TEX_CLOBBER", "performance"}, {"LOW_END_GPU", "performance"},
     {"PUSH_SKIP", "performance"}, {"SPLIT_DRAWS", "performance"}, {"SPLIT_IDLE", "performance"}, {"SPLIT_IN_PASS", "performance"}, {"SPLIT_US", "performance"}, {"VK_VALIDATION", "performance"},
     {"VK_DYN_VERTEX", "performance"}, {"VK_DYN_A2C", "performance"}, {"VK_SUBGROUP_PIN", "performance"}, {"VK_RECONVERGE", "performance"},
@@ -395,7 +395,9 @@ static const CfgMeta metas[] = {
     // all|<count>: the compute pipelines the boot keeps, those dispatched most recently (vk_pipeline.c, compute-used.bin)
     {"COMPUTE_KEEP", "512", NULL, RESTART},
     {"BG_YIELD", "auto", "auto|0|1", RESTART},   // perf.c perf_background_yield: background builds wait while frames are late
-    {"SHADER_CARRY", "1", "0|1", RESTART},   // gfx_shader.c "Carry": a previous translator's translations until translated again
+    {"SHADER_CARRY", "1", "0|1", RESTART},
+    {"SHADER_CARRY_PASS", "0", "0|1", RESTART},
+    {"SHADER_UPDATE", "prepare", "prepare|keep", RESTART},   // read by tools/make_game.py shader_carry, not the game   // gfx_shader.c gfx_shader_carry_start: the background pass while the game runs   // gfx_shader.c "Carry": a previous translator's translations until translated again
     {"SHADER_PREPARE_RAM_GB", "0", "0..256", RESTART},   // prep_mem.h: the shader preparation's memory cap, 0 half the RAM
     {"SHADER_BUILD_MAX_S", "600", "0..86400", RESTART},   // vk_pipeline.c lb_watchdog: one driver build's time limit in the preparation
     // gfx_shader.c "SPIR-V at rest": a shader's SPIR-V is kept zstd-compressed in memory once no pipeline was made of

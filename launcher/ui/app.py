@@ -993,6 +993,62 @@ class App:
                    desc=('Show "Playing The Legend of Zelda: Ocarina of Time PC" with your play time in your Discord status while the game runs. '
                          'The game\'s menu switches it too (Game tab).',))
 
+    def shader_update_row(self, game_dir):
+        """The game's shader_update (OOT-PC.ini, tools/make_game.py shader_carry): what an update that brings a new
+        shader translator does with the shaders prepared before it."""
+        def current():
+            try:
+                v = (gameini.get(game_dir, 'shader_update') or '').strip().lower()
+            except OSError:
+                v = ''
+            return 'keep' if v == 'keep' else 'prepare'
+
+        def step(_d):
+            if self.game_busy(game_dir):   # the game writes the same file while it runs (discord_row)
+                self.message = 'Quit the game first: the game writes its settings file while it runs.'
+                return
+            try:
+                gameini.put(game_dir, 'performance', 'shader_update', 'prepare' if current() == 'keep' else 'keep')
+                self.message = ''
+            except OSError as e:
+                self.message = f'The game\'s settings could not be written: {e}'
+        return Row('enum', 'Shaders After Updates',
+                   get=lambda: 'Keep the Old Ones' if current() == 'keep' else 'Prepare Again',
+                   left=lambda: step(-1), right=lambda: step(1),
+                   desc=('What an update that brings a new shader translator does with your shaders. Prepare Again '
+                         '(recommended): the update translates them all again before you play, which can take a '
+                         'while on a slower processor. Keep the Old Ones: the update is quick and the game goes on '
+                         'with the earlier translations, which may miss fixes of the new translator and run or look '
+                         'a little worse; Prepare the Shaders Again does it later. The game never does it while you '
+                         'play.',))
+
+    def shaders_kept(self, game_dir):
+        """The OOT-PC version whose shaders the game still draws with after an update kept them ('pre-0.11.0' when
+        that was not recorded), or '' when the shaders are the current translator's (tools/make_game.py KEPT_MARK)."""
+        if not game_dir:
+            return ''
+        try:
+            text = (Path(game_dir) / 'shaders-kept.txt').read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            return ''
+        first = text.splitlines()[0] if text else ''
+        return first.partition('version:')[2].strip() if first.startswith('version:') else 'pre-0.11.0'
+
+    def shaders_label(self, version):
+        """How a kept shader version reads on a row: 'Pre-0.11.0 shaders', '0.11.2 shaders'."""
+        return 'Pre-0.11.0 shaders' if version.lower().startswith('pre-') else f'{version} shaders'
+
+    def prepare_shaders_row(self, game_dir):
+        kept = self.shaders_kept(game_dir)
+        label = self.shaders_label(kept) if kept else ''
+        return Row('value', 'Prepare the Shaders Again', f'{label} in use' if kept else '', 'arrow',
+                   on=self.start_prepare_shaders,
+                   desc=('Translate every shader again with the current translator and build them for your graphics '
+                         'card, as at the install. It takes a while, and only runs while the game is closed. '
+                         + (f'Your game still uses its {label.lower() if label.startswith("Pre") else label}, kept '
+                            'by an update (Shaders After Updates).' if kept
+                            else 'Use it if shaders look wrong or the game stutters where it did not before.'),))
+
     # The choices of Max RAM for Shaders, in GB; 0 is the game's default, half the installed memory.
     SHADER_RAM_GB = (0, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64)
 
@@ -1151,6 +1207,7 @@ class App:
             Row('value', 'Rebuild the Game', rebuild_value, rebuild_style, on=self.start_rebuild,
                 desc=('Build the game again from the files of the last build. Only what changed is compiled. Use it '
                       'after changing build tools, or if the game stopped starting.',)),
+            *([self.prepare_shaders_row(gd)] if self.shaders_kept(gd) else []),
             Row('value', 'Customize Launcher', art.THEMES[art.theme]['label'], 'arrow',
                 on=lambda: self.show('customize'),
                 desc=('Colour scheme, background picture, animations and sounds.',)),
@@ -2386,6 +2443,13 @@ class App:
         gd = self.settings.get('game_dir')
         self.run_job(jobs.RebuildJob(self.ctx, gd, self.settings.get('dump')), 'home')
 
+    def start_prepare_shaders(self):
+        gd = self.settings.get('game_dir')
+        if self.game_busy(gd):
+            self.message = 'Quit the game first: the shaders are only prepared while the game is closed.'
+            return
+        self.run_job(jobs.ShadersJob(self.ctx, gd, self.settings.get('dump')), 'home')
+
     # ---- settings
 
     def rows_settings(self):
@@ -2407,6 +2471,7 @@ class App:
             self.channel_row(),
             *([self.discord_row(gd)] if gd and Path(gd).is_dir() else []),
             *([self.shader_ram_row(gd)] if gd and Path(gd).is_dir() else []),
+            *([self.shader_update_row(gd), self.prepare_shaders_row(gd)] if gd and Path(gd).is_dir() else []),
             Row('divider'),
             Row('value', 'Game Folder', gd or 'Not chosen', on=lambda: gd and self.open(gd),
                 desc=('Open the game folder: saves in profile, the game\'s settings in OOT-PC.ini, its logs in '

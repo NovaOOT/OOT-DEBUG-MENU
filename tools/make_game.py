@@ -2282,31 +2282,51 @@ def note_cache_translator(out):
     os.replace(tmp, ids)
 
 
-# Carrying the shaders over moves their translation into play: a background pass translates them all again (about
-# 44,000) and the pipelines whose shaders changed are built again beside the game. With fewer logical processors than
-# this, that work and the game's own threads do not both fit: a player's 4-core processor ran the game at 2 to 15 fps
-# for the hours the pass would take (about one shader a second). There the update prepares the shaders before play.
-CARRY_MIN_CPUS = 12
+# What an update or Rebuild the Game does with the shaders prepared before it when the translator changed
+# (SHADER_UPDATE, the launcher's Settings row "Shaders After Updates"): prepare, the default, translates every shader
+# again before play; keep goes on with the earlier translator's translations (runtime/gfx_shader.c "Carry"), so the
+# update is quick, and the shaders are prepared again only when the player asks (--prepare-shaders-again, the
+# launcher's "Prepare the Shaders Again"). Never while the game runs: on a 4-core processor that ran the game at 2 to
+# 15 fps for hours (the game's background pass is off, OOTPC_SHADER_CARRY_PASS). shader_carry = 0 means prepare too.
+# KEPT_MARK in the game folder says the shaders in use are an earlier translator's, for the launcher's row: its first
+# line "version: X" names the OOT-PC version that prepared them. SHADERS_VERSION, written by each full preparation
+# from 0.11.2 on, holds that version and the translator's identity. Earlier preparations wrote nothing: the translator
+# 0.11.0 and 0.11.1 shipped is known by its identity, and any other is older than 0.11.0.
+KEPT_MARK = 'shaders-kept.txt'
+SHADERS_VERSION = 'shaders-version.txt'
+KNOWN_TRANSLATORS = {'6866a13e0074587881b17b957cc5c84cb3caae313387ff1a6d2aeeb925efc3d2': '0.11.0'}
 
-def cpus_usable():
-    """The logical processors this process may run on (os.process_cpu_count, Python 3.13 on), else all of them."""
-    return (getattr(os, 'process_cpu_count', None) or os.cpu_count)() or 1
+def shaders_version(out, translator):
+    """The OOT-PC version whose preparation made the shaders of translator (a 64-digit identity): SHADERS_VERSION
+    when it names that translator, else KNOWN_TRANSLATORS, else 'pre-0.11.0'."""
+    try:
+        lines = (out / SHADERS_VERSION).read_text(encoding='utf-8', errors='replace').split()
+        if len(lines) >= 2 and lines[1].lower() == translator.lower():
+            return lines[0]
+    except OSError:
+        pass
+    return KNOWN_TRANSLATORS.get(translator.lower(), 'pre-0.11.0')
 
-def shader_carry(out):
-    """Whether the game carries the shaders prepared before an update over (runtime/gfx_shader.c, OOTPC_SHADER_CARRY)
-    and there are some: shader-prepared.bin is written by a finished preparation, and the cache must name the
-    translator its translations are of (SHADER_IDS, note_cache_translator), else the game has nothing to carry them
-    over by. The environment or OOT-PC.ini set to 0 turns it off, to 1 on; unset, it is on with CARRY_MIN_CPUS logical
-    processors or more."""
-    setting = os.environ.get('OOTPC_SHADER_CARRY', '').strip()
+def ini_value(out, key):
+    """KEY's value in the game folder's OOT-PC.ini (OOTPC_ and NX2NAVI_ prefixes allowed, a # comment cut), '' when
+    the file or the key is not there."""
     try:
         for line in (out / 'OOT-PC.ini').read_text(encoding='utf-8-sig', errors='replace').splitlines():
             k, eq, v = line.strip().partition('=')
-            if eq and k.strip().upper().removeprefix('OOTPC_').removeprefix('NX2NAVI_') == 'SHADER_CARRY':
-                setting = setting or v.split('#')[0].strip().strip('"')
+            if eq and k.strip().upper().removeprefix('OOTPC_').removeprefix('NX2NAVI_') == key:
+                return v.split('#')[0].strip().strip('"')
     except OSError:
         pass
-    if setting == '0' or (setting != '1' and cpus_usable() < CARRY_MIN_CPUS):
+    return ''
+
+def shader_carry(out):
+    """Whether this update keeps the shaders prepared before it (SHADER_UPDATE keep, from the environment or
+    OOT-PC.ini) and there are some: shader-prepared.bin is written by a finished preparation, and the cache must name
+    the translator its translations are of (SHADER_IDS, note_cache_translator), else the game has nothing to carry
+    them over by."""
+    if (os.environ.get('OOTPC_SHADER_CARRY', '').strip() or ini_value(out, 'SHADER_CARRY')) == '0':
+        return False
+    if (os.environ.get('OOTPC_SHADER_UPDATE', '').strip() or ini_value(out, 'SHADER_UPDATE')).lower() != 'keep':
         return False
     return (out / 'shader-prepared.bin').is_file() and bool(cache_identities(out))
 
@@ -2470,7 +2490,19 @@ def step_shaders(out, update=False):
     if carry and not why:
         for seed in SEED_FILES:
             (out / seed).unlink(missing_ok=True)
-        say('  the shaders prepared before this update stay in use; the game translates them again in the background')
+        say('  the shaders prepared before this update stay in use (Shaders After Updates: keep); Prepare the Shaders '
+            'Again in the launcher translates them again')
+        # the mark only when they are an earlier translator's: shader-prepared.bin names the one that prepared them
+        try:
+            current = (out / 'ootpc_xlate.id').read_text(encoding='ascii', errors='replace').strip().lower()
+        except OSError:
+            current = ''
+        before = prepared_from(out)
+        if before and current and before['translator'] != current and not (out / KEPT_MARK).is_file():
+            (out / KEPT_MARK).write_text(f'version: {shaders_version(out, before["translator"])}\n'
+                                         "The shaders in use were prepared by an earlier shader translator. The "
+                                         "launcher's Prepare the Shaders Again translates them with the current one.\n",
+                                         encoding='utf-8')
         if loose_shaders(out) >= PACK_LOOSE_MIN:
             # minutes without a count (4 on a player's 328,000 files): the row says what runs meanwhile
             emit('progress', step='shaders', fraction=0.0, detail='Folding the shader cache into one file')
@@ -2482,6 +2514,10 @@ def step_shaders(out, update=False):
         fail('preparing the shaders failed (the lines above say why); the game still runs, compiling shaders as it '
              'meets them. Run the build again to retry this step')
     # translated now: the shader cache holds them. seed-pipeline-keys.bin stays: --warm-shaders builds from it again
+    (out / KEPT_MARK).unlink(missing_ok=True)
+    after = prepared_from(out)
+    if after:   # which OOT-PC prepared them, for the launcher once a later update keeps them
+        (out / SHADERS_VERSION).write_text(f'{kit_version().split("+")[0]}\n{after["translator"]}\n', encoding='utf-8')
     for seed in SEED_FILES:
         (out / seed).unlink(missing_ok=True)
     pack_shader_cache(out)
@@ -2779,6 +2815,9 @@ def build_main():
     ap.add_argument('--retune', action='store_true',
                     help="with --rebuild: compile the lifted code for this processor's level even when the objects "
                          'kept from before an update were compiled for another (Rebuild the Game)')
+    ap.add_argument('--prepare-shaders-again', action='store_true',
+                    help='with --rebuild: translate every shader again with the current translator and build the '
+                         'pipelines, even when the shaders were kept from before an update (SHADER_UPDATE keep)')
     ap.add_argument('--out', help='the folder for the finished game')
     ap.add_argument('--check', action='store_true', help='only check the game\'s version; builds nothing')
     ap.add_argument('--game-version', choices=tuple(GAME_VERSIONS),
@@ -2875,12 +2914,14 @@ def build_main():
     if a.rebuild and a.retune and retune_due(cache / 'obj', msys):
         # the compile step's key does not name the level: without this a finished compile reads as done before
         state['steps'].pop('compile', None)
+    if a.prepare_shaders_again:   # the shaders step runs whatever its key says, as at the install
+        state['steps'].pop('shaders', None)
     keep_awake()
     # What can be known to fail later is looked at now: the disk space of every step that will run, and on Windows
     # that the build tools compile and link (not for a build the tests stop before its compile step, --until)
     ahead = steps_to_run(state, src.identity, out, a.until)
     check_space(out, space_needs(ahead, out, sum(src.romfs_size(ref) for _, ref in src.romfs) if 'romfs' in ahead else 0,
-                                 a.rebuild and shader_carry(out)))
+                                 a.rebuild and not a.prepare_shaders_again and shader_carry(out)))
     if WIN and 'compile' in ahead:
         probe_toolchain(msys, cache / 'toolchain-check')
     # Linux: the compiler, headers and libraries are the system's, so they are tried on the runtime before the long
@@ -2893,7 +2934,7 @@ def build_main():
     runs = {'exefs': lambda: step_exefs(src, out), 'romfs': lambda: step_romfs(src, out, min(a.jobs, 8)),
             'lift': lambda: step_lift(out, cache),
             'compile': lambda: step_compile(out, cache, msys, a.jobs, romfs_job, a.rebuild and not a.retune),
-            'shaders': lambda: step_shaders(out, a.rebuild), 'prompts': lambda: step_prompts(out),
+            'shaders': lambda: step_shaders(out, a.rebuild and not a.prepare_shaders_again), 'prompts': lambda: step_prompts(out),
             'scan': lambda: step_scan(out)}
     state_lock = threading.Lock()   # the RomFS step records itself from its own thread
 

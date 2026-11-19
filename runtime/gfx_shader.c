@@ -192,6 +192,8 @@ static PlatOnce paths_once = PLAT_ONCE_INIT;
 #define IDS_MAX 8                                          // identities.txt holds at most this many identities
 static struct {
     int on;                                                // OOTPC_SHADER_CARRY, read in init_paths
+    int old_first;                                         // the update kept the old shaders (shaders-kept.txt):
+                                                           // their translations before the current one's on disk
     int n_prev;                                            // previous identities in identities.txt, newest first
     uint8_t prev[IDS_MAX][32];                             // their base identities
     uint8_t prev_eff[IDS_MAX][32];                         // mixed with this machine's host options: their cache keys
@@ -396,6 +398,13 @@ static void init_paths(void *param) {
     else if (exe_dir[0]) snprintf(cache_dir, sizeof cache_dir, "%s/shader-cache", exe_dir);
     xlate_identity();
     C.on = cfg_bool("OOTPC_SHADER_CARRY");
+    if (C.on && exe_dir[0]) {   // tools/make_game.py KEPT_MARK: the player chose to keep the earlier shaders
+        char kept[PATH_CAP + 32];
+        snprintf(kept, sizeof kept, "%s/shaders-kept.txt", exe_dir);
+        if ((C.old_first = file_exists(kept)))
+            rt_log("gfx_shader: carry: the update kept the earlier shaders (shaders-kept.txt): their translations go "
+                   "before the current translator's, so the pipelines built for them stay in use");
+    }
     if (cache_dir[0] && C.on) ids_load(), pack_swap_pruned();   // the swap before the pack is opened
     if (cache_dir[0]) pack_open();
     use_preload_start();
@@ -2308,16 +2317,27 @@ static int failed_slot(const uint8_t key[32], int insert) {
     return found;
 }
 
+// The disk part of the lookup: the current key, then a previous translator's entry. When the update kept the earlier
+// shaders (C.old_first) the previous translator's entry goes first, so a shader the current translator also has (the
+// few it translated before the player chose to keep them) keeps the translation the pipeline caches were built for.
+static GfxShader *disk_any(const uint8_t key[32], const uint8_t iid[32], int final, const uint8_t h[32],
+                           const GfxShaderAnswers *a, int stage) {
+    GfxShader *s;
+    if (C.old_first && (s = carry_find(h, a, stage, 1))) return s;
+    GfxShader *d = final ? disk_load(key, iid) : NULL;
+    if (d) return mem_insert(d);
+    return C.old_first ? NULL : carry_find(h, a, stage, 1);
+}
+
 // The lookup order with carry (see "Carry" at the top): the current key in memory, a previous translator's entry in
-// memory, the current key on disk, a previous translator's entry on disk.
+// memory, the current key on disk, a previous translator's entry on disk (disk_any, which can take them the other way).
 static const GfxShader *get_one(const Req *r, int stage, const uint8_t *control, const uint8_t *code,
                                 const GfxShaderAnswers *a) {
     GfxShader *s = mem_find(r->key);
     if (s || (s = carry_find(r->code_hash, a, stage, 0))) return plat_inc64(&n_hits), s;
     paths();
     if (!cache_dir[0]) return fail("no cache directory", NULL);
-    if (r->final && (s = disk_load(r->key, r->iid))) return plat_inc64(&n_hits), mem_insert(s);
-    if ((s = carry_find(r->code_hash, a, stage, 1))) return plat_inc64(&n_hits), s;
+    if ((s = disk_any(r->key, r->iid, r->final, r->code_hash, a, stage))) return plat_inc64(&n_hits), s;
     if (failed_slot(r->key, 0)) return NULL;
     const GfxShader *t = translate(r, stage, control, code, a);
     if (!t) failed_slot(r->key, 1);
@@ -2694,8 +2714,7 @@ static void load_worker(void *arg) {
         XJob *j = X.lhead;
         if (!(X.lhead = j->next)) X.ltail = NULL;
         plat_mutex_unlock(&X.lock);
-        GfxShader *d = j->r.final ? disk_load(j->r.key, j->r.iid) : NULL;
-        const GfxShader *s = d ? mem_insert(d) : carry_find(j->r.code_hash, &j->a, j->stage, 1);
+        const GfxShader *s = disk_any(j->r.key, j->r.iid, j->r.final, j->r.code_hash, &j->a, j->stage);
         plat_mutex_lock(&X.lock);
         if (s) {
             XWait **w = wait_slot(j->r.key), *e = *w;
@@ -2770,8 +2789,7 @@ static const GfxShader *get_async_one(Req r, int stage, const uint8_t *control, 
     int read = load_budget() || __atomic_load_n(&X.loaders, __ATOMIC_RELAXED) == 0;   // the disk here, or a loader
     if (read) {
         uint64_t t0 = plat_now_ns();
-        GfxShader *d = r.final ? disk_load(r.key, r.iid) : NULL;
-        s = d ? mem_insert(d) : carry_find(r.code_hash, a, stage, 1);
+        s = disk_any(r.key, r.iid, r.final, r.code_hash, a, stage);
         load_spent(plat_now_ns() - t0);
         if (s) return plat_inc64(&n_hits), s;
     }
@@ -2802,8 +2820,7 @@ static const GfxShader *get_async_one(Req r, int stage, const uint8_t *control, 
     free(j), free(e), free(ctl), free(cd);
     if (raced) return *pending = 1, NULL;
     if (!read) {                                           // no worker or out of memory: everything here
-        GfxShader *d = r.final ? disk_load(r.key, r.iid) : NULL;
-        if ((s = d ? mem_insert(d) : carry_find(r.code_hash, a, stage, 1))) return plat_inc64(&n_hits), s;
+        if ((s = disk_any(r.key, r.iid, r.final, r.code_hash, a, stage))) return plat_inc64(&n_hits), s;
     }
     return translate(&r, stage, control, code, a);
 }
@@ -2856,8 +2873,9 @@ const GfxShader *gfx_shader_load_input(const uint8_t iid[32], int xlate) {
     key_of_input(iid, key);
     GfxShader *s = mem_find(key);
     if (s || (s = carry_find_iid(iid, 0, NULL))) return s;
+    if (C.old_first && (s = carry_find_iid(iid, 1, NULL))) return s;   // as disk_any
     if ((s = disk_load(key, iid))) return mem_insert(s);
-    if ((s = carry_find_iid(iid, 1, NULL))) return s;
+    if (!C.old_first && (s = carry_find_iid(iid, 1, NULL))) return s;
     Inputs in;
     if (!xlate || !in_load(iid, &in)) return NULL;
     const GfxShader *t = gfx_shader_get(in.stage, in.control, in.code, in.length, in.c1, &in.a);
@@ -4003,10 +4021,19 @@ static void carry_main(void *arg) {
     free(d.v);
 }
 
+// The pass runs only with OOTPC_SHADER_CARRY_PASS=1. By default the game never translates shaders again while it runs:
+// the translations of a previous translator stay in use until the launcher prepares the shaders again, after an update
+// or when the player asks (tools/make_game.py shader_carry, --prepare-shaders-again). On a processor with few threads
+// the pass and the game did not both fit: a 4-core processor ran the game at 2 to 15 fps for the hours the pass took.
 void gfx_shader_carry_start(void) {
     static volatile int32_t started;
     paths();
     if (!carry_on() || !cache_dir[0] || plat_xchg32(&started, 1)) return;
+    if (!cfg_bool("OOTPC_SHADER_CARRY_PASS")) {
+        rt_log("gfx_shader: carry: no background pass while the game runs (OOTPC_SHADER_CARRY_PASS 0); the launcher "
+               "prepares the shaders again");
+        return;
+    }
     mkdir_p(cache_dir);
     int lk = carry_lock();
     if (lk != 1) {

@@ -2851,17 +2851,35 @@ class MakeGameTest(Tmp):
             self.assertFalse(self.mg.retune_due(obj, None))
 
     def test_updates_skip_shader_preparation(self):
-        """An update leaves the shaders to the game (shader_carry) only when they were prepared and the cache names the
-        translator they were made with: without that the game has nothing to carry them over by."""
+        """An update keeps the shaders prepared before it (shader_carry) only when the player chose it (shader_update
+        keep), they were prepared and the cache names the translator they were made with: without that the game has
+        nothing to carry them over by. By default the update prepares them again."""
         out = self.tmp / 'game'
         (out / 'shader-cache').mkdir(parents=True)
+        (out / 'OOT-PC.ini').write_text('[performance]\nshader_update = keep\n')
         self.assertFalse(self.mg.shader_carry(out))   # nothing prepared yet: the update prepares
         (out / 'shader-prepared.bin').write_bytes(b'x')
         self.assertFalse(self.mg.shader_carry(out))   # prepared, but the cache names no translator
         (out / 'shader-cache' / 'identities.txt').write_text('# translators\n' + 'ab' * 32 + '\n')
         self.assertTrue(self.mg.shader_carry(out))
-        (out / 'OOT-PC.ini').write_text('[performance]\nOOTPC_SHADER_CARRY = "0"\n')
+        (out / 'OOT-PC.ini').write_text('[performance]\nshader_update = prepare\n')
         self.assertFalse(self.mg.shader_carry(out))
+        (out / 'OOT-PC.ini').unlink()
+        self.assertFalse(self.mg.shader_carry(out))   # the default prepares
+        (out / 'OOT-PC.ini').write_text('[performance]\nshader_update = keep\nOOTPC_SHADER_CARRY = "0"\n')
+        self.assertFalse(self.mg.shader_carry(out))
+
+    def test_kept_shaders_name_their_version(self):
+        """The version the launcher shows for kept shaders: the one shaders-version.txt names for that translator, the
+        translator 0.11.0 shipped by its identity, and pre-0.11.0 for any other (nothing was recorded then)."""
+        out = self.tmp / 'game'
+        out.mkdir()
+        old, shipped = 'ab' * 32, '6866a13e0074587881b17b957cc5c84cb3caae313387ff1a6d2aeeb925efc3d2'
+        self.assertEqual(self.mg.shaders_version(out, old), 'pre-0.11.0')
+        self.assertEqual(self.mg.shaders_version(out, shipped.upper()), '0.11.0')
+        (out / self.mg.SHADERS_VERSION).write_text(f'0.11.2\n{old}\n')
+        self.assertEqual(self.mg.shaders_version(out, old), '0.11.2')
+        self.assertEqual(self.mg.shaders_version(out, 'cd' * 32), 'pre-0.11.0')   # recorded for another translator
 
     def test_cache_from_before_carrying_names_its_translator(self):
         """Before a new translator goes beside the game, a shader cache with no identities.txt gets one naming the

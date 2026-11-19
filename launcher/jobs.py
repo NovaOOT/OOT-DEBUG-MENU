@@ -508,6 +508,7 @@ class RebuildJob(Job):
     claims = ('game',)
     task = 'the rebuild of the game'
     retune = True   # Rebuild the Game: the game's code for this processor's level (build.rebuild_args)
+    extra = ()      # more arguments for tools/make_game.py (ShadersJob)
 
     def __init__(self, ctx, game_dir, dump=''):
         super().__init__(ctx, ['tools_update', 'lift', 'compile_changed', 'swap', 'shaders', *prompt_rows(ctx), 'scan'])
@@ -519,7 +520,7 @@ class RebuildJob(Job):
         if build.game_running(self.game_dir):
             raise build.BuildError('the game is running: close it and try again')
         if build.can_rebuild(self.game_dir):
-            args = build.rebuild_args(layout, self.game_dir, self.retune)
+            args = build.rebuild_args(layout, self.game_dir, self.retune) + list(self.extra)
         elif self.dump:
             args = build.install_args(layout, self.dump, self.game_dir)
         else:
@@ -530,6 +531,17 @@ class RebuildJob(Job):
             if self.step(sid) and self.step(sid).state == PENDING:
                 self.skip(sid)
         self.note_scan(self.game_dir)
+
+
+class ShadersJob(RebuildJob):
+    """Prepare the Shaders Again (Settings): the game's build brought up to date as by Rebuild the Game, and every
+    shader translated again with the current translator and its pipelines built, also when an update kept the
+    earlier translator's (tools/make_game.py --prepare-shaders-again, SHADER_UPDATE keep). Only while the game is
+    closed (RebuildJob.run), never in play."""
+    title = 'Preparing the Shaders'
+    task = 'preparing the shaders'
+    retune = False
+    extra = ('--prepare-shaders-again',)
 
 
 class ModsRebuildJob(RebuildJob):

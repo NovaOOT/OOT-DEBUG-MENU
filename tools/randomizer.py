@@ -46,7 +46,7 @@ so every location, Ganon's Castle included, can be reached in the result. The ot
 --logic none places everything at random: a seed may then lock an item behind itself (the debug menu can give it).
 Overworld and all entrances use no logic: it knows only the vanilla field.
 
-Other files of the stage are read from the mods below this one when they replace them (nx2navi.ini [mods] order), so
+Other files of the stage are read from the mods below this one when they replace them (OOT-PC.ini [mods] order), so
 a mod that changes the same stage files keeps its changes in the randomized ones; this mod must then sit above it.
 """
 import argparse, copy, hashlib, json, os, random, re, shutil, struct, sys, time
@@ -124,7 +124,7 @@ def sarc(b):
 # ---- BYML (little endian, version 2 and later), keeping each value's type so a file can be written back as it was.
 # A dict is a Python dict of key -> node, an array a list of nodes, any other value a tuple (type, value).
 
-T_STR, T_ARR, T_DICT, T_STRTAB = 0xA0, 0xC0, 0xC1, 0xC2
+T_STR, T_BIN, T_ARR, T_DICT, T_STRTAB = 0xA0, 0xA1, 0xC0, 0xC1, 0xC2
 T_BOOL, T_INT, T_FLOAT, T_UINT, T_INT64, T_UINT64, T_DOUBLE, T_NULL = 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xFF
 
 
@@ -146,6 +146,8 @@ def byml_read(b):
             return (t, strs[v])
         if t in (T_ARR, T_DICT):
             return node(v)
+        if t == T_BIN:   # u32 size, then the bytes
+            return (t, bytes(b[v + 4:v + 4 + struct.unpack_from('<I', b, v)[0]]))
         if t in (T_INT64, T_UINT64, T_DOUBLE):
             return (t, struct.unpack_from({T_INT64: '<q', T_UINT64: '<Q', T_DOUBLE: '<d'}[t], b, v)[0])
         if t in (T_BOOL, T_INT, T_FLOAT, T_UINT, T_NULL):
@@ -218,6 +220,11 @@ def byml_write(ver, root):
             align(8)
             o = len(out)
             out.extend(struct.pack({T_INT64: '<q', T_UINT64: '<Q', T_DOUBLE: '<d'}[t], v))
+            return o
+        if t == T_BIN:
+            align(4)
+            o = len(out)
+            out.extend(struct.pack('<I', len(v)) + v)
             return o
         return v
 
@@ -809,6 +816,9 @@ GIFTS = [   # (flows, vanilla item, where)
     (('Npc_Hylia_Dampe_001',), 'Obj_Heart_Piece', 'Dampe\'s race'),
     (('Npc_SkullKid_Child',), 'Obj_Heart_Piece', 'the Skull Kid\'s song'),
     (('Npc_SkullKid_Child_02',), 'Obj_Heart_Piece', 'the Skull Kid\'s second song'),
+    # every sale of the bean salesman in Zora's River gives what lands here; his own count of sales (Get_MagicBeans)
+    # still ends them after the last bean
+    (('Npc_Hylia_047_Child',), 'Item_MagicBean', 'the bean salesman in Zora\'s River'),
 ]
 GIFTS_KEY = [   # the gifts that open the way (the tunics: the Fire and Water Temples): only with --logic none
     (('SageOfFire',), 'Obj_Armor_Goron', 'the Goron Tunic gift'),
@@ -893,8 +903,8 @@ def apply_flow_items(rom, game, below, placed):
 
 
 def mod_order(game):
-    """Mod folder names in the game's order (top first), from nx2navi.ini [mods] mods_order."""
-    ini = os.path.join(game, 'nx2navi.ini')
+    """Mod folder names in the game's order (top first), from OOT-PC.ini [mods] mods_order."""
+    ini = os.path.join(game, 'OOT-PC.ini')
     order, section = [], ''
     if os.path.isfile(ini):
         for line in open(ini, encoding='utf-8', errors='replace'):
@@ -914,7 +924,7 @@ def mod_romfs(game, name):
     base = os.path.join(MODS_DIR or os.path.join(game, 'mods'), name)
     sets = os.path.join(base, 'settings')
     if os.path.isdir(sets):
-        ini = open(os.path.join(game, 'nx2navi.ini'), encoding='utf-8', errors='replace').read() if os.path.isfile(os.path.join(game, 'nx2navi.ini')) else ''
+        ini = open(os.path.join(game, 'OOT-PC.ini'), encoding='utf-8', errors='replace').read() if os.path.isfile(os.path.join(game, 'OOT-PC.ini')) else ''
         m = re.search(r'^\s*mods_settings\s*=\s*(.*)$', ini, re.M)
         chosen = dict(e.split('=', 1) for e in (m.group(1).split('|') if m else []) if '=' in e)
         for setting in os.listdir(sets):

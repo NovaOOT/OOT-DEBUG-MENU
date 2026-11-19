@@ -1,5 +1,5 @@
 // runtime/vk_index_rewrite.h: the index lists an indexed quad list or line loop is drawn with (vk_exec_draw.c
-// op_draw_idx, NX2NAVI_QUAD_INDEX). Built and run by tests/index_rewrite_check.py; prints each failed check and exits 1
+// op_draw_idx, OOTPC_QUAD_INDEX). Built and run by tests/index_rewrite_check.py; prints each failed check and exits 1
 // on any.
 #include <stdio.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-"""Census of every Maxwell shader in the extracted NX2navi RomFS and ExeFS, and an offline translation pass.
+"""Census of every Maxwell shader in the extracted OOT-PC RomFS and ExeFS, and an offline translation pass.
 
 The inventory, the bnsh, sharcb and sarc readers and the package walk: Copyright (c) 2026 MacNativeGames contributors
 (MIT; see THIRD_PARTY_NOTICES.md). This pass reads no shared shader list, runs no spirv-cross and makes no bind-state
@@ -34,7 +34,7 @@ from pathlib import Path
 import lz4.block
 
 ROOT = Path(__file__).resolve().parent.parent
-XLATE = ROOT / 'build' / 'xlate' / ('nx2navi_xlate.exe' if os.name == 'nt' else 'nx2navi_xlate')
+XLATE = ROOT / 'build' / 'xlate' / ('ootpc_xlate.exe' if os.name == 'nt' else 'ootpc_xlate')
 SPIRV_VAL = Path(r'C:\msys64\ucrt64\bin\spirv-val.exe') if os.name == 'nt' else Path(shutil.which('spirv-val') or '/usr/bin/spirv-val')
 ZSTD = b'\x28\xb5\x2f\xfd'
 # NVN program control section magic, u32 0x98761234

@@ -1,6 +1,6 @@
 // Host input for nn::hid (runtime/ov_input.c): an SDL3 gamepad (no SDL window needed), the keyboard and the mouse,
 // merged into Switch npad button bits and stick axes. Button order follows HidNpadButton. The key and pad
-// bindings are the tables in input_map.c (nx2navi.ini overrides them). The keyboard and the mouse come from the window
+// bindings are the tables in input_map.c (OOT-PC.ini overrides them). The keyboard and the mouse come from the window
 // system's back end (input_wsys.h: input_win.c with Win32, input_sdl.c with SDL), which also owns the cursor capture.
 // Keys and their map: docs/controls.md.
 // The gamepad also rumbles (input_rumble; a Switch controller's linear actuators can take the game's own values instead,
@@ -19,6 +19,7 @@
 #include "input.h"
 #include "input_hd_pair.h"
 #include "input_map.h"
+#include "midi_ocarina.h"
 #include "input_wsys.h"
 #ifdef _WIN32
 #include "input_ds3.h"
@@ -45,13 +46,13 @@ static SDL_Gamepad *pad;
 static uint64_t next_scan;
 static int pad_rumble;               // the open gamepad has rumble motors
 static volatile int32_t pad_labels[4];  // ... and the labels of its south, east, west, north buttons (PAD_LABEL_*), any thread
-static int pad_east_a;               // ... and labels its east face button A (Nintendo layout under NX2NAVI_PAD_LAYOUT=auto)
+static int pad_east_a;               // ... and labels its east face button A (Nintendo layout under OOTPC_PAD_LAYOUT=auto)
 static int pad_layout = -1;          // PAD_LAYOUT_* in effect for the open gamepad, -1 to pick again; live (cfg_version)
 static unsigned pad_layout_seen;
 static volatile int32_t pad_layout_shown = -1;   // pad_layout for the menu (any thread), -1 without a gamepad
 static SDL_JoystickID sensor_pad;    // the gamepad whose sensors the motion thread set up, 0 none
 static int sensor_ok;                // ... and it has both sensors, enabled
-static int motion_thread;            // 0 not started, 1 running, -1 off (NX2NAVI_MOTION=0, no SDL)
+static int motion_thread;            // 0 not started, 1 running, -1 off (OOTPC_MOTION=0, no SDL)
 
 // SDL buttons of the gamepad inputs (input_map.h PAD_*), by position; PAD_ZL and PAD_ZR are the triggers (axes).
 static const SDL_GamepadButton pad_sdl[PAD_COUNT] = {
@@ -65,14 +66,14 @@ static const SDL_GamepadButton pad_sdl[PAD_COUNT] = {
     [PAD_LPADDLE2] = SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, [PAD_RPADDLE2] = SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,
 };
 
-// NX2NAVI_INPUT_SCRIPT=<file>: lines "<frame> <button> [hold]" or "<frame> LSTICK|RSTICK <x> <y> [hold]", ORed into the real input.
+// OOTPC_INPUT_SCRIPT=<file>: lines "<frame> <button> [hold]" or "<frame> LSTICK|RSTICK <x> <y> [hold]", ORed into the real input.
 // <frame> and its hold are 60 Hz ticks of game time since the first present (frame_step_ticks: presents at 60 fps), so
 // the title menus get the presses at the same game time at any frame limit. A line "@<ms> ..." is timed instead: <ms>
 // and its hold are milliseconds of the world clock (frame_step_world_us, game time since the loaded save's first
 // frame), so it lands at the same game time at any frame rate and load length. A timed event shorter than a frame is
 // applied once. In a script with timed lines (a recording) the untimed ones belong before the world clock: they stop
 // when it starts, as the load ends at another tick in each run. "<frame> MARK <name>" presses nothing: with
-// NX2NAVI_TRACE=perf it ends the running segment of frame times and starts one called <name> (perf.c perf_segment).
+// OOTPC_TRACE=perf it ends the running segment of frame times and starts one called <name> (perf.c perf_segment).
 // at, hold: ticks, or microseconds of the world clock when timed.
 // live: queued by input_script_live, at counted from the tick it was queued; it never stops at the world clock.
 typedef struct { uint64_t at, hold; int bit, stick, timed, mark, live; int32_t x, y; int logged; char text[48]; } ScriptEv;
@@ -136,10 +137,10 @@ static int script_add(const ScriptEv *e) {
 
 static void script_load(void) {
     script_state = 1;
-    const char *path = cfg_get("NX2NAVI_INPUT_SCRIPT");
+    const char *path = cfg_get("OOTPC_INPUT_SCRIPT");
     if (!path || !*path) return;
     FILE *f = fopen(path, "r");
-    if (!f) { rt_log("input: cannot open NX2NAVI_INPUT_SCRIPT %s", path); return; }
+    if (!f) { rt_log("input: cannot open OOTPC_INPUT_SCRIPT %s", path); return; }
     char line[256];
     int ln = 0;
     ScriptEv e;
@@ -206,7 +207,7 @@ static void script_apply(uint64_t *b, int32_t sl[2], int32_t sr[2]) {
     }
 }
 
-// NX2NAVI_INPUT_RECORD=<file>: writes the merged input as NX2NAVI_INPUT_SCRIPT lines, one per button press and per stick
+// OOTPC_INPUT_RECORD=<file>: writes the merged input as OOTPC_INPUT_SCRIPT lines, one per button press and per stick
 // segment, so a played session replays as a script. A stick segment ends when an axis moves by more than REC_STICK_STEP.
 // An event that begins on the world clock is written timed ("@<ms>", hold in ms), one before it in ticks
 // (frame_step_ticks). When the world clock starts, held buttons and sticks are cut there and go on as timed events.
@@ -249,11 +250,11 @@ static void rec_flush_all(void) {
 
 static void rec_apply(uint64_t b, const int32_t sl[2], const int32_t sr[2]) {
     if (!rec_state) {
-        const char *path = cfg_get("NX2NAVI_INPUT_RECORD");   // no default: not recording when unset
+        const char *path = cfg_get("OOTPC_INPUT_RECORD");   // no default: not recording when unset
         rec = path && *path ? fopen(path, "w") : NULL;
         rec_state = rec ? 1 : -1;
-        if (path && *path && !rec) rt_log("input: cannot open NX2NAVI_INPUT_RECORD %s", path);
-        if (rec) { fprintf(rec, "# Recorded input (NX2NAVI_INPUT_RECORD); frame = 60 Hz ticks of game time, @ms = world clock.\n"); atexit(rec_flush_all);
+        if (path && *path && !rec) rt_log("input: cannot open OOTPC_INPUT_RECORD %s", path);
+        if (rec) { fprintf(rec, "# Recorded input (OOTPC_INPUT_RECORD); frame = 60 Hz ticks of game time, @ms = world clock.\n"); atexit(rec_flush_all);
                    rt_log("input: recording to %s", path); }
     }
     if (rec_state != 1) return;
@@ -320,26 +321,26 @@ void input_direct_mouse_sample(int enabled, int32_t *dx, int32_t *dy) {
     plat_mutex_unlock(&lock);
 }
 
-static float mouse_sens = -1;              // NX2NAVI_MOUSE_SENS, 0 = mouse camera off; live (cfg_version)
+static float mouse_sens = -1;              // OOTPC_MOUSE_SENS, 0 = mouse camera off; live (cfg_version)
 static unsigned mouse_sens_seen;
 
 static float mouse_sens_get(void) {
     unsigned ver = cfg_version();
     if (mouse_sens >= 0 && ver == mouse_sens_seen) return mouse_sens;
     mouse_sens_seen = ver;
-    double v = cfg_double("NX2NAVI_MOUSE_SENS");
+    double v = cfg_double("OOTPC_MOUSE_SENS");
     mouse_sens = (float)(v < 0 ? 0 : v > 10 ? 10 : v);
     return mouse_sens;
 }
 
 
-// ---- walk key: the keyboard's stick samples scaled down while a key is held (NX2NAVI_WALK_KEY, NX2NAVI_WALK_SCALE)
+// ---- walk key: the keyboard's stick samples scaled down while a key is held (OOTPC_WALK_KEY, OOTPC_WALK_SCALE)
 // A keyboard key is all or nothing, so every keyboard-driven stick sample is +/-32767 and the game only ever sees a
 // full tilt. Holding this key scales those two samples, which gives the half tilt a gamepad gets from its analog range,
 // so the keyboard can walk as well as run.
 // Only the keyboard is scaled: the gamepad's axes and the mouse camera sample their own values.
-static int walk_key = KEY_NONE;        // NX2NAVI_WALK_KEY as a KEY_*, KEY_NONE = off; live (cfg_version)
-static float walk_scale = 0.51f;       // NX2NAVI_WALK_SCALE, 0.2 to 0.9; live (cfg_version)
+static int walk_key = KEY_NONE;        // OOTPC_WALK_KEY as a KEY_*, KEY_NONE = off; live (cfg_version)
+static float walk_scale = 0.51f;       // OOTPC_WALK_SCALE, 0.2 to 0.9; live (cfg_version)
 static unsigned walk_seen = ~0u;
 
 // The ini takes the key names the Controls tab writes; a hand-written line may spell them in any case.
@@ -357,7 +358,7 @@ static void walk_get(void) {
     unsigned ver = cfg_version();
     if (ver == walk_seen) return;
     walk_seen = ver;
-    const char *name = cfg_value("NX2NAVI_WALK_KEY");   // "none" (the default) turns the key off
+    const char *name = cfg_value("OOTPC_WALK_KEY");   // "none" (the default) turns the key off
     int key = KEY_NONE;
     if (*name && !name_matches(name, "none")) {
         for (int k = KEY_A; k < KEY_COUNT && key == KEY_NONE; k++)
@@ -367,10 +368,10 @@ static void walk_get(void) {
     // 0.51 rather than 0.5: a keyboard sample is 32767, and 32767 * 0.5 = 16383 falls one short of stick_bits'
     // STICK_DIR (16384), which would leave the game's stick-direction bits clear while the walk key is held. The value
     // in the settings table carries that default; this code only rejects what the table's range does not allow.
-    const char *sv = cfg_value("NX2NAVI_WALK_SCALE");
+    const char *sv = cfg_value("OOTPC_WALK_SCALE");
     char *end;
     double d = strtod(sv, &end);
-    double s = end == sv || *end || !(d >= 0.2 && d <= 0.9) ? strtod(cfg_meta("NX2NAVI_WALK_SCALE")->def, NULL) : d;
+    double s = end == sv || *end || !(d >= 0.2 && d <= 0.9) ? strtod(cfg_meta("OOTPC_WALK_SCALE")->def, NULL) : d;
     if (key != walk_key || (float)s != walk_scale) {
         walk_key = key;
         walk_scale = (float)s;
@@ -547,7 +548,7 @@ static void sdl_leave(void) { plat_mutex_unlock(&sdl_lock); }
 
 // ---- HD rumble: the game's vibration values as they are, for a controller with linear actuators
 // A Switch Pro Controller and a Joy-Con play a frequency and an amplitude per band, which is what the game sends
-// (ov_input.c VibrationValue); SDL_RumbleGamepad drives them at two fixed frequencies. With NX2NAVI_RUMBLE_HD=1 (live,
+// (ov_input.c VibrationValue); SDL_RumbleGamepad drives them at two fixed frequencies. With OOTPC_RUMBLE_HD=1 (live,
 // off by default) the primary gamepad, when it is one of these, gets the game's values in the controller's own rumble
 // report (rumble_hd.c) and no dual-motor call any more (input_rumble):
 // - HD_SDL, a Pro Controller or a single Joy-Con: SDL_SendGamepadEffect takes the report for these controllers and
@@ -580,27 +581,27 @@ static int hd_ended;                  // input_rumble_hd_stop ran: nothing is wr
 static int hd_first_logged;           // under lock: the primary's first report was logged (hd_wrote)
 static volatile int32_t hd_thread;    // 0 not started, 1 running, -1 it could not be started (set under hd_lock)
 
-// NX2NAVI_RUMBLE_HD is on and rumble is not off altogether (NX2NAVI_RUMBLE=0); live (cfg_version). Any thread.
+// OOTPC_RUMBLE_HD is on and rumble is not off altogether (OOTPC_RUMBLE=0); live (cfg_version). Any thread.
 static int hd_setting(void) {
     static volatile int32_t on = -1;
     static volatile uint32_t seen;
     unsigned ver = cfg_version();
     if (__atomic_load_n(&on, __ATOMIC_RELAXED) < 0 || ver != __atomic_load_n(&seen, __ATOMIC_RELAXED)) {
-        const char *all = cfg_get("NX2NAVI_RUMBLE");
-        __atomic_store_n(&on, cfg_bool("NX2NAVI_RUMBLE_HD") && !(all && !strcmp(all, "0")), __ATOMIC_RELAXED);
+        const char *all = cfg_get("OOTPC_RUMBLE");
+        __atomic_store_n(&on, cfg_bool("OOTPC_RUMBLE_HD") && !(all && !strcmp(all, "0")), __ATOMIC_RELAXED);
         __atomic_store_n(&seen, ver, __ATOMIC_RELAXED);
     }
     return __atomic_load_n(&on, __ATOMIC_RELAXED);
 }
 
-// The time between two reports: NX2NAVI_RUMBLE_HD_MS, 5 to 50 ms, RUMBLE_HD_GAP_NS when unset; live. The HD thread only.
+// The time between two reports: OOTPC_RUMBLE_HD_MS, 5 to 50 ms, RUMBLE_HD_GAP_NS when unset; live. The HD thread only.
 static uint64_t hd_gap_ns(void) {
     static uint64_t gap = RUMBLE_HD_GAP_NS;
     static unsigned seen = ~0u;
     unsigned ver = cfg_version();
     if (ver == seen) return gap;
     seen = ver;
-    const char *e = cfg_get("NX2NAVI_RUMBLE_HD_MS");
+    const char *e = cfg_get("OOTPC_RUMBLE_HD_MS");
     long ms = e && *e ? strtol(e, NULL, 10) : 0;
     uint64_t set = ms ? (uint64_t)(ms < 5 ? 5 : ms > 50 ? 50 : ms) * 1000000u : RUMBLE_HD_GAP_NS;
     if (set != gap) rt_log("input: HD rumble: a report at most every %llu ms", (unsigned long long)(set / 1000000u));
@@ -822,7 +823,7 @@ static void pad_primary(SDL_Gamepad *p, const char *why) {
     pad_hd = hd_probe(pad, &one, how, sizeof how);
     __atomic_store_n(&hd_shown, pad_hd == HD_NONE ? 0 : 1 + one, __ATOMIC_RELAXED);
     rt_log("input: HD rumble %s for this gamepad: %s (rumble_hd = %s)", pad_hd == HD_NONE ? "not available" : "available",
-           how, cfg_value("NX2NAVI_RUMBLE_HD"));
+           how, cfg_value("OOTPC_RUMBLE_HD"));
 }
 
 // Joysticks SDL has no gamepad mapping for are not gamepads to it, and this file opens gamepads only. Known ones get a
@@ -955,7 +956,7 @@ static int pad_layout_get(void) {
     if (pad_layout >= 0 && ver == pad_layout_seen) return pad_layout;
     pad_layout_seen = ver;
     int was = pad_layout;
-    const char *set = cfg_value("NX2NAVI_PAD_LAYOUT");
+    const char *set = cfg_value("OOTPC_PAD_LAYOUT");
     pad_layout = input_pad_layout_pick(set, pad_east_a);
     if (pad_layout != was)
         rt_log("input: gamepad layout %s (pad_layout = %s)", pad_layout == PAD_LAYOUT_XBOX ? "xbox" : "nintendo", set);
@@ -963,7 +964,7 @@ static int pad_layout_get(void) {
     return pad_layout;
 }
 
-// The NX2NAVI_BIND_* values last applied, one per line; the tables are built again when one changes (the menu's remapping rows write
+// The OOTPC_BIND_* values last applied, one per line; the tables are built again when one changes (the menu's remapping rows write
 // them while the game runs). Under lock.
 static unsigned binds_seen = ~0u;
 static char binds_applied[4096];
@@ -976,7 +977,7 @@ static void binds_refresh(void) {
     size_t len = 0;
     for (int a = 0; a < ACTION_COUNT; a++) {
         char var[32];
-        snprintf(var, sizeof var, "NX2NAVI_BIND_%s", input_action_name(a));
+        snprintf(var, sizeof var, "OOTPC_BIND_%s", input_action_name(a));
         const char *s = cfg_get(var);
         len += (size_t)snprintf(now + len, len < sizeof now ? sizeof now - len : 0, "%s\n", s ? s : "");
     }
@@ -985,20 +986,20 @@ static void binds_refresh(void) {
     input_map_configure();
 }
 
-// NX2NAVI_TEST_PAD=<lx>,<ly>,<rx>,<ry> (test runs): an SDL virtual gamepad whose sticks rest at these raw SDL axis values
+// OOTPC_TEST_PAD=<lx>,<ly>,<rx>,<ry> (test runs): an SDL virtual gamepad whose sticks rest at these raw SDL axis values
 // (-32768..32767, down is +y), attached before the first scan so it is the gamepad the game reads: drift and full
-// deflection go through the same mapping and dead zone as a real pad. NX2NAVI_TEST_PAD_AT=<ms>: attached that long after
+// deflection go through the same mapping and dead zone as a real pad. OOTPC_TEST_PAD_AT=<ms>: attached that long after
 // input starts instead, like a controller switched on in play, and its south button pressed for half a second one
 // second later (the log then shows the hot-plug and the press arriving: scan_pads, pad_physical).
 static SDL_Joystick *test_joy;     // kept open: a virtual joystick's axes and buttons are set through an open handle
-static uint64_t test_attach_ns, test_press_ns;   // NX2NAVI_TEST_PAD_AT: when to attach, when to press (0: done)
+static uint64_t test_attach_ns, test_press_ns;   // OOTPC_TEST_PAD_AT: when to attach, when to press (0: done)
 
 static void test_pad_make(void) {
-    const char *e = cfg_get("NX2NAVI_TEST_PAD");
+    const char *e = cfg_get("OOTPC_TEST_PAD");
     int v[4];
     if (!e || !*e) return;
     if (sscanf(e, "%d,%d,%d,%d", &v[0], &v[1], &v[2], &v[3]) != 4) {
-        rt_log("input: NX2NAVI_TEST_PAD=%s is not <lx>,<ly>,<rx>,<ry>; no test gamepad", e);
+        rt_log("input: OOTPC_TEST_PAD=%s is not <lx>,<ly>,<rx>,<ry>; no test gamepad", e);
         return;
     }
     SDL_VirtualJoystickDesc d;
@@ -1006,7 +1007,7 @@ static void test_pad_make(void) {
     d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
     d.naxes = SDL_GAMEPAD_AXIS_COUNT;
     d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
-    d.name = "NX2navi test gamepad";
+    d.name = "OOT-PC test gamepad";
     SDL_JoystickID id = SDL_AttachVirtualJoystick(&d);
     test_joy = id ? SDL_OpenJoystick(id) : NULL;
     if (!test_joy) {
@@ -1021,15 +1022,15 @@ static void test_pad_make(void) {
 }
 
 static void test_pad_attach(void) {
-    const char *at = cfg_get("NX2NAVI_TEST_PAD_AT");
-    if (at && *at && cfg_get("NX2NAVI_TEST_PAD")) {
+    const char *at = cfg_get("OOTPC_TEST_PAD_AT");
+    if (at && *at && cfg_get("OOTPC_TEST_PAD")) {
         test_attach_ns = plat_now_ns() + strtoull(at, NULL, 10) * 1000000ull;
         return;
     }
     test_pad_make();
 }
 
-// Under lock, every poll: the delayed attach and the press of NX2NAVI_TEST_PAD_AT.
+// Under lock, every poll: the delayed attach and the press of OOTPC_TEST_PAD_AT.
 static void test_pad_tick(void) {
     uint64_t now = plat_now_ns();
     if (test_attach_ns && now >= test_attach_ns) {
@@ -1046,8 +1047,8 @@ static void test_pad_tick(void) {
 
 static void start(void) {
     binds_refresh();
-    const char *e = cfg_get("NX2NAVI_INPUT");
-    if (e && !strcmp(e, "none")) { state = -1; rt_log("input: disabled (NX2NAVI_INPUT=none)"); return; }
+    const char *e = cfg_get("OOTPC_INPUT");
+    if (e && !strcmp(e, "none")) { state = -1; rt_log("input: disabled (OOTPC_INPUT=none)"); return; }
     state = sdl_start() ? 1 : -1;   // SDL's initialisation, on the pad thread (up_main)
     if (state == 1) {
         plat_mutex_lock(&sdl_lock);   // the pad thread updates only when asked, and nobody has asked yet
@@ -1108,7 +1109,7 @@ static int pad_physical(uint8_t pd[PAD_COUNT]) {
     return 1;
 }
 
-// Under lock, state 1: the open gamepad's buttons (Switch bits after NX2NAVI_PAD_LAYOUT and the NX2NAVI_BIND_* lines) and
+// Under lock, state 1: the open gamepad's buttons (Switch bits after OOTPC_PAD_LAYOUT and the OOTPC_BIND_* lines) and
 // sticks; 0 without a connected gamepad.
 #ifdef _WIN32
 // Without a gamepad SDL can open, Xbox controllers are read through XInput directly (xinput1_4, else xinput9_1_0):
@@ -1376,9 +1377,9 @@ static volatile uint64_t g_block_closed, g_menu_closed;
 // mouse_mode = off: the mouse never turns the camera and the cursor is never captured, so it moves freely between the
 // game and other windows.
 int input_cursor_allowed(void) {
-    const char *in = cfg_get("NX2NAVI_INPUT");
+    const char *in = cfg_get("OOTPC_INPUT");
     return g_block != 1 && g_menu != 1 && mouse_sens_get() > 0 && !(in && !strcmp(in, "none")) && !menu_cursor_pointer() &&
-           strcmp(cfg_value("NX2NAVI_MOUSE_MODE"), "off");
+           strcmp(cfg_value("OOTPC_MOUSE_MODE"), "off");
 }
 
 void input_block(int on) {
@@ -1414,20 +1415,106 @@ static int blocked(volatile int32_t *flag, volatile uint64_t *closed, const char
     return 0;
 }
 
+static void pause_apply(uint64_t *buttons);
+
 void input_poll(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
     poll_merged(buttons, lx, ly, rx, ry);
+    pause_apply(buttons);   // a button pressed while paused (input_poll_paused), on the frame after
     dbg_pad_apply(buttons, lx, ly, rx, ry);   // a console input script replaces the controller (debug_pad.c)
     *buttons &= ~dbg_fly_game_mask();   // fly's B with the ocarina out (debug_move.c)
     if (!g_block && !g_menu) menu_cursor_poll(buttons);
     const int32_t axes[4] = {*lx, *ly, *rx, *ry};
     int text = blocked(&g_block, &g_block_closed, "text entry", *buttons, axes),
         menu = blocked(&g_menu, &g_menu_closed, "menu", *buttons, axes);
-    if (!text && !menu) return;
+    if (!text && !menu) {
+        midi_oc_input(buttons, lx, ly, rx, ry);   // a MIDI file played on the ocarina (midi_ocarina.c)
+        return;
+    }
     *buttons = 0; *lx = *ly = *rx = *ry = 0;
 }
 
 void input_poll_ui(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
     poll_merged(buttons, lx, ly, rx, ry);
+}
+
+// Buttons pressed while the game is paused: the last ones pressed, as many as the setting debug_pause_inputs (1 to
+// PAUSE_KEEP_MAX; input_poll_paused keeps them in order, a button pressed again moves to the newest place and the
+// oldest drops out) are held for the whole frame the next step or the resume lets through (input_pause_release), on
+// top of what is held then. The frame hook ends that frame's share (input_pause_frame). Game thread, under the lock;
+// input_pause_next reads them for the overlay from the render thread.
+enum { PAUSE_KEEP_MAX = 16 };
+static uint64_t pause_kept[PAUSE_KEEP_MAX];   // one button bit each, oldest first
+static int pause_n;
+static uint64_t step_b, pause_held;
+static int pause_fresh = 1;   // the next paused poll takes what is held as already held (held when the pause began)
+#define STICK_BITS (0xffull << B_SL_LEFT)   // B_SL_LEFT .. B_SR_DOWN
+
+uint64_t input_poll_paused(void) {
+    uint64_t b = 0, hotkeys = 0;
+    uint32_t phys = 0;
+    int32_t sl[2] = {0, 0}, sr[2] = {0, 0};
+    plat_mutex_lock(&lock);
+    if (state > 0) {
+        int menu_pad = dbg_menu_button();
+        if (state == 1) pad_read(&b, sl, sr, dbg_bind_pads() | (menu_pad ? 1u << menu_pad : 0), &phys);
+        uint8_t down[KEY_COUNT] = {0};
+        int front = ikb_foreground();
+        for (int k = 1; front && k < KEY_COUNT; k++) down[k] = (uint8_t)(ikb_down(k) != 0);
+        hotkeys = dbg_bind_poll(phys, front ? down : NULL, menu_is_open());   // clears the bound keys
+        if (front) b |= input_map_buttons(down);
+        b &= ~STICK_BITS;   // the stick directions pad_read reports as buttons are not presses
+        if (pause_fresh) pause_held = b, pause_fresh = 0;
+        uint64_t pressed = b & ~pause_held;
+        pause_held = b;
+        int keep = cfg_int("OOTPC_DEBUG_PAUSE_INPUTS");
+        keep = keep < 1 ? 1 : keep > PAUSE_KEEP_MAX ? PAUSE_KEEP_MAX : keep;
+        while (pressed && !menu_is_open() && !g_block) {
+            uint64_t bit = pressed & -pressed;
+            pressed &= pressed - 1;
+            int j = 0;
+            for (int i = 0; i < pause_n; i++)
+                if (pause_kept[i] != bit) pause_kept[j++] = pause_kept[i];
+            pause_n = j;
+            if (pause_n == PAUSE_KEEP_MAX) memmove(pause_kept, pause_kept + 1, --pause_n * sizeof *pause_kept);
+            pause_kept[pause_n++] = bit;
+        }
+        if (pause_n > keep) {   // the setting lowered, or more pressed in one poll than it keeps
+            memmove(pause_kept, pause_kept + pause_n - keep, keep * sizeof *pause_kept);
+            pause_n = keep;
+        }
+    }
+    plat_mutex_unlock(&lock);
+    return hotkeys;
+}
+
+void input_pause_release(void) {
+    plat_mutex_lock(&lock);
+    step_b = 0;
+    for (int i = 0; i < pause_n; i++) step_b |= pause_kept[i];
+    pause_n = 0, pause_fresh = 1;
+    plat_mutex_unlock(&lock);
+}
+
+void input_pause_frame(void) {
+    if (!step_b) return;
+    plat_mutex_lock(&lock);
+    step_b = 0;
+    plat_mutex_unlock(&lock);
+}
+
+uint64_t input_pause_next(void) {
+    uint64_t b = 0;
+    plat_mutex_lock(&lock);
+    for (int i = 0; i < pause_n; i++) b |= pause_kept[i];
+    plat_mutex_unlock(&lock);
+    return b;
+}
+
+// The paused presses a step let through (input_pause_release), added to the frame's poll.
+static void pause_apply(uint64_t *buttons) {
+    plat_mutex_lock(&lock);
+    *buttons |= step_b;
+    plat_mutex_unlock(&lock);
 }
 
 // Presses queued by input_menu_press for the menu (the remote console's "menu" command), timed on the wall clock: the
@@ -1541,7 +1628,7 @@ int input_capture(int reset, int *id) {
 }
 
 int input_rumble_triggers_enabled(void) {
-    return cfg_bool("NX2NAVI_RUMBLE_TRIGGERS");
+    return cfg_bool("OOTPC_RUMBLE_TRIGGERS");
 }
 
 int input_rumble(uint16_t low, uint16_t high, uint32_t ms) {
@@ -1611,13 +1698,13 @@ int input_motion_enabled(void) {
     unsigned v = cfg_version();
     if (on < 0 || v != seen) {
         seen = v;
-        on = cfg_bool("NX2NAVI_MOTION");
+        on = cfg_bool("OOTPC_MOTION");
     }
     return on;
 }
 
 // 250 Hz: the gamepads update (reports read, rumble expiry) and the newest gyro and accelerometer sample goes into the
-// fusion. Without a gamepad with sensors, or with motion off (NX2NAVI_MOTION=0, live), nothing is fed and the six-axis
+// fusion. Without a gamepad with sensors, or with motion off (OOTPC_MOTION=0, live), nothing is fed and the six-axis
 // sensor reads at rest.
 static void motion_main(void *arg) {
     (void)arg;
@@ -1643,7 +1730,7 @@ void input_motion_start(void) {
     plat_mutex_lock(&lock);
     if (!state) start();
     if (!motion_thread) {
-        if (!input_motion_enabled()) rt_log("input: motion off (NX2NAVI_MOTION=0); it can be turned on while the game runs");
+        if (!input_motion_enabled()) rt_log("input: motion off (OOTPC_MOTION=0); it can be turned on while the game runs");
         if (state != 1) motion_thread = -1;
         else {
             if (!plat_thread_spawn(motion_main, NULL, "motion", 0)) rt_fatal("input: cannot start the motion thread");
@@ -1653,12 +1740,12 @@ void input_motion_start(void) {
     plat_mutex_unlock(&lock);
 }
 
-// --probe-input: the gamepad path on SDL's virtual test gamepad (NX2NAVI_TEST_PAD). The pad thread comes up, a poll
+// --probe-input: the gamepad path on SDL's virtual test gamepad (OOTPC_TEST_PAD). The pad thread comes up, a poll
 // reads the gamepad, polls are quick, and while an update takes as long as a device search (up_test_ns) the polls go on
 // with their last state instead of waiting for it. Needs no game files and no controller.
 int probe_gamepad(void) {
     int fails = 0;
-    cfg_setenv("NX2NAVI_TEST_PAD", "20000,-12000,0,0");
+    cfg_setenv("OOTPC_TEST_PAD", "20000,-12000,0,0");
     uint64_t b = 0;
     int32_t lx = 0, ly = 0;
     uint64_t t0 = plat_now_ns();

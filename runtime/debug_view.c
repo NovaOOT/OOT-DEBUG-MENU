@@ -15,6 +15,13 @@
 // quicksand's shape is a mesh, so those two are marked, not outlined. Exterminator is a live actor; the lava planes and
 // pit bottoms never are (passive placements), so those come from the area's stage files (debug_place.c), read once per
 // area change.
+//
+// Void-out zones (their own kind, DBG_VOL_VOID): the placements the stage's AI logic sends the player back with when
+// touched (debug_place.c void_refs), drawn from the stage files at their placement scale, as a cylinder when the Area's
+// shape type says so. The same read keeps the shape of every cylinder Area of the area (area_shape), so the live Areas
+// among the loading and trigger zones are drawn in their own shape too, and a live Area that is a void-out zone is left
+// to that kind.
+#include <stdatomic.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
@@ -24,6 +31,7 @@
 #include "debug_tools.h"
 #include "host.h"
 #include "layout.h"
+#include "n64sword.h"
 #include "platform/platform.h"
 
 #define ACTOR_CLASS RT_OOT_ADDR(0x4b25e18ull, 0x4ac0e30ull)   // the generic actor class (debug_warp.c)
@@ -32,8 +40,10 @@
 #define ACT_ROT 0x328
 #define ACT_SCALE 0x34c
 #define LIST_MAX 1024
-#define PLACED_MAX 256
+#define PLACED_MAX 512
+#define SHAPES_MAX 2048
 #define RESCAN_MS 1500
+#define FULL_EVERY 4   // rescans per full heap pass (view_thread)
 
 typedef struct {
     uint64_t actor, name_ptr;   // actor 0: a placement from the stage files, at pos / axes / scale below
@@ -98,6 +108,28 @@ static int wall_stops_player(const char *name) {
     return 1;
 }
 
+// The cylinder Areas and void-out zones of the area's placements, by position (view_thread reads them with the death
+// barriers); a live Area stands where it is placed until something moves it.
+static struct {
+    float pos[3];
+    int cylinder, void_out;
+} area_shapes[SHAPES_MAX];
+static int area_shape_n;
+
+static int area_shape(uint64_t actor, int *void_out) {
+    float p[3];
+    *void_out = 0;
+    if (!area_shape_n || !plat_mem_read(actor + ACT_POS, p, sizeof p)) return DBG_SHAPE_BOX;
+    for (int i = 0; i < area_shape_n; i++) {
+        const float *q = area_shapes[i].pos;
+        if (fabsf(p[0] - q[0]) < 0.05f && fabsf(p[1] - q[1]) < 0.05f && fabsf(p[2] - q[2]) < 0.05f) {
+            *void_out = area_shapes[i].void_out;
+            return area_shapes[i].cylinder ? DBG_SHAPE_CYLINDER : DBG_SHAPE_BOX;
+        }
+    }
+    return DBG_SHAPE_BOX;
+}
+
 // The kind of a live actor by its name (0: not shown), its shape and, for the death barriers, the name to show and
 // the base shape's size.
 static int classify(uint64_t actor, const char *name, int *shape, Entry *e) {
@@ -111,7 +143,12 @@ static int classify(uint64_t actor, const char *name, int *shape, Entry *e) {
         !strcmp(name, "WallCrack"))
         return DBG_VOL_ENEMY;
     if (has(name, "AirWall") || has(name, "Airwall")) return wall_stops_player(name) ? DBG_VOL_WALL : 0;
-    if (!strcmp(name, "Area")) return dbg_area_is_loading_zone(actor) ? DBG_VOL_LOAD : DBG_VOL_TRIGGER;
+    if (!strcmp(name, "Area")) {   // a void-out zone is drawn from its placement (place_one), in that kind's colour
+        int void_out;
+        *shape = area_shape(actor, &void_out);
+        if (void_out && (V.want & DBG_VOL_VOID)) return 0;
+        return dbg_area_is_loading_zone(actor) ? DBG_VOL_LOAD : DBG_VOL_TRIGGER;
+    }
     // NavMeshCut* (path-finding holes round every character) and ForbidAutoPlacement* (where nothing spawns) fill a
     // town with boxes and say nothing about the level, so they are left out.
     if (has(name, "Area") && !has(name, "AreaBgm") && !has(name, "AreaOverwrite") && !has(name, "VolumeFog") &&
@@ -156,43 +193,70 @@ static int scan_one(uint64_t actor, const char *name, void *ctx) {
     return s->n < LIST_MAX;
 }
 
-// The death barriers among an area's placements (not Exterminator, which is a live actor).
+// The death barriers and void-out zones among an area's placements (not Exterminator, which is a live actor), and the
+// shapes of its cylinder Areas.
 static Entry placed[PLACED_MAX];
 static int placed_n;
 
 static int place_one(const DbgPlacement *pl, void *ctx) {
     (void)ctx;
+    int cylinder = pl->shape_type == DBG_AREA_CYLINDER;
+    if ((cylinder || pl->void_kind) && area_shape_n < SHAPES_MAX) {
+        memcpy(area_shapes[area_shape_n].pos, pl->pos, sizeof pl->pos);
+        area_shapes[area_shape_n].cylinder = cylinder, area_shapes[area_shape_n++].void_out = pl->void_kind != 0;
+    }
+    if (placed_n >= PLACED_MAX) return 1;
     Entry *e = &placed[placed_n];
-    int shape;
-    if (pl->void_out) {   // a box like the live Area actor's (its placement scale, the base shape 1 m)
-        shape = DBG_SHAPE_BOX;
+    int shape, kind = DBG_VOL_DEATH;
+    if (pl->void_kind) {   // the placement's own shape at its scale, as the live Area's
+        static const char *const what[] = {"", "Void-out zone", "Void-out zone (when active)", "Sand void-out"};
+        shape = cylinder ? DBG_SHAPE_CYLINDER : DBG_SHAPE_BOX, kind = DBG_VOL_VOID;
         e->base[0] = e->base[1] = e->base[2] = 1.0f, e->lift = 0;
-        snprintf(e->name, sizeof e->name, "Void-out zone");
+        snprintf(e->name, sizeof e->name, "%s", what[pl->void_kind]);
     } else if (!strcmp(pl->name, "Exterminator") || !death_of(pl->name, &shape, e))
         return 1;
-    e->actor = 0, e->name_ptr = 0, e->kind = DBG_VOL_DEATH, e->shape = shape, e->target[0] = 0;
+    e->actor = 0, e->name_ptr = 0, e->kind = kind, e->shape = shape, e->target[0] = 0;
     memcpy(e->pos, pl->pos, sizeof e->pos);
     memcpy(e->axes, pl->axes, sizeof e->axes);
     memcpy(e->scale, pl->scale, sizeof e->scale);
-    return ++placed_n < PLACED_MAX;
+    placed_n++;
+    return 1;
 }
 
 static void view_thread(void *arg) {
     (void)arg;
     static Entry next[LIST_MAX];
-    static char placed_area[64];
+    static char placed_area[64], scanned_area[64];
+    int since_full = FULL_EVERY;
     while (V.want) {
         struct scan s = {next, 0, V.want};
         char area[64];
-        if ((V.want & DBG_VOL_DEATH) && dbg_current_area(area) && area[0] && strcmp(area, placed_area)) {
-            placed_n = 0;
-            int got = dbg_place_each(area, place_one, NULL);
+        int have_area = dbg_current_area(area) && area[0];
+        if ((V.want & (DBG_VOL_DEATH | DBG_VOL_VOID | DBG_VOL_LOAD | DBG_VOL_TRIGGER)) && have_area &&
+            strcmp(area, placed_area)) {
+            placed_n = area_shape_n = 0;
+            int got = dbg_place_each(area, place_one, NULL), voids = 0;
+            for (int i = 0; i < placed_n; i++) voids += placed[i].kind == DBG_VOL_VOID;
             memcpy(placed_area, area, sizeof placed_area);
-            rt_log("debug view: %s: %d death barriers among %d placements", area, placed_n, got);
+            rt_log("debug view: %s: %d death barriers, %d void-out zones, %d shaped Areas among %d placements", area,
+                   placed_n - voids, voids, area_shape_n, got);
         }
-        if (V.want & DBG_VOL_DEATH)
-            for (int i = 0; i < placed_n && s.n < LIST_MAX; i++) next[s.n++] = placed[i];
-        dbg_each_actor(scan_one, &s);
+        if ((V.want & DBG_VOL_VOID) && have_area) {   // debug_voidcells.c: the tiles once per area, the cells round the player
+            float me[3];
+            dbg_void_cells_area(area);
+            if (dbg_player_pos(me)) dbg_void_cells_update(me);
+        }
+        for (int i = 0; i < placed_n && s.n < LIST_MAX; i++)
+            if (placed[i].kind & V.want) next[s.n++] = placed[i];
+        // The whole heap after an area change and every FULL_EVERY rescans, the chunks that held actors between
+        // (debug_warp.c each_actor): an actor in a heap chunk new to the area shows at the next full pass.
+        int full = ++since_full >= FULL_EVERY || !have_area || strcmp(area, scanned_area);
+        if (full) {
+            since_full = 0;
+            if (have_area) memcpy(scanned_area, area, sizeof scanned_area);
+            dbg_each_actor(scan_one, &s);
+        } else
+            dbg_each_actor_marked(scan_one, &s);
         plat_mutex_lock(&V.lock);
         memcpy(V.list, next, (size_t)s.n * sizeof *next);
         V.n = s.n;
@@ -253,10 +317,26 @@ int dbg_view_volumes(DbgVolume *out, int max, float range) {
             float r = range + fmaxf(v->scale[0], fmaxf(v->scale[1], v->scale[2]));   // a big volume reaching into range
             if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > r * r) continue;
         }
-        v->kind = e->kind, v->shape = e->shape;
+        v->kind = e->kind, v->shape = e->shape, v->cells = 0;
         memcpy(v->name, e->name, sizeof v->name);
         memcpy(v->target, e->target, sizeof v->target);
         n++;
+    }
+    // the void-out cells near the player, as upright boxes from their bottom middle
+    if (V.want & DBG_VOL_VOID) {
+        static float box[LIST_MAX][6];
+        int k = dbg_void_cells(box, max - n < LIST_MAX ? max - n : LIST_MAX, have_me ? me : NULL, range);
+        static const float id[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        for (int i = 0; i < k; i++) {
+            DbgVolume *v = &out[n++];
+            const float *b = box[i];
+            v->pos[0] = (b[0] + b[3]) * 0.5f, v->pos[1] = b[1], v->pos[2] = (b[2] + b[5]) * 0.5f;
+            memcpy(v->axes, id, sizeof id);
+            for (int j = 0; j < 3; j++) v->scale[j] = b[3 + j] - b[j];
+            v->kind = DBG_VOL_VOID, v->shape = DBG_SHAPE_BOX, v->cells = 1;
+            snprintf(v->name, sizeof v->name, "Void-out cells (fall check)");
+            v->target[0] = 0;
+        }
     }
     return n;
 }
@@ -282,6 +362,8 @@ static int life_of(uint64_t actor, int *life, int *max, uint64_t *at) {
     if (at) *at = pc + 8;
     return 1;
 }
+
+int dbg_actor_life(uint64_t actor, int *life, int *max, uint64_t *at) { return life_of(actor, life, max, at); }
 
 int dbg_view_health(DbgHealth *out, int max, float range) {
     static Entry copy[LIST_MAX];
@@ -311,29 +393,41 @@ int dbg_view_health(DbgHealth *out, int max, float range) {
     return n;
 }
 
-// The kinds the settings switch on (nx2navi.ini [debug] debug_view_walls, _loading, _triggers, _hidden, _death,
+// The kinds the settings switch on (OOT-PC.ini [debug] debug_view_walls, _loading, _triggers, _hidden, _death, _void,
 // _health, _hookshot, _collision), parsed again when cfg_version changes; also starts or stops the helper thread's rescans.
+// The presence's fight line (discord_rpc.c fight_line) wants the enemy scan too, while it is connected and in play.
+static _Atomic int foes_wanted;
+static int foes_seen = -1;
+
+void dbg_view_foes(int on) {
+    atomic_store(&foes_wanted, on ? 1 : 0);
+    dbg_view_kinds();   // starts or stops the scan at once
+}
+
 int dbg_view_kinds(void) {
     static unsigned seen = ~0u;
     static int kinds;
     unsigned v = cfg_version();
-    if (v != seen) {
-        seen = v;
-        kinds = (cfg_bool("NX2NAVI_DEBUG_VIEW_WALLS") ? DBG_VOL_WALL : 0) |
-                (cfg_bool("NX2NAVI_DEBUG_VIEW_LOADING") ? DBG_VOL_LOAD : 0) |
-                (cfg_bool("NX2NAVI_DEBUG_VIEW_TRIGGERS") ? DBG_VOL_TRIGGER : 0) |
-                (cfg_bool("NX2NAVI_DEBUG_VIEW_HIDDEN") ? DBG_VOL_HIDDEN : 0) |
-                (cfg_bool("NX2NAVI_DEBUG_VIEW_DEATH") ? DBG_VOL_DEATH : 0) |
-                (cfg_bool("NX2NAVI_DEBUG_VIEW_HEALTH") ? DBG_VOL_ENEMY : 0);
-        dbg_view_want(kinds | (cfg_bool("NX2NAVI_DEBUG_ONE_HIT") ? DBG_VOL_ENEMY : 0));   // the overlay's set stays as it is
+    int foes = atomic_load(&foes_wanted);
+    if (v != seen || foes != foes_seen) {
+        seen = v, foes_seen = foes;
+        kinds = (cfg_bool("OOTPC_DEBUG_VIEW_WALLS") ? DBG_VOL_WALL : 0) |
+                (cfg_bool("OOTPC_DEBUG_VIEW_LOADING") ? DBG_VOL_LOAD : 0) |
+                (cfg_bool("OOTPC_DEBUG_VIEW_TRIGGERS") ? DBG_VOL_TRIGGER : 0) |
+                (cfg_bool("OOTPC_DEBUG_VIEW_HIDDEN") ? DBG_VOL_HIDDEN : 0) |
+                (cfg_bool("OOTPC_DEBUG_VIEW_DEATH") ? DBG_VOL_DEATH : 0) |
+                (cfg_bool("OOTPC_DEBUG_VIEW_VOID") ? DBG_VOL_VOID : 0) |
+                (cfg_bool("OOTPC_DEBUG_VIEW_HEALTH") ? DBG_VOL_ENEMY : 0);
+        dbg_view_want(kinds | (cfg_bool("OOTPC_DEBUG_ONE_HIT") || foes ? DBG_VOL_ENEMY : 0));   // the overlay's set stays as it is
         // debug_hook.c, its own thread: the hookshot surfaces and the walls of the collision files
-        // and the collision for the clips' second view (vk_dbg3d.c vk_dbg3d_view2) while clips are recorded with it
-        int view2 = clip_enabled() && clip_view2();
-        dbg_hook_want((cfg_bool("NX2NAVI_DEBUG_VIEW_HOOKSHOT") ? DBG_HOOK_SURFACES : 0) |
-                      (cfg_bool("NX2NAVI_DEBUG_VIEW_WALLS") ? DBG_HOOK_WALLS : 0) |
-                      (cfg_bool("NX2NAVI_DEBUG_VIEW_COLLISION") || view2 ? DBG_HOOK_COLLISION : 0));
-        if (cfg_bool("NX2NAVI_DEBUG_VIEW_HOOKSHOT")) kinds |= DBG_VOL_HOOK;
-        if (cfg_bool("NX2NAVI_DEBUG_VIEW_COLLISION")) kinds |= DBG_VOL_COLLISION;
+        // and the collision for the clips' second view (vk_dbg3d.c vk_dbg3d_view2) while clips are recorded with it,
+        // and for N64 Graphics' sword walls (n64sword.c), which test the swung weapon against it
+        int view2 = clip_enabled() && clip_view2(), sword = n64sword_wants_collision();
+        dbg_hook_want((cfg_bool("OOTPC_DEBUG_VIEW_HOOKSHOT") ? DBG_HOOK_SURFACES : 0) |
+                      (cfg_bool("OOTPC_DEBUG_VIEW_WALLS") ? DBG_HOOK_WALLS : 0) |
+                      (cfg_bool("OOTPC_DEBUG_VIEW_COLLISION") || view2 || sword ? DBG_HOOK_COLLISION : 0));
+        if (cfg_bool("OOTPC_DEBUG_VIEW_HOOKSHOT")) kinds |= DBG_VOL_HOOK;
+        if (cfg_bool("OOTPC_DEBUG_VIEW_COLLISION")) kinds |= DBG_VOL_COLLISION;
     }
     return kinds;
 }
@@ -341,8 +435,8 @@ int dbg_view_kinds(void) {
 // One-hit kills (debug_tools.h dbg_one_hit). The list comes from the helper thread's rescans (every RESCAN_MS), and
 // the life of each listed enemy is read and lowered on every presented frame, so one that heals or is reset is caught
 // again before the player's next swing lands. Enemies already at 1 or at 0 (dying) are left alone.
-void dbg_one_hit(int on) { dbg_keep("NX2NAVI_DEBUG_ONE_HIT", on ? "1" : "0"); }
-int dbg_one_hit_on(void) { return cfg_bool("NX2NAVI_DEBUG_ONE_HIT") != 0; }
+void dbg_one_hit(int on) { dbg_keep("OOTPC_DEBUG_ONE_HIT", on ? "1" : "0"); }
+int dbg_one_hit_on(void) { return cfg_bool("OOTPC_DEBUG_ONE_HIT") != 0; }
 
 void dbg_one_hit_tick(void) {
     dbg_view_kinds();   // follows a change of the setting: starts or stops the enemy scan

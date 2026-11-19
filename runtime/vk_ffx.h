@@ -37,12 +37,12 @@ void vk_ffx_release_idle(void);
 // for it): room for an FSR 4 context whose creation failed. Their count.
 int vk_ffx_trim_idle(uint64_t recent);
 // The device's functions as the library is given them (ffxCreateBackendVKDesc.vkDeviceProcAddr): its pipeline creates
-// go through the runtime's pipeline caches (vk_pipeline.c vk_pipeline_create_foreign; NX2NAVI_FFX_PIPE_CACHE=0: not).
+// go through the runtime's pipeline caches (vk_pipeline.c vk_pipeline_create_foreign; OOTPC_FFX_PIPE_CACHE=0: not).
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_ffx_proc_addr(VkDevice dev, const char *name);
 
 // AMD FSR 4 (vk_ffx4.cpp): the ML upscaler of AMD's FSR SDK 2.4, through amd_fidelityfx_loader_vk.dll and
 // amd_fidelityfx_upscaler_vk.dll beside the executable. vk_ffx_upscale runs it in FSR 3.1's place when the setting
-// asks (NX2NAVI_FSR4) and it runs here, and falls back to FSR 3.1 when it fails.
+// asks (OOTPC_FSR4) and it runs here, and falls back to FSR 3.1 when it fails.
 int vk_ffx4_available(void);      // the libraries are there and list a 4.x version for the device; asked once, with the
                                   // device, from any thread (0 before the device exists)
 const char *vk_ffx4_name(void);   // "AMD FSR 4.1.2" once vk_ffx4_available found it

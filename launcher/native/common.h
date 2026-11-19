@@ -1,4 +1,4 @@
-/* Shared by OOT-DEBUG-MENU.exe (nx2navi.c) and OOT-DEBUG-MENU-Setup.exe (setup.c): paths, small files, shortcuts and the
+/* Shared by OOT-PC.exe (ootpc.c) and OOT-PC-Setup.exe (setup.c): paths, small files, shortcuts and the
    uninstall entry. Wide-character Win32 throughout, so folder names in any language work. */
 #pragma once
 #define COBJMACROS
@@ -14,11 +14,11 @@
 #include <wchar.h>
 
 #define PATHN 1024
-#define APP_NAME L"OOT-DEBUG-MENU"
-#define UNINSTALL_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OOT-DEBUG-MENU"
+#define APP_NAME L"OOT-PC"
+#define UNINSTALL_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OOT-PC"
 /* The launcher window's taskbar identity (launcher/winsys.py app_id): a shortcut that carries it is the one the
    taskbar groups and pins the window under, with the shortcut's icon. */
-#define APP_USER_MODEL_ID L"OOT-DEBUG-MENU.Launcher"
+#define APP_USER_MODEL_ID L"OOT-PC.Launcher"
 static const PROPERTYKEY NX_PKEY_AppUserModel_ID = {
     {0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5};
 static const IID NX_IID_IPropertyStore = {0x886d8eeb, 0x8cf2, 0x4446, {0x8d, 0x02, 0xcd, 0xba, 0x1d, 0xbd, 0xcf, 0x99}};
@@ -140,14 +140,14 @@ static inline int shortcut_path(int desktop, wchar_t *out, size_t n)
     return swprintf(out, n, L"%ls\\%ls.lnk", dir, APP_NAME) > 0;
 }
 
-/* Create (on) or remove (off) the Desktop and/or Start menu shortcut to root\OOT-DEBUG-MENU.exe. */
+/* Create (on) or remove (off) the Desktop and/or Start menu shortcut to root\OOT-PC.exe. */
 static inline int set_shortcut(const wchar_t *root, int desktop, int on)
 {
     wchar_t lnk[PATHN], target[PATHN];
     if (!shortcut_path(desktop, lnk, PATHN)) return 0;
     if (!on) return DeleteFileW(lnk) || GetLastError() == ERROR_FILE_NOT_FOUND;
-    swprintf(target, PATHN, L"%ls\\OOT-DEBUG-MENU.exe", root);
-    return make_shortcut(lnk, target, root, L"Play and update OOT-DEBUG-MENU");
+    swprintf(target, PATHN, L"%ls\\OOT-PC.exe", root);
+    return make_shortcut(lnk, target, root, L"Play and update OOT-PC");
 }
 
 static inline void reg_str(HKEY k, const wchar_t *name, const wchar_t *value)
@@ -160,7 +160,7 @@ static inline void reg_dword(HKEY k, const wchar_t *name, DWORD value)
     RegSetValueExW(k, name, 0, REG_DWORD, (const BYTE *)&value, sizeof value);
 }
 
-/* The entry in Settings > Apps that runs "OOT-DEBUG-MENU.exe --uninstall". */
+/* The entry in Settings > Apps that runs "OOT-PC.exe --uninstall". */
 static inline int write_uninstall_entry(const wchar_t *root, const wchar_t *version, DWORD size_kb)
 {
     HKEY k;
@@ -171,13 +171,50 @@ static inline int write_uninstall_entry(const wchar_t *root, const wchar_t *vers
     reg_str(k, L"DisplayVersion", version);
     reg_str(k, L"Publisher", APP_NAME);
     reg_str(k, L"InstallLocation", root);
-    swprintf(buf, PATHN + 64, L"\"%ls\\OOT-DEBUG-MENU.exe\",0", root);
+    swprintf(buf, PATHN + 64, L"\"%ls\\OOT-PC.exe\",0", root);
     reg_str(k, L"DisplayIcon", buf);
-    swprintf(buf, PATHN + 64, L"\"%ls\\OOT-DEBUG-MENU.exe\" --uninstall", root);
+    swprintf(buf, PATHN + 64, L"\"%ls\\OOT-PC.exe\" --uninstall", root);
     reg_str(k, L"UninstallString", buf);
     reg_dword(k, L"NoModify", 1);
     reg_dword(k, L"NoRepair", 1);
     reg_dword(k, L"EstimatedSize", size_kb);
     RegCloseKey(k);
     return 1;
+}
+
+/* The names before the project was renamed to OOT-PC. An install from then keeps its folder; the launcher has the new
+   stub move its shortcuts and its entry in Settings > Apps to the new names (OOT-PC.exe --rebrand, rebrand), and the
+   setup installs over it rather than beside it (setup.c). */
+#define LEGACY_APP_NAME L"OOT-DEBUG-MENU"
+#define LEGACY_UNINSTALL_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OOT-DEBUG-MENU"
+#define LEGACY_STUB L"OOT-DEBUG-MENU.exe"
+
+/* Delete the old Desktop (desktop 1) or Start menu (0) shortcut; 1 when there was one. */
+static inline int drop_legacy_shortcut(int desktop)
+{
+    wchar_t dir[PATHN], lnk[PATHN];
+    if (!known_folder(desktop ? &FOLDERID_Desktop : &FOLDERID_Programs, dir, PATHN)) return 0;
+    swprintf(lnk, PATHN, L"%ls\\%ls.lnk", dir, LEGACY_APP_NAME);
+    return path_exists(lnk) && DeleteFileW(lnk);
+}
+
+/* Each old shortcut becomes the new one, and the old Settings > Apps entry becomes the new one with its version and
+   size. Running it again changes nothing. */
+static inline int rebrand(const wchar_t *root)
+{
+    int ok = 1;
+    for (int desktop = 0; desktop < 2; desktop++)
+        if (drop_legacy_shortcut(desktop)) ok &= set_shortcut(root, desktop, 1);
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, LEGACY_UNINSTALL_KEY, 0, KEY_QUERY_VALUE, &k) == ERROR_SUCCESS) {
+        wchar_t ver[64] = L"0";
+        DWORD size_kb = 0, vn = sizeof ver - sizeof(wchar_t), sn = sizeof size_kb;
+        if (RegQueryValueExW(k, L"DisplayVersion", NULL, NULL, (BYTE *)ver, &vn) != ERROR_SUCCESS) wcscpy(ver, L"0");
+        ver[63] = 0;
+        RegQueryValueExW(k, L"EstimatedSize", NULL, NULL, (BYTE *)&size_kb, &sn);
+        RegCloseKey(k);
+        if (write_uninstall_entry(root, ver, size_kb)) RegDeleteKeyW(HKEY_CURRENT_USER, LEGACY_UNINSTALL_KEY);
+        else ok = 0;
+    }
+    return ok;
 }

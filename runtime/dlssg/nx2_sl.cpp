@@ -1,4 +1,4 @@
-// nx2navi_dlssg.dll: DLSS Frame Generation through NVIDIA Streamline, behind the C interface of nx2_sl.h. Built with
+// ootpc_dlssg.dll: DLSS Frame Generation through NVIDIA Streamline, behind the C interface of nx2_sl.h. Built with
 // MSVC against the Streamline SDK's headers (tools/build_dlssg.py; the SDK stays outside the repository), so its C++
 // types have the ABI of Streamline's own DLLs. sl.interposer.dll and its plugins are loaded from the game's folder at
 // run time; this DLL links none of them.

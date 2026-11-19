@@ -1,6 +1,6 @@
-﻿// nx2navi.ini: file-backed defaults for the NX2NAVI_* environment variables (docs/controls.md, nx2navi.ini.example).
+﻿// OOT-PC.ini: file-backed defaults for the OOTPC_* environment variables (docs/controls.md, OOT-PC.ini.example).
 // Format: "key = value" lines, '#' or ';' at the start of a line begins a comment, [sections] only group. A key is a
-// variable name without "NX2NAVI_" (an optional NX2NAVI_ prefix is accepted), case-insensitive. A value is the rest of the
+// variable name without "OOTPC_" (an optional OOTPC_ prefix is accepted), case-insensitive. A value is the rest of the
 // line, trimmed, optionally in double quotes; an empty value counts as unset. The environment wins over the file.
 //
 // Live settings: cfg_set changes a value in memory (readers see the new pointer; the old string is kept, so a pointer
@@ -17,8 +17,14 @@
 #include "host.h"
 #include "platform/platform.h"
 
-#define PREFIX "NX2NAVI_"
+#define PREFIX "OOTPC_"
 #define PREFIX_LEN (sizeof PREFIX - 1)
+// The prefix and the file name before the project was renamed to OOT-PC: a key written with the old prefix still
+// counts (norm_key), an environment variable with it still sets the setting (legacy_env), and an old settings file
+// beside the game becomes OOT-PC.ini at the first start (find_ini).
+#define LEGACY_PREFIX "NX2NAVI_"
+#define LEGACY_PREFIX_LEN (sizeof LEGACY_PREFIX - 1)
+#define LEGACY_INI "nx2navi.ini"
 #define CFG_MAX_KEYS 512
 
 typedef struct { char *key, *value; int dirty, removed; } CfgEntry;   // key upper-case, without the prefix; value NULL after cfg_reset
@@ -34,7 +40,7 @@ static int save_ok = 1;                         // the last cfg_save_to wrote (o
 // logged as unknown. A new variable goes here too, or its ini key logs a harmless "unknown key" line.
 static const char *const known[] = {
     "CORES", "TM_DISPATCH", "NVN2_CS_TABLE", "SKIP_SHADERS", "MOVIE_DEBAND", "MOVIE_FPS", "MOVIE_SKIP", "MOVIE_OVERLAY", "MOVIES", "NPLN", "NVN2_PROGRAMS", "NVN_TRAP", "OCARINA_REALTIME", "ONESHOT_BUDGET", "ONESHOT_WAIT_MS", "OCARINA_STEP", "PHYSICS_STEPS", "PHYSICS_STEPS_FULL", "PICKUP_COUNT", "WATER_STEPS", "SOUND_STEPS", "FLOOR_PROBE", "FLOOR_SCAN", "FLOOR_WATCH", "FLOOR_CARRY", "MOVIE_PTS", "STEP_STEADY", "VI_HZ", "VI_VRR", "TIME_DUMP", "SHADER_DUMP", "SHOT_AFTER", "SHOT_DIR", "SHOT_EVERY",   // Switch 2 port: movie skip (romfs.c), NVN2 proc traps (nvn_procs.c)
-    "AA", "AA_LOG", "AB", "AMIIBO_DIR", "ANISO", "APP_POOL", "ASPECT", "ASPECT_PATCH", "ASSUME_FOCUS", "ASTC", "ASTC_BC", "ASTC_TIME", "ASYNC_PREEMPT", "AUDIO", "AUDIO_CATCHUP", "AUDIO_CHANNELS", "AUDIO_DEVICE", "AUDIO_GAME_PRIO", "AUDIO_OFF", "AUDIO_PREFILL_MS", "AUDIO_RAMP", "AUDIO_STATS",
+    "AA", "AA_LOG", "GAME_AO", "AB", "AMIIBO_DIR", "ANISO", "APP_POOL", "ASPECT", "ASPECT_PATCH", "ASSUME_FOCUS", "ASTC", "ASTC_BC", "ASTC_TIME", "ASYNC_PREEMPT", "AUDIO", "AUDIO_CATCHUP", "AUDIO_CHANNELS", "AUDIO_DEVICE", "AUDIO_GAME_PRIO", "AUDIO_OFF", "AUDIO_PREFILL_MS", "AUDIO_RAMP", "AUDIO_REVERB", "AUDIO_STATS",
     "BARRIER_GAME", "MESH_AHEAD", "MESH_FALLBACK", "MESH_FALLBACK_MB", "MESH_FALLBACK_WORKERS", "PROBE_MESHFB_DIR",
     "APP_POOL_SLACK",
     "BACKGROUND_WINDOW", "BIND_A", "BIND_B", "BIND_DOWN", "BIND_L", "BIND_LCLICK", "BIND_LEFT", "BIND_LSTICK_DOWN", "BIND_LSTICK_LEFT",
@@ -44,9 +50,9 @@ static const char *const known[] = {
     "BIND_SKIP", "BIND_STATS", "BIND_UP", "BIND_X", "BIND_Y",
     "BIND_ZL", "BIND_ZR", "BLOCK_VIEWS_3D", "CACHE_DIE", "CLOTH_REALTIME", "COLOR_BRIGHTNESS", "COMPUTE_KEEP", "COLOR_CONTRAST", "COLOR_GAMMA",
     "COLOR_PRESET", "COLOR_SATURATION", "CONTACT_DEBUG", "CONTACT_SHADOWS", "CORE_DIAG", "CRIT", "CRIT_OUT",
-    "DMABUF", "DMABUF_MB", "DRAW_CRUMBS", "GPA_LATE", "DESC_TEMPLATE", "DEVICE_PROFILE", "DISCORD_APP_ID", "DISCORD_IMAGE", "DISCORD_RPC", "DLAA", "DLAA_CAM_KEEP", "DLAA_CUT", "DLSS_IDLE_FREE", "DLAA_EDGE_FILL", "DLAA_AT_UPSCALER", "FFX_DEBUG", "FFX_KEYS", "FSR3_SHARPEN", "DLAA_JITTER", "DLAA_MV", "DLAA_MASKDEBUG", "DLAA_MVDEBUG", "DLAA_OBJMV", "DLAA_SURVEY", "DLAA_TARGET_KEEP", "DLAA_TIMES", "DLSS", "DLSS_CHAR_MASK", "DLSS_PRESET", "DLSS_PREBLOOM", "DLSS_RANGE", "DLSS_REACTIVE", "DUMP", "DUMP_BUF", "DUMP_DIR",
+    "DMABUF", "DMABUF_MB", "DRAW_CRUMBS", "GPA_LATE", "DESC_TEMPLATE", "DEVICE_PROFILE", "DISCORD_APP_ID", "DISCORD_IMAGE", "DISCORD_LOCATION", "DISCORD_FIGHT", "DISCORD_RPC", "DLAA", "DLAA_CAM_KEEP", "DLAA_CUT", "DLSS_IDLE_FREE", "DLAA_EDGE_FILL", "DLAA_AT_UPSCALER", "FFX_DEBUG", "FFX_KEYS", "FSR3_SHARPEN", "DLAA_JITTER", "DLAA_MV", "DLAA_MASKDEBUG", "DLAA_MVDEBUG", "DLAA_OBJMV", "DLAA_SURVEY", "DLAA_TARGET_KEEP", "DLAA_TIMES", "DLSS", "DLSS_CHAR_MASK", "DLSS_PRESET", "DLSS_PREBLOOM", "DLSS_RANGE", "DLSS_REACTIVE", "DUMP", "DUMP_BUF", "DUMP_DIR",
     "DUMP_LOG", "DUMP_RAW", "DUMP_SHADERS", "DUMP_FILE", "DS3", "LOG_CS_BINDS", "LOG_TEX_FLAGS", "LOG_MESH", "MESH", "POOL", "NATIVE_TENSOR", "LOG_RCOND", "LOG_RT_SIZES", "DUMP_WHITE", "DUMP_AFTER", "DUMP_MOVIE", "SUBMIT_FINISH", "ACQUIRE_WAIT", "CRASH_FILTER_GUARD", "CS_FALLBACK", "EXEFS", "FEEDBACK", "FIX_C0", "FIX_ZERO", "FLIGHT", "FLIGHT_AT", "FLIGHT_DIR", "FLIGHT_FRAMES", "GPU_TIMELINE",
-    "FFX_PIPE_CACHE", "FLIGHT_SPIKE_MS", "STUTTER_MAP", "PAR_JOBS", "PIPE_RELEASE", "FLIGHT_THUMBS", "FLIGHT_EVERY", "FLIGHT_FLASH", "FLIGHT_FLASH_DIFF", "FLIGHT_FLASH_CELLS", "FLUSH_SPAN", "FLUSH_UPLOAD", "FOG_CULL", "FOLIAGE_SHADOW_CULL", "FOLIAGE_SHADOW_VRS", "FOV", "FOV_PATCH", "FG_HUDLESS_SHOW", "FG_MULT", "FPS60", "FPS_LIMIT", "FRAMEGEN", "FRAMEGEN_MULTIPLIER", "FREEZE_IDLE", "FREEZE_ASYNC", "FREEZE_BUDGET_US", "FREE_CORES",
+    "FFX_PIPE_CACHE", "FLIGHT_SPIKE_MS", "STUTTER_MAP", "PAR_JOBS", "PIPE_RELEASE", "FLIGHT_THUMBS", "FLIGHT_EVERY", "FLIGHT_FLASH", "FLIGHT_FLASH_DIFF", "FLIGHT_FLASH_CELLS", "FLUSH_SPAN", "FLUSH_UPLOAD", "FOG_CULL", "FOLIAGE_SHADOW_CULL", "FOLIAGE_SHADOW_VRS", "FOV", "FOV_PATCH", "FG_HUDLESS_SHOW", "FG_MULT", "FPS60", "FPS_LIMIT", "FRAMEGEN", "FRAMEGEN_MULTIPLIER", "FRAMEGEN_TARGET", "FREEZE_IDLE", "FREEZE_ASYNC", "FREEZE_BUDGET_US", "FREE_CORES",
     "FULLSCREEN", "FXAA", "GAME_ASPECT", "GAME_RES", "GPA", "GPA_EMPTY", "GPA_TWIN", "GPA_TWIN_MAX_KB", "MIRROR_CAPTURE_KB", "WB_SKIP_MB", "GPL", "GPL_DRAW_BUILD", "GPL_FEEDBACK", "GPL_MESH", "PIPE_AHEAD", "PIPE_FAST_WORKERS", "PIPE_FRAME_WAIT_MS", "PIPE_LINK_DRAW_MS", "PIPE_SKIP_STEADY", "DRAW_WRITERS_WAIT", "PROG_LEAD", "GPU", "GPU_INDEX", "GPU_PASSES", "GPU_NAME", "HDR",
     "HDR_GAME_NITS", "HDR_LIVE", "HEAP_LAZY", "HDR_PEAK_NITS", "HDR_UI_NITS",
     // retired: the HDR look's settings of earlier versions, now fixed (vk_hdr.c, shaders/hdr_tonemap.frag); read by
@@ -55,13 +61,13 @@ static const char *const known[] = {
     "HDR_HIGHLIGHTS", "HDR_HUE", "HDR_HUE_CLIP", "HDR_MATCH_SLOPE", "HDR_MIDGRAY", "HDR_SATURATION", "HDR_SHADOWS",
     "HDR_TONEMAP", "HDR_TONE_SLOPE", "HIGHFPS_FIX", "INPUT", "INPUT_RECORD", "INPUT_SCRIPT", "LANG", "LIB_PREBUILD",
     "BIG_BUILD_FREE_MB", "BIG_BUILD_MAX_MB", "BUILD_FREE_MB", "BUILD_RESERVE_MB", "LIB_PREBUILD_BIG", "LIB_PREBUILD_BIG_BG", "COMPUTE_WARM_REUSE", "LIB_PREBUILD_KEEP", "LIB_PREBUILD_THREADS", "LIB_WARM", "LINE_WIDTH", "POOL_SHOWN_FIRST", "POOL_DATA_FIRST", "TEX_REUSE_NAMED", "TEX_OVERWRITTEN_USED", "PIPE_LINK_MS", "FRAME_HOLD_MS", "PACE_SMOOTH", "OQ_BATCH", "OQ_HOLD", "QUAD_INDEX", "CLEAR_SMALL_CPU", "GATE_WAIT_MS", "LOCALE", "LOD_GUARD", "LSTICK_DEADZONE", "MEMORY", "MEM_CENSUS", "MEM_NEED_MB", "MENU_LANG", "MENU_SOUND_VOLUME", "MENU_TEST",
-    "MENU_CURSOR", "MENU_CURSOR_LOG", "MENU_TEST_CLICK", "MENU_TEST_DIR", "MENU_TEST_SET", "MINIMAL_LAYOUT", "MICROPHONE", "MIRROR_GAP", "MODS_DIR", "MODS_DISABLED", "MODS_ORDER", "MODS_REBUILD", "MODS_SETTINGS", "MONITOR", "MOTION", "MOUSE_MODE", "MOUSE_DIRECT_PATCH", "MOUSE_SENS", "MOUSE_TRACE", "MOVIE_HOST", "MOVIE_PACE", "MOVIE_CLOCK", "TEST_HITCH", "SPRINT_BUTTON", "SPRINT_MODE", "SPRINT_BUTTON_PATCH", "TEXT_SPEED", "TEXT_SPEED_PATCH",
+    "MENU_CURSOR", "MENU_CURSOR_LOG", "MENU_TEST_CLICK", "MENU_TEST_DIR", "MENU_TEST_SET", "MINIMAL_LAYOUT", "MICROPHONE", "MIRROR_GAP", "MODS_DIR", "MODS_DISABLED", "MODS_ORDER", "MODS_REBUILD", "MODS_SETTINGS", "N64_LINK", "N64_ITEMS", "N64_ACTORS", "N64_WORLD", "N64_WORLD_FOLIAGE", "N64_SWORD_WALLS", "DARK_LINK_STYLE", "DARK_LINK_EFFECTS", "NO_INVISIBLE_WALLS", "RANDO_INVISIBLE_WALLS", "MONITOR", "MOTION", "MOUSE_MODE", "MOUSE_DIRECT_PATCH", "MOUSE_SENS", "MOUSE_TRACE", "MOVIE_HOST", "MOVIE_PACE", "MOVIE_CLOCK", "TEST_HITCH", "SPRINT_BUTTON", "SPRINT_MODE", "SPRINT_BUTTON_PATCH", "TEXT_SPEED", "TEXT_SPEED_PATCH",
     "MOTION_GUARD_DEGREES", "MOTION_POLICY_TRACE", "SELECTIVE_MOTION", "SELECTIVE_MOTION_RAW",   // motion_owner.c, vk_fg_pose.inc
     "SKIN_MOTION",   // vk_skin_motion.inc
     "MVOBJ_ALL", "MVOBJ_BANKS", "MVOBJ_EQUAL", "MVOBJ_EXACT", "MVOBJ_EXEC", "MVOBJ_NOC4", "MVOBJ_ONLY", "MVOBJ_TIMES", "MVPREV_CHECK", "MVPREV_GROW", "MVPREV_SKIP", "MVPREV_TRUST", "MV_CHECK",
     "MV_SURVEY",
-    "PIPE_SEED_BOOT", "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PACE_HZ", "PASS_CRUMBS", "PATCH_OUTPUT", "PATCH_RES_FIXED", "PATCH_SCENE", "PATCH_WIDE_ASPECT", "PATCH_WIDE_HUD", "PATCH_WIDE_MOVIE", "PATCH_WIDE_OUT", "PATCH_FREECAM", "PATCH_OCCLUSION_OFF", "PATCH_WIDE_SAVE", "PATCH_WIDE_SCENE", "PCSS", "PCSS_K", "PERF_OVERLAY", "PERF_SLOW_MS", "PIPELINE_CACHE", "PIPELINE_CACHE_MAX_MB", "PIPELINE_CACHE_PLAY", "PIPELINE_CACHE_PLAY_MB", "PIPE_BINARIES", "PIPE_BINARIES_MAX_MB", "PIPE_FEEDBACK", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SEED", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT", "POWER_FULL", "TEX_SAME", "TEX_SAME_BIG", "TEX_FLAT3D", "TEX_KEEP_TAKEN", "TEX_STALE_KEPT", "PRESENT_HELD", "HELD_SYNC",
-    "DEBUG_FOG_OFF", "DEBUG_MENU_PAD", "DEBUG_MENU_BUTTON", "DEBUG_TITLE_PROFILES", "DEBUG_GOD", "DEBUG_ONE_HIT", "DEBUG_LANK", "DEBUG_HEALTH_LOCK", "DEBUG_SPEED", "DEBUG_READOUT", "DEBUG_HOTKEYS", "DEBUG_REMOTE", "DEBUG_HOVER_BOOTS", "DEBUG_NO_VOID_OUT", "DEBUG_BUNNY", "DEBUG_BUNNY_SPEED", "DEBUG_MASK_POWERS", "RANDO_SEED", "RANDO_LOGIC", "RANDO_CHESTS", "RANDO_DROPS", "RANDO_MAPS", "RANDO_SHOPS", "RANDO_SCRUBS", "RANDO_SONGS", "RANDO_GIFTS", "RANDO_REWARDS", "RANDO_ENEMIES", "RANDO_ENTRANCES", "RANDO_ENTRANCE_POOLS", "RANDO_DUNGEON_AGES", "RANDO_SPOILER", "RANDO_PYTHON", "DEBUG_BOMB_BUG", "DEBUG_CLIP", "DEBUG_CLIP_SECONDS", "DEBUG_CLIP_OVERLAYS", "DEBUG_CLIP_VIEW2", "DEBUG_FLY_SPEED", "DEBUG_FORCE_AGE", "DEBUG_FORCE_AGE_OK", "DEBUG_SAVE_HISTORY", "DEBUG_SAVE_TREE", "DEBUG_INF_MAGIC", "DEBUG_INF_ITEMS", "DEBUG_ANY_AGE_ITEMS", "DEBUG_IGT", "DEBUG_IGT_AUTOSPLIT", "DEBUG_IGT_AUTOSTART", "DEBUG_VIEW_WALLS", "DEBUG_VIEW_LOADING", "DEBUG_VIEW_TRIGGERS", "DEBUG_VIEW_HIDDEN", "DEBUG_VIEW_DEATH", "DEBUG_VIEW_KILL_PLANE", "DEBUG_VIEW_HEALTH", "DEBUG_VIEW_BOMBS", "DEBUG_VIEW_HOOKSHOT", "DEBUG_VIEW_COLLISION", "DEBUG_COLLISION_RANGE", "DEBUG_COLLISION_POLYS", "DEBUG_HIDE_MESHES", "DEBUG_HIDE_PLAYER", "DEBUG_VIEW_STYLE", "DEBUG_VIEW_OPACITY", "DEBUG_VIEW_COLOR_WALLS", "DEBUG_VIEW_COLOR_LOADING", "DEBUG_VIEW_COLOR_TRIGGERS", "DEBUG_VIEW_COLOR_HIDDEN", "DEBUG_VIEW_COLOR_DEATH", "DEBUG_VIEW_COLOR_HOOKSHOT", "DEBUG_VIEW_LABELS", "DEBUG_VIEW_OCCLUDE", "DEBUG_VIEW_RANGE", "DEBUG_DRAW_DISTANCE",
+    "PIPE_SEED_BOOT", "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PACE_HZ", "PASS_CRUMBS", "PATCH_OUTPUT", "PATCH_RES_FIXED", "PATCH_SCENE", "PATCH_WIDE_ASPECT", "PATCH_WIDE_HUD", "PATCH_WIDE_MOVIE", "PATCH_WIDE_OUT", "PATCH_FREECAM", "PATCH_OCCLUSION_OFF", "PATCH_WIDE_SAVE", "PATCH_WIDE_SCENE", "PCSS", "PCSS_K", "PERF_OVERLAY", "PERF_SLOW_MS", "PIPELINE_CACHE", "PIPELINE_CACHE_MAX_MB", "PIPELINE_CACHE_PLAY", "PIPELINE_CACHE_PLAY_MB", "PIPE_BINARIES", "PIPE_BINARIES_MAX_MB", "INDEX_UINT8", "PIPE_FEEDBACK", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SEED", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT", "POWER_FULL", "TEX_SAME", "TEX_SAME_BIG", "TEX_FLAT3D", "TEX_KEEP_TAKEN", "TEX_STALE_KEPT", "PRESENT_HELD", "HELD_SYNC",
+    "DEBUG_FOG_OFF", "DEBUG_MENU_PAD", "DEBUG_MENU_BUTTON", "DEBUG_TITLE_PROFILES", "DEBUG_GOD", "DEBUG_ONE_HIT", "DEBUG_LANK", "DEBUG_HEALTH_LOCK", "DEBUG_SPEED", "DEBUG_READOUT", "DEBUG_HOTKEYS", "DEBUG_REMOTE", "DEBUG_HOVER_BOOTS", "DEBUG_NO_VOID_OUT", "DEBUG_BUNNY", "DEBUG_BUNNY_SPEED", "DEBUG_MASK_POWERS", "RANDO_SEED", "RANDO_LOGIC", "RANDO_CHESTS", "RANDO_DROPS", "RANDO_MAPS", "RANDO_SHOPS", "RANDO_SCRUBS", "RANDO_SONGS", "RANDO_GIFTS", "RANDO_REWARDS", "RANDO_ENEMIES", "RANDO_ENTRANCES", "RANDO_ENTRANCE_POOLS", "RANDO_DUNGEON_AGES", "RANDO_SPOILER", "RANDO_PYTHON", "DEBUG_BOMB_BUG", "DEBUG_CLIP", "DEBUG_CLIP_SECONDS", "DEBUG_CLIP_OVERLAYS", "DEBUG_CLIP_VIEW2", "DEBUG_FLY_SPEED", "DEBUG_FORCE_AGE", "DEBUG_FORCE_AGE_OK", "DEBUG_SAVE_HISTORY", "DEBUG_SAVE_TREE", "DEBUG_INF_MAGIC", "DEBUG_INF_ITEMS", "DEBUG_ANY_AGE_ITEMS", "DEBUG_IGT", "DEBUG_IGT_AUTOSPLIT", "DEBUG_IGT_AUTOSTART", "DEBUG_VIEW_WALLS", "DEBUG_VIEW_LOADING", "DEBUG_VIEW_TRIGGERS", "DEBUG_VIEW_HIDDEN", "DEBUG_VIEW_DEATH", "DEBUG_VIEW_VOID", "DEBUG_VIEW_KILL_PLANE", "DEBUG_VIEW_HEALTH", "DEBUG_VIEW_BOMBS", "DEBUG_VIEW_HOOKSHOT", "DEBUG_VIEW_COLLISION", "DEBUG_COLLISION_RANGE", "DEBUG_COLLISION_POLYS", "DEBUG_HIDE_MESHES", "DEBUG_HIDE_PLAYER", "DEBUG_VIEW_STYLE", "DEBUG_VIEW_OPACITY", "DEBUG_VIEW_COLOR_WALLS", "DEBUG_VIEW_COLOR_LOADING", "DEBUG_VIEW_COLOR_TRIGGERS", "DEBUG_VIEW_COLOR_HIDDEN", "DEBUG_VIEW_COLOR_DEATH", "DEBUG_VIEW_COLOR_VOID", "DEBUG_VIEW_COLOR_HOOKSHOT", "DEBUG_VIEW_LABELS", "DEBUG_VIEW_OCCLUDE", "DEBUG_VIEW_RANGE", "DEBUG_PAUSE_INPUTS", "DEBUG_DRAW_DISTANCE",
     "PREPARE_PIPELINES", "PREWARM_FULL", "PREWARM_FULL_S", "PREWARM_WAIT_MS", "PREWARM_XLATE", "PROBE_MOVIE", "PROBE_MOVIE_SHOT", "PROFILE", "PROFILE_CHAINS", "PROFILE_DIR", "PROFILE_FRAMES", "PROFILE_REPLAY", "PROFILE_SLOW",
     "POOL_FAST", "POOL_GROUP", "POOL_GROUP_CHECK", "POOL_PRESNAP", "POOL_PRESNAP_RUNS",
     "SUBMIT_FINISH_GPU", "SVC_WAITS", "SNAP_WIDEN", "SUBMIT_FINISH_RESULTS", "SUBMIT_FINISH_KINDS", "FOLIAGE", "FOLIAGE_SHADOWS", "MIRROR_STAGE", "FLUSH_SKIP_CLEAN", "MIRROR_HOT", "MESH_EMULATION", "MESH_EMU_MB", "MESH_EMU_TASKS", "MESH_EMU_BATCH", "GUEST_OPT", "LOG_TEX_NEW", "DUMP_KEY", "VEC_INDEX_FIX", "PASS_TIMES",
@@ -76,30 +82,31 @@ static const char *const known[] = {
     "SWKBD_ANSWER",
     "SET_AT", "SWKBD_TEST", "TAA", "DBG_TEST", "DEBUG_MENU", "MENU_TEST_DEBUG", "FSR4", "FSR4_FG", "FG4_VERSION", "FG4_SWAPCHAIN", "TEST_PAD", "TEST_PAD_AT", "TEST_PREPARE_SHADERS", "TEX_ALIAS", "DEPTH_INIT_INLINE", "DEPTH_ALIAS_LOG", "TEX_DISUSE", "TEX_DISUSE_EVICT", "TEX_GEN_UNDO", "TEX_MEMO", "TEX_VRAM_PRESSURE", "TEX_RELEASED_MB", "TEX_RELEASED_MAX", "TEX_RELEASED_HOLD", "TEX_REUSE", "TEX_SPLIT_FILL", "TEX_COMMIT_FREE_MB", "TEX_PROC_COMMIT_MB", "TEX_EVICT", "TEX_COMMIT_EVICT", "MIRROR_EVICT", "VRAM_BUDGET_MB", "TIMER_1MS", "TRACE", "TXD_TRANSPOSE", "UBO_SNAPSHOT", "EVO_TRACE", "EVENT_AT_SYNC", "UPSCALER", "VK_DYN_A2C", "VK_DYN_VERTEX", "VK_NAN_PRESERVE", "VK_NOOPT", "VK_NO_FLOAT64",
     "VK_PRESENT", "VK_RECONVERGE", "VK_NAN_BITS", "VK_RECORDER", "VK_SSBO_ALIGN", "VK_SUBGROUP", "VK_SUBGROUP_PIN", "VK_VALIDATION", "VOLUME", "VRAM_HEADROOM", "VS_OUTS", "WATER_PROJECTIVE",
-    "WAIT_WATCH_S", "WALK_KEY", "WALK_SCALE", "WB_EXACT", "WB_FENCE_LIMIT", "WB_MERGE", "WB_NO_REUP", "WB_MERGE_MAX", "WB_PROBE", "WB_SPLIT", "WB_LAZY", "WB_LAZY_CHUNK", "WB_LAZY_TOUCH", "WINDOW_SIZE", "XLATE", "XLATE_ID", "XLATE_KEEP", "XLATE_PROCS",
+    "WAIT_WATCH_S", "WALK_KEY", "WALK_SCALE", "WB_EXACT", "WB_FENCE_LIMIT", "WB_MERGE", "WB_NO_REUP", "WB_MERGE_MAX", "WB_MERGE_PROBE", "WB_PROBE", "SPV_OPT", "SPV_OPT_MIN_WORDS", "SPV_OPT_STAGES", "WB_SPLIT", "WB_LAZY", "WB_LAZY_CHUNK", "WB_LAZY_TOUCH", "WINDOW_SIZE", "XLATE", "XLATE_ID", "XLATE_KEEP", "XLATE_PROCS",
     "UPLOAD_BATCH_MB", "VRAM_HEAP_LIMIT", "VRAM_RESERVE_MB", "TEX_CLOBBER", "LOW_END_GPU",
     "ZSTD_CHECK", "ZSTD_NATIVE",
-    "BIND_REUSE", "DYN_DELTA", "STG_ARENA", "SUBMIT_BATCH", "SUBMIT_THREAD", "ASTC_GPU_DESWIZZLE", "ASTC_SCRATCH_KEEP", "ASTC_ARENA", "ASTC_BC1",
-    "TEXUP_LOG_MS", "DYN_RES", "DYN_RES_TARGET", "DYN_RES_STEP", "TEXTURE_DETAIL", "VRAM_USE",   // vram_use: the removed Video memory use row, read by nothing
+    "BIND_REUSE", "GAME_WAIT", "DYN_DELTA", "STG_ARENA", "SUBMIT_BATCH", "SUBMIT_THREAD", "ASTC_GPU_DESWIZZLE", "ASTC_SCRATCH_KEEP", "ASTC_ARENA", "ASTC_BC1",
+    "TEXUP_LOG_MS", "DYN_RES", "DYN_RES_TARGET", "DYN_RES_STEP", "TEXTURE_DETAIL", "TEXTURE_LOD_BIAS", "VRAM_USE",   // vram_use: the removed Video memory use row, read by nothing
     "RECORDER_CORE", "RECORDER_PRIO", "REPLAY_TIME", "LOCK_TIME", "POOL_CREATE_BUDGET", "POOL_CREATE_MS", "POOL_FINI_IDLE", "POOL_LOAD_BACKLOG", "POOL_LOAD_MS",
     "VMA_BLOCK_MB", "SYNC_WAKE_ALL", "LOG_ASYNC", "DEVICE_LOST_AT", "STAGING_FAIL_AT", "VRAM_BALLAST_MB",
     "MEM_BUDGET_TEST_VRAM_MB", "MEM_BUDGET_TEST_RAM_MB",
-    "TEX_COMPACT", "TEX_COMPACT_MIN_MB", "TEX_COMPACT_FRAME_MB",   // texture compaction (vk_texture.c); no menu row
+    "TEX_COMPACT", "TEX_COMPACT_MIN_MB", "TEX_COMPACT_FRAME_MB",   // texture compaction (vk_texture.c)
     "STANDIN_FILTER",   // the filter of the scene upscaler's stand-in (vk_tonemap.c); no menu row
+    "COOP_SHARE", "COOP_NAMES", "COOP_CHAT",   // co-op, the Steam Co-op mod (coop.c, coop_game.c, ui/coop_page.cpp)
     // retired: the settings of the co-op of versions up to 0.9.2; read by nothing, listed so that a file which still
     // sets them logs no unknown key
     "COOP", "COOP_BETA", "COOP_NAME", "COOP_SERVER", "COOP_PORT", "COOP_ROOM", "COOP_AUTO", "COOP_DROP",
     "COOP_PROGRESS", "COOP_ITEMS", "COOP_SONGS", "COOP_QUEST", "COOP_KEYS", "COOP_RUPEES", "COOP_AMMO",
     "COOP_TEST_SET", "COOP_ACCEPT", "COOP_REMOVE", "COOP_RESET_POOLS",
-    // retired: the settings of the co-op through Steam that the main branch held for a while after 0.9.2 and no
-    // release shipped; listed like the ones above, for the file of someone who built from it then and turned it on
-    "COOP_STEAM", "COOP_SHARE", "COOP_NAMES", "COOP_CHAT",
+    // retired: the switch of the co-op through Steam before it became a mod (mods.h mods_feature); a file that still
+    // has coop_steam = 1 turns nothing on
+    "COOP_STEAM",
 };
 
-// The nx2navi.ini section a key cfg_set may write goes to when the file lacks it (nx2navi.ini.example's sections).
+// The OOT-PC.ini section a key cfg_set may write goes to when the file lacks it (OOT-PC.ini.example's sections).
 static const struct { const char *key, *section; } sections[] = {
     // the low-end GPU mode's rows in the menu's Game tab (ui/menu.cpp rows_low_end)
-    {"TEX_RELEASED_MAX", "performance"}, {"MIRROR_HOT", "performance"}, {"FREEZE_IDLE", "performance"}, {"SUBMIT_FINISH_KINDS", "performance"}, {"FOLIAGE", "performance"}, {"FOLIAGE_SHADOWS", "performance"},
+    {"TEX_RELEASED_MAX", "performance"}, {"MIRROR_HOT", "performance"}, {"MIRROR_STAGE", "performance"}, {"SUBMIT_FINISH_GPU", "performance"}, {"FREEZE_IDLE", "performance"}, {"SUBMIT_FINISH_KINDS", "performance"}, {"FOLIAGE", "performance"}, {"FOLIAGE_SHADOWS", "performance"}, {"FOLIAGE_SHADOW_CULL", "performance"}, {"FOLIAGE_SHADOW_VRS", "performance"}, {"DLAA_EDGE_FILL", "performance"}, {"SPV_OPT", "performance"}, {"SPV_OPT_MIN_WORDS", "performance"}, {"SPV_OPT_STAGES", "performance"}, {"SPV_OVERRIDE", "diagnostics"},
     {"ZSTD_NATIVE", "performance"},
     {"VRAM_HEAP_LIMIT", "performance"}, {"VRAM_RESERVE_MB", "performance"}, {"UPLOAD_BATCH_MB", "performance"}, {"MESH_EMULATION", "performance"},
     {"MESH_EMU_MB", "performance"}, {"MESH_EMU_TASKS", "performance"}, {"MESH_EMU_BATCH", "performance"}, {"VEC_INDEX_FIX", "performance"},
@@ -113,24 +120,25 @@ static const struct { const char *key, *section; } sections[] = {
     {"FULLSCREEN", "display"}, {"WINDOW_SIZE", "display"}, {"PERF_OVERLAY", "display"}, {"VK_PRESENT", "display"},
     {"GPU_INDEX", "display"}, {"MONITOR", "display"}, {"OUTPUT_RES", "display"}, {"GAME_ASPECT", "display"}, {"GAME_RES", "display"}, {"RENDER_SCALE", "display"}, {"UPSCALER", "display"},
     {"SHARPNESS", "display"}, {"STANDIN_FILTER", "display"}, {"SCENE_SHARE", "display"}, {"ASPECT", "display"}, {"FOV", "display"}, {"ANISO", "display"},
-    {"TEXTURE_DETAIL", "display"},
+    {"TEXTURE_DETAIL", "display"}, {"TEXTURE_LOD_BIAS", "display"},
     {"COLOR_PRESET", "display"},
     {"COLOR_BRIGHTNESS", "display"}, {"COLOR_CONTRAST", "display"}, {"COLOR_SATURATION", "display"},
     {"COLOR_GAMMA", "display"}, {"HDR", "display"}, {"HDR_LIVE", "display"}, {"HDR_PEAK_NITS", "display"}, {"HDR_GAME_NITS", "display"},
     {"HDR_UI_NITS", "display"}, {"SHADOW_RES", "display"},
-    {"DLAA", "display"}, {"FSR4", "display"}, {"FSR4_FG", "display"}, {"DLSS", "display"}, {"DLSS_PRESET", "display"}, {"DLSS_IDLE_FREE", "display"}, {"DLSS_RANGE", "display"}, {"DLSS_PREBLOOM", "display"}, {"DLSS_CHAR_MASK", "display"}, {"FXAA", "display"}, {"AA", "display"},
-    {"FRAMEGEN", "display"}, {"FRAMEGEN_MULTIPLIER", "display"}, {"FG_MULT", "display"}, {"SKIN_MOTION", "display"},
+    {"DLAA", "display"}, {"FSR4", "display"}, {"FSR4_FG", "display"}, {"DLSS", "display"}, {"DLSS_PRESET", "display"}, {"DLSS_IDLE_FREE", "display"}, {"DLSS_RANGE", "display"}, {"DLSS_PREBLOOM", "display"}, {"DLSS_CHAR_MASK", "display"}, {"FXAA", "display"}, {"AA", "display"}, {"GAME_AO", "display"},
+    {"FRAMEGEN", "display"}, {"FRAMEGEN_MULTIPLIER", "display"}, {"FRAMEGEN_TARGET", "display"}, {"FG_MULT", "display"}, {"SKIN_MOTION", "display"},
     {"LOW_LATENCY", "display"},
     {"DEVICE_PROFILE", "display"}, {"ASSUME_FOCUS", "display"},
-    {"DISCORD_RPC", "discord"}, {"DISCORD_APP_ID", "discord"}, {"DISCORD_IMAGE", "discord"},
-    {"DEBUG_FOG_OFF", "debug"}, {"DEBUG_MENU_PAD", "debug"}, {"DEBUG_MENU_BUTTON", "debug"}, {"DEBUG_TITLE_PROFILES", "debug"}, {"DEBUG_GOD", "debug"}, {"DEBUG_ONE_HIT", "debug"}, {"DEBUG_LANK", "debug"}, {"DEBUG_HEALTH_LOCK", "debug"}, {"DEBUG_SPEED", "debug"}, {"DEBUG_READOUT", "debug"}, {"DEBUG_HOTKEYS", "debug"}, {"DEBUG_REMOTE", "debug"}, {"DEBUG_HOVER_BOOTS", "debug"}, {"DEBUG_NO_VOID_OUT", "debug"}, {"DEBUG_BUNNY", "debug"}, {"DEBUG_BUNNY_SPEED", "debug"}, {"DEBUG_MASK_POWERS", "debug"}, {"RANDO_SEED", "randomizer"}, {"RANDO_LOGIC", "randomizer"}, {"RANDO_CHESTS", "randomizer"}, {"RANDO_DROPS", "randomizer"}, {"RANDO_MAPS", "randomizer"}, {"RANDO_SHOPS", "randomizer"}, {"RANDO_SCRUBS", "randomizer"}, {"RANDO_SONGS", "randomizer"}, {"RANDO_GIFTS", "randomizer"}, {"RANDO_REWARDS", "randomizer"}, {"RANDO_ENEMIES", "randomizer"}, {"RANDO_ENTRANCES", "randomizer"}, {"RANDO_ENTRANCE_POOLS", "randomizer"}, {"RANDO_DUNGEON_AGES", "randomizer"}, {"RANDO_SPOILER", "randomizer"}, {"RANDO_PYTHON", "randomizer"}, {"DEBUG_BOMB_BUG", "debug"}, {"DEBUG_CLIP", "debug"}, {"DEBUG_CLIP_SECONDS", "debug"}, {"DEBUG_CLIP_OVERLAYS", "debug"}, {"DEBUG_CLIP_VIEW2", "debug"}, {"DEBUG_FLY_SPEED", "debug"}, {"DEBUG_FORCE_AGE", "debug"}, {"DEBUG_FORCE_AGE_OK", "debug"}, {"DEBUG_SAVE_HISTORY", "debug"}, {"DEBUG_SAVE_TREE", "debug"}, {"DEBUG_INF_MAGIC", "debug"}, {"DEBUG_INF_ITEMS", "debug"}, {"DEBUG_ANY_AGE_ITEMS", "debug"}, {"DEBUG_IGT", "debug"}, {"DEBUG_IGT_AUTOSPLIT", "debug"}, {"DEBUG_IGT_AUTOSTART", "debug"}, {"DEBUG_VIEW_WALLS", "debug"}, {"DEBUG_VIEW_LOADING", "debug"}, {"DEBUG_VIEW_TRIGGERS", "debug"}, {"DEBUG_VIEW_HIDDEN", "debug"}, {"DEBUG_VIEW_DEATH", "debug"}, {"DEBUG_VIEW_KILL_PLANE", "debug"}, {"DEBUG_VIEW_HEALTH", "debug"}, {"DEBUG_VIEW_BOMBS", "debug"}, {"DEBUG_VIEW_HOOKSHOT", "debug"}, {"DEBUG_VIEW_COLLISION", "debug"}, {"DEBUG_COLLISION_RANGE", "debug"}, {"DEBUG_COLLISION_POLYS", "debug"}, {"DEBUG_HIDE_MESHES", "debug"}, {"DEBUG_HIDE_PLAYER", "debug"}, {"DEBUG_VIEW_STYLE", "debug"}, {"DEBUG_VIEW_OPACITY", "debug"}, {"DEBUG_VIEW_COLOR_WALLS", "debug"}, {"DEBUG_VIEW_COLOR_LOADING", "debug"}, {"DEBUG_VIEW_COLOR_TRIGGERS", "debug"}, {"DEBUG_VIEW_COLOR_HIDDEN", "debug"}, {"DEBUG_VIEW_COLOR_DEATH", "debug"}, {"DEBUG_VIEW_COLOR_HOOKSHOT", "debug"}, {"DEBUG_VIEW_LABELS", "debug"}, {"DEBUG_VIEW_OCCLUDE", "debug"}, {"DEBUG_VIEW_RANGE", "debug"}, {"DEBUG_DRAW_DISTANCE", "debug"},
+    {"DISCORD_RPC", "discord"}, {"DISCORD_LOCATION", "discord"}, {"DISCORD_FIGHT", "discord"}, {"DISCORD_APP_ID", "discord"}, {"DISCORD_IMAGE", "discord"},
+    {"COOP_SHARE", "coop"}, {"COOP_NAMES", "coop"}, {"COOP_CHAT", "coop"},
+    {"DEBUG_FOG_OFF", "debug"}, {"DEBUG_MENU_PAD", "debug"}, {"DEBUG_MENU_BUTTON", "debug"}, {"DEBUG_TITLE_PROFILES", "debug"}, {"DEBUG_GOD", "debug"}, {"DEBUG_ONE_HIT", "debug"}, {"DEBUG_LANK", "debug"}, {"DEBUG_HEALTH_LOCK", "debug"}, {"DEBUG_SPEED", "debug"}, {"DEBUG_READOUT", "debug"}, {"DEBUG_HOTKEYS", "debug"}, {"DEBUG_REMOTE", "debug"}, {"DEBUG_HOVER_BOOTS", "debug"}, {"DEBUG_NO_VOID_OUT", "debug"}, {"DEBUG_BUNNY", "debug"}, {"DEBUG_BUNNY_SPEED", "debug"}, {"DEBUG_MASK_POWERS", "debug"}, {"RANDO_SEED", "randomizer"}, {"RANDO_LOGIC", "randomizer"}, {"RANDO_CHESTS", "randomizer"}, {"RANDO_DROPS", "randomizer"}, {"RANDO_MAPS", "randomizer"}, {"RANDO_SHOPS", "randomizer"}, {"RANDO_SCRUBS", "randomizer"}, {"RANDO_SONGS", "randomizer"}, {"RANDO_GIFTS", "randomizer"}, {"RANDO_REWARDS", "randomizer"}, {"RANDO_ENEMIES", "randomizer"}, {"RANDO_ENTRANCES", "randomizer"}, {"RANDO_ENTRANCE_POOLS", "randomizer"}, {"RANDO_DUNGEON_AGES", "randomizer"}, {"RANDO_SPOILER", "randomizer"}, {"RANDO_PYTHON", "randomizer"}, {"DEBUG_BOMB_BUG", "debug"}, {"DEBUG_CLIP", "debug"}, {"DEBUG_CLIP_SECONDS", "debug"}, {"DEBUG_CLIP_OVERLAYS", "debug"}, {"DEBUG_CLIP_VIEW2", "debug"}, {"DEBUG_FLY_SPEED", "debug"}, {"DEBUG_FORCE_AGE", "debug"}, {"DEBUG_FORCE_AGE_OK", "debug"}, {"DEBUG_SAVE_HISTORY", "debug"}, {"DEBUG_SAVE_TREE", "debug"}, {"DEBUG_INF_MAGIC", "debug"}, {"DEBUG_INF_ITEMS", "debug"}, {"DEBUG_ANY_AGE_ITEMS", "debug"}, {"DEBUG_IGT", "debug"}, {"DEBUG_IGT_AUTOSPLIT", "debug"}, {"DEBUG_IGT_AUTOSTART", "debug"}, {"DEBUG_VIEW_WALLS", "debug"}, {"DEBUG_VIEW_LOADING", "debug"}, {"DEBUG_VIEW_TRIGGERS", "debug"}, {"DEBUG_VIEW_HIDDEN", "debug"}, {"DEBUG_VIEW_DEATH", "debug"}, {"DEBUG_VIEW_VOID", "debug"}, {"DEBUG_VIEW_KILL_PLANE", "debug"}, {"DEBUG_VIEW_HEALTH", "debug"}, {"DEBUG_VIEW_BOMBS", "debug"}, {"DEBUG_VIEW_HOOKSHOT", "debug"}, {"DEBUG_VIEW_COLLISION", "debug"}, {"DEBUG_COLLISION_RANGE", "debug"}, {"DEBUG_COLLISION_POLYS", "debug"}, {"DEBUG_HIDE_MESHES", "debug"}, {"DEBUG_HIDE_PLAYER", "debug"}, {"DEBUG_VIEW_STYLE", "debug"}, {"DEBUG_VIEW_OPACITY", "debug"}, {"DEBUG_VIEW_COLOR_WALLS", "debug"}, {"DEBUG_VIEW_COLOR_LOADING", "debug"}, {"DEBUG_VIEW_COLOR_TRIGGERS", "debug"}, {"DEBUG_VIEW_COLOR_HIDDEN", "debug"}, {"DEBUG_VIEW_COLOR_DEATH", "debug"}, {"DEBUG_VIEW_COLOR_VOID", "debug"}, {"DEBUG_VIEW_COLOR_HOOKSHOT", "debug"}, {"DEBUG_VIEW_LABELS", "debug"}, {"DEBUG_VIEW_OCCLUDE", "debug"}, {"DEBUG_VIEW_RANGE", "debug"}, {"DEBUG_PAUSE_INPUTS", "debug"}, {"DEBUG_DRAW_DISTANCE", "debug"},
     {"SHADOW_SCALE", "display"}, {"SHADOW_RANGE", "display"}, {"CONTACT_SHADOWS", "display"},
     {"PCSS", "display"},
     {"SHADOW_PCF", "display"},
-    {"MODS_DIR", "mods"}, {"MODS_ORDER", "mods"}, {"MODS_DISABLED", "mods"}, {"MODS_REBUILD", "mods"}, {"MODS_SETTINGS", "mods"},
+    {"MODS_DIR", "mods"}, {"MODS_ORDER", "mods"}, {"MODS_DISABLED", "mods"}, {"MODS_REBUILD", "mods"}, {"MODS_SETTINGS", "mods"}, {"N64_LINK", "mods"}, {"N64_ITEMS", "mods"}, {"N64_ACTORS", "mods"}, {"N64_WORLD", "mods"}, {"N64_WORLD_FOLIAGE", "mods"}, {"N64_SWORD_WALLS", "mods"}, {"DARK_LINK_STYLE", "mods"}, {"DARK_LINK_EFFECTS", "mods"}, {"NO_INVISIBLE_WALLS", "mods"}, {"RANDO_INVISIBLE_WALLS", "randomizer"},
     {"MENU_LANG", "language"}, {"LANG", "language"}, {"OPERATION_MODE", "language"}, {"TEXT_SPEED", "language"},
     {"VOLUME", "audio"}, {"AUDIO_CHANNELS", "audio"}, {"AUDIO_DEVICE", "audio"}, {"MICROPHONE", "audio"}, {"MENU_SOUND_VOLUME", "audio"},
-    {"AUDIO_RAMP", "audio"}, {"AUDIO_CATCHUP", "audio"},
+    {"AUDIO_RAMP", "audio"}, {"AUDIO_CATCHUP", "audio"}, {"AUDIO_REVERB", "audio"},
     {"MOTION", "input"}, {"SPRINT_BUTTON", "input"}, {"SPRINT_MODE", "input"}, {"RUMBLE_STRENGTH", "input"}, {"RUMBLE_CURVE", "input"}, {"RUMBLE_TRIGGERS", "input"}, {"RUMBLE_HD", "input"}, {"DS3", "input"},
     {"PAD_LAYOUT", "input"}, {"PROMPTS", "input"}, {"STICK_DEADZONE", "input"}, {"LSTICK_DEADZONE", "input"}, {"RSTICK_DEADZONE", "input"},
     {"STICK_SENS", "input"},
@@ -152,7 +160,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"TIMER_1MS", "performance"}, {"PIPE_WAIT", "performance"}, {"PIPE_SKIP", "performance"}, {"ONESHOT_BUDGET", "performance"},
     {"PIPE_FRAME_WAIT_MS", "performance"}, {"PIPE_SKIP_STEADY", "performance"}, {"DRAW_WRITERS_WAIT", "performance"},
     {"CACHE_DIE", "performance"}, {"ONE_PER_CORE", "performance"},
-    {"PIPE_SEED_BOOT", "performance"}, {"LIB_PREBUILD", "performance"}, {"LIB_PREBUILD_THREADS", "performance"}, {"LIB_WARM", "performance"}, {"PIPE_LINK_MS", "performance"}, {"PIPE_LINK_DRAW_MS", "performance"}, {"PIPE_AHEAD", "performance"}, {"LINE_WIDTH", "performance"}, {"POOL_SHOWN_FIRST", "performance"}, {"POOL_DATA_FIRST", "performance"}, {"TEX_REUSE_NAMED", "performance"}, {"TEX_OVERWRITTEN_USED", "performance"}, {"PIPE_FAST_WORKERS", "performance"}, {"GPL_FEEDBACK", "performance"}, {"GPL_MESH", "performance"}, {"FRAME_HOLD_MS", "performance"}, {"PACE_SMOOTH", "performance"}, {"OQ_BATCH", "performance"}, {"CLEAR_SMALL_CPU", "performance"}, {"PATCH_OCCLUSION_OFF", "performance"}, {"GATE_WAIT_MS", "performance"}, {"PIPE_PREBUILD", "performance"}, {"PIPE_SEED", "performance"},
+    {"PIPE_SEED_BOOT", "performance"}, {"LIB_PREBUILD", "performance"}, {"LIB_PREBUILD_THREADS", "performance"}, {"LIB_WARM", "performance"}, {"PIPE_LINK_MS", "performance"}, {"PIPE_LINK_DRAW_MS", "performance"}, {"PIPE_AHEAD", "performance"}, {"LINE_WIDTH", "performance"}, {"POOL_SHOWN_FIRST", "performance"}, {"POOL_DATA_FIRST", "performance"}, {"TEX_REUSE_NAMED", "performance"}, {"TEX_OVERWRITTEN_USED", "performance"}, {"PIPE_FAST_WORKERS", "performance"}, {"GPL_FEEDBACK", "performance"}, {"GPL_MESH", "performance"}, {"FRAME_HOLD_MS", "performance"}, {"PACE_SMOOTH", "performance"}, {"OQ_BATCH", "performance"}, {"CLEAR_SMALL_CPU", "performance"}, {"PATCH_OCCLUSION_OFF", "performance"}, {"GATE_WAIT_MS", "performance"}, {"GAME_WAIT", "performance"}, {"PIPE_PREBUILD", "performance"}, {"PIPE_SEED", "performance"},
     {"OQ_HOLD", "performance"}, {"QUAD_INDEX", "performance"},
     {"COMPUTE_KEEP", "performance"},
     {"PREWARM_XLATE", "performance"}, {"GPL", "performance"}, {"ASTC", "performance"}, {"MEMORY", "performance"},
@@ -165,7 +173,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"VK_NAN_PRESERVE", "performance"}, {"VK_NAN_BITS", "performance"},
     {"DRAW_CRUMBS", "diagnostics"}, {"TRACE", "diagnostics"}, {"FLIGHT", "diagnostics"}, {"PASS_CRUMBS", "diagnostics"}, {"FLIGHT_SPIKE_MS", "diagnostics"}, {"STUTTER_MAP", "diagnostics"}, {"PAR_JOBS", "performance"}, {"PIPE_RELEASE", "performance"},
     {"FLIGHT_FLASH", "diagnostics"}, {"FLIGHT_FLASH_DIFF", "diagnostics"}, {"FLIGHT_FLASH_CELLS", "diagnostics"},
-    {"WB_FENCE_LIMIT", "diagnostics"}, {"WB_MERGE", "diagnostics"}, {"WB_EXACT", "diagnostics"}, {"MEM_CENSUS", "diagnostics"}, {"WB_NO_REUP", "diagnostics"}, {"WB_PROBE", "diagnostics"}, {"WB_SPLIT", "performance"}, {"SHADOW_BULK_WRITE", "performance"}, {"WB_LAZY", "performance"}, {"HEAP_LAZY", "performance"}, {"BARRIER_GAME", "performance"}, {"MESH_AHEAD", "performance"}, {"MESH_FALLBACK", "performance"}, {"MESH_FALLBACK_MB", "performance"}, {"MESH_FALLBACK_WORKERS", "performance"}, {"WB_LAZY_TOUCH", "diagnostics"}, {"WB_LAZY_CHUNK", "performance"}, {"FLUSH_UPLOAD", "diagnostics"}, {"GPA_TWIN_MAX_KB", "diagnostics"}, {"MIRROR_CAPTURE_KB", "diagnostics"}, {"WB_SKIP_MB", "diagnostics"},
+    {"WB_FENCE_LIMIT", "diagnostics"}, {"WB_MERGE", "diagnostics"}, {"WB_MERGE_PROBE", "diagnostics"}, {"WB_EXACT", "diagnostics"}, {"MEM_CENSUS", "diagnostics"}, {"WB_NO_REUP", "diagnostics"}, {"WB_PROBE", "diagnostics"}, {"WB_SPLIT", "performance"}, {"SHADOW_BULK_WRITE", "performance"}, {"WB_LAZY", "performance"}, {"HEAP_LAZY", "performance"}, {"BARRIER_GAME", "performance"}, {"MESH_AHEAD", "performance"}, {"MESH_FALLBACK", "performance"}, {"MESH_FALLBACK_MB", "performance"}, {"MESH_FALLBACK_WORKERS", "performance"}, {"WB_LAZY_TOUCH", "diagnostics"}, {"WB_LAZY_CHUNK", "performance"}, {"FLUSH_UPLOAD", "diagnostics"}, {"GPA_TWIN_MAX_KB", "diagnostics"}, {"MIRROR_CAPTURE_KB", "diagnostics"}, {"WB_SKIP_MB", "diagnostics"},
     {"WB_MERGE_MAX", "diagnostics"}, {"MV_SURVEY", "diagnostics"}, {"TEXUP_LOG_MS", "diagnostics"},
     {"WAIT_WATCH_S", "diagnostics"},
     {"VMA_BLOCK_MB", "diagnostics"}, {"DEVICE_LOST_AT", "diagnostics"}, {"STAGING_FAIL_AT", "diagnostics"}, {"VRAM_BALLAST_MB", "diagnostics"},
@@ -209,18 +217,22 @@ static const CfgMeta metas[] = {
     {"FSR4", "0", "0|1", LIVE},   // vk_ffx.cpp vk_ffx_fsr4
     {"FSR4_FG", "0", "0|1", LIVE},   // vk_fg.cpp use4
     {"FRAMEGEN", "off", "off|fsr3|dlss", LIVE},   // vk_fg.cpp, vk_dlssg.c
-    {"FRAMEGEN_MULTIPLIER", "2", "2|3|4", LIVE},   // vk_dlssg.c: frames on screen per rendered frame with DLSS
+    {"FRAMEGEN_TARGET", "display", "display|30..500", LIVE},   // vk_dlssg.c: the rate the dynamic multiplier aims for
+    {"FRAMEGEN_MULTIPLIER", "2", "2|3|4|dynamic", LIVE},   // vk_dlssg.c: frames on screen per rendered frame with DLSS
     // the same where DLSS's frame generation runs through NGX itself (gfx_present.c ng_multiplier): 2x to 6x or dynamic
     {"FG_MULT", "2", "2|3|4|5|6|dynamic", LIVE},
     {"DLSS_CHAR_MASK", "65", "0|35|65|100", LIVE}, {"FXAA", "1", "0|1", LIVE},
     // vk_skin_motion.inc skin_enabled: motion vectors of their own for every skinned character, not the player alone
     {"SKIN_MOTION", "1", "0|1", RESTART},
     {"AA", "game", "game|off|fxaa|smaa|taa", LIVE},   // vk_aa.c: what runs in place of the game's SMAA
+    {"GAME_AO", "1", "0|1", LIVE},   // vk_game_fx.c: the game's ambient occlusion
     {"GAME_ASPECT", "16:9", "16:9|window|21:9|32:9", RESTART},   // widescreen.c
     {"GAME_RES", "1440", "540|720|1080|1440|1800|2160|2880|window", RESTART},   // widescreen.c: the picture's height
     {"ASPECT", "fit", "fit|stretch", LIVE}, {"FOV", "100", "70..140", LIVE},
     {"ANISO", "16", "game|2|4|8|16", LIVE},   // vk_texture.c sampler_features, vk_sampler_aniso_live; 16: the game asks 1x or 2x
     {"TEXTURE_DETAIL", "auto", "auto|full|reduced|low", RESTART},   // vk_texture.c "texture detail", read at the first texture
+    // vk_texture.c lod_bias_setting: mip levels added on the surface textures, 0 the game's own sampling
+    {"TEXTURE_LOD_BIAS", "0", "0|0.5|1|2", LIVE},
     // colour adjustment (vk_color.c); the preset is the menu's, the four values are what the present uses
     {"COLOR_PRESET", "default", "default|vivid|clarity|custom", LIVE}, {"COLOR_BRIGHTNESS", "0", "-30..30", LIVE},
     {"COLOR_CONTRAST", "100", "70..150", LIVE}, {"COLOR_SATURATION", "100", "50..200", LIVE},
@@ -248,6 +260,14 @@ static const CfgMeta metas[] = {
     {"RTSS", "1", "0|1", RESTART},   // rtss_limit.c: RivaTuner Statistics Server takes the limit where it runs
     {"REALTIME", "1", "0|1", RESTART}, {"CLOTH_REALTIME", "1", "0|1", RESTART},
     {"MODS_REBUILD", "auto", "auto|off", RESTART},
+    {"N64_LINK", "1", "0|1", LIVE}, {"N64_ITEMS", "1", "0|1", LIVE}, {"N64_ACTORS", "1", "0|1", LIVE},
+    {"N64_WORLD", "1", "0|1", LIVE}, {"N64_SWORD_WALLS", "1", "0|1", LIVE}, {"NO_INVISIBLE_WALLS", "0", "0|1", LIVE},
+    // the remake's grass, moss and plants while N64_WORLD draws an area (vk_exec_draw.c foliage_skip)
+    {"N64_WORLD_FOLIAGE", "reduced", "off|reduced|full", LIVE},
+    // the Dark Link mod with N64 Graphics: N64 Link drawn as Dark Link, or the remake's Dark Link (n64gfx.c n64gfx_dark)
+    {"DARK_LINK_STYLE", "n64", "n64|remake", LIVE},
+    {"DARK_LINK_EFFECTS", "1", "0|1", LIVE},
+    {"RANDO_INVISIBLE_WALLS", "keep", "keep|remove", LIVE},
     {"HIGHFPS_FIX", "1", "0|1", RESTART},
     // the set owater of patches-v111.txt (frame_rate.c frame_rate_sim_host): water and floor surfaces' fixed steps
     {"WATER_STEPS", "1", "0|1", RESTART},
@@ -272,6 +292,7 @@ static const CfgMeta metas[] = {
     {"MICROPHONE", "1", "0|1", RESTART},   // ov_audio_input.c mic_on: 0 refuses the game's input streams
     {"AUDIO_RAMP", "1", "0|1", RESTART},   // audio_mixer.c accumulate_ramp: a changed volume is reached across the frame
     {"AUDIO_CATCHUP", "1", "0|1", RESTART},   // audren.c render_thread: frames owed after a stall are rendered and dropped
+    {"AUDIO_REVERB", "1", "0|1", LIVE},   // audio_mixer.c reverb_on: the game's delay and reverb effects, 0 passed through
     // sprint.c: the sprint button (b the game's B, l3 the left stick's click) and toggle or hold; the Controls tab's
     // Sprint rows (1.1.1)
     {"SPRINT_BUTTON", "off", "off|b|l3", LIVE}, {"SPRINT_MODE", "toggle", "toggle|hold", LIVE},
@@ -289,12 +310,17 @@ static const CfgMeta metas[] = {
     {"MENU_LANG", "", "en|ru|pt-BR|zh-Hans", LIVE},
     {"AMIIBO_DIR", "", NULL, LIVE},
     // Discord Rich Presence (discord_rpc.c): on by default (it only talks to a Discord client running on this PC, and
-    // does nothing without one); the Game tab of the settings menu and the launcher's Settings switch it. The application's id and art key default to discord_app.h's NX2NAVI_DISCORD_*_DEFAULT.
-    {"DISCORD_RPC", "1", "0|1", LIVE},
+    // does nothing without one); the Game tab of the settings menu and the launcher's Settings switch it. The application's id and art key default to discord_app.h's OOTPC_DISCORD_*_DEFAULT.
+    {"DISCORD_RPC", "1", "0|1", LIVE}, {"DISCORD_LOCATION", "1", "0|1", LIVE},
+    {"DISCORD_FIGHT", "1", "0|1", LIVE},   // discord_rpc.c fight_line: "Attacking: <enemy>" after the place
     {"DEBUG_FOG_OFF", "0", "0|1", LIVE}, {"DEBUG_MENU_PAD", "1", "0|1", LIVE}, {"DEBUG_MENU_BUTTON", "dpad_right", NULL, LIVE}, {"DEBUG_TITLE_PROFILES", "1", "0|1", LIVE}, {"DEBUG_GOD", "0", "0|1", LIVE}, {"DEBUG_ONE_HIT", "0", "0|1", LIVE}, {"DEBUG_LANK", "0", "0|1", LIVE}, {"DEBUG_HEALTH_LOCK", "0", "0..80", LIVE}, {"DEBUG_SPEED", "1", "0.05..8", LIVE}, {"DEBUG_READOUT", "0", "0..255", LIVE}, {"DEBUG_HOTKEYS", "0", "0|1", LIVE}, {"DEBUG_REMOTE", "0", "0|1", LIVE}, {"DEBUG_HOVER_BOOTS", "0", "0|1", LIVE}, {"DEBUG_NO_VOID_OUT", "0", "0|1", LIVE}, {"DEBUG_BUNNY", "1", "0|1", LIVE}, {"DEBUG_BUNNY_SPEED", "1.5", "1..3", LIVE}, {"DEBUG_MASK_POWERS", "1", "0|1", LIVE}, {"RANDO_SEED", "", NULL, LIVE}, {"RANDO_LOGIC", "glitchless", "glitchless|none", LIVE}, {"RANDO_CHESTS", "on", "on|off", LIVE}, {"RANDO_DROPS", "off", "off|own_pool|with_chests", LIVE}, {"RANDO_MAPS", "own_dungeon", "own_dungeon|vanilla", LIVE}, {"RANDO_SHOPS", "off", "off|shuffle", LIVE}, {"RANDO_SCRUBS", "off", "off|shuffle", LIVE}, {"RANDO_SONGS", "off", "off|shuffle", LIVE}, {"RANDO_GIFTS", "off", "off|shuffle", LIVE}, {"RANDO_REWARDS", "off", "off|shuffle", LIVE}, {"RANDO_ENEMIES", "off", "off|same_kind|any_kind", LIVE}, {"RANDO_ENTRANCES", "off", "off|dungeons|bosses|overworld|all", LIVE}, {"RANDO_ENTRANCE_POOLS", "separate", "separate|mixed", LIVE}, {"RANDO_DUNGEON_AGES", "same", "same|any", LIVE}, {"RANDO_SPOILER", "1", "0|1", LIVE}, {"RANDO_PYTHON", "", NULL, LIVE}, {"DEBUG_BOMB_BUG", "0", "0|1", LIVE}, {"DEBUG_CLIP", "1", "0|1", LIVE}, {"DEBUG_CLIP_SECONDS", "30", "5..120", LIVE}, {"DEBUG_CLIP_OVERLAYS", "0", "0|1", LIVE}, {"DEBUG_CLIP_VIEW2", "off", "off|above|side|front", LIVE}, {"DEBUG_FLY_SPEED", "8", "1..100", LIVE}, {"DEBUG_FORCE_AGE", "off", "off|child|adult", LIVE}, {"DEBUG_FORCE_AGE_OK", "", NULL, LIVE}, {"DEBUG_SAVE_HISTORY", "100", "0..10000", LIVE}, {"DEBUG_SAVE_TREE", "1", "0|1|2", LIVE}, {"DEBUG_INF_MAGIC", "0", "0|1", LIVE}, {"DEBUG_INF_ITEMS", "0", "0|1", LIVE}, {"DEBUG_ANY_AGE_ITEMS", "0", "0|1", LIVE}, {"DEBUG_IGT", "0", "0|1", LIVE}, {"DEBUG_IGT_AUTOSPLIT", "1", "0|1", LIVE}, {"DEBUG_IGT_AUTOSTART", "0", "0|1", LIVE},
-    {"DEBUG_VIEW_WALLS", "0", "0|1", LIVE}, {"DEBUG_VIEW_LOADING", "0", "0|1", LIVE}, {"DEBUG_VIEW_TRIGGERS", "0", "0|1", LIVE}, {"DEBUG_VIEW_HIDDEN", "0", "0|1", LIVE}, {"DEBUG_VIEW_DEATH", "0", "0|1", LIVE}, {"DEBUG_VIEW_KILL_PLANE", "1", "0|1", LIVE}, {"DEBUG_VIEW_HEALTH", "0", "0|1", LIVE}, {"DEBUG_VIEW_BOMBS", "0", "0|1", LIVE}, {"DEBUG_VIEW_HOOKSHOT", "0", "0|1", LIVE}, {"DEBUG_VIEW_COLLISION", "0", "0|1", LIVE}, {"DEBUG_COLLISION_RANGE", "250", "10..5000", LIVE}, {"DEBUG_COLLISION_POLYS", "30000", "1000..1000000", LIVE}, {"DEBUG_HIDE_MESHES", "0", "0|1", LIVE}, {"DEBUG_HIDE_PLAYER", "0", "0|1", LIVE}, {"DEBUG_VIEW_STYLE", "wire", "wire|solid|both", LIVE}, {"DEBUG_VIEW_OPACITY", "35", "10..100", LIVE}, {"DEBUG_VIEW_COLOR_WALLS", "pink", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_LOADING", "cyan", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_TRIGGERS", "yellow", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_HIDDEN", "green", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_DEATH", "red", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_HOOKSHOT", "orange", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_LABELS", "1", "0|1", LIVE}, {"DEBUG_VIEW_OCCLUDE", "0", "0|1", LIVE}, {"DEBUG_VIEW_RANGE", "150", "10..1000", LIVE}, {"DEBUG_DRAW_DISTANCE", "1", "0.25..8", RESTART},
-    {"DISCORD_APP_ID", NX2NAVI_DISCORD_APP_ID_DEFAULT, NULL, LIVE},
-    {"DISCORD_IMAGE", NX2NAVI_DISCORD_IMAGE_DEFAULT, NULL, LIVE},
+    {"DEBUG_VIEW_WALLS", "0", "0|1", LIVE}, {"DEBUG_VIEW_LOADING", "0", "0|1", LIVE}, {"DEBUG_VIEW_TRIGGERS", "0", "0|1", LIVE}, {"DEBUG_VIEW_HIDDEN", "0", "0|1", LIVE}, {"DEBUG_VIEW_DEATH", "0", "0|1", LIVE}, {"DEBUG_VIEW_VOID", "0", "0|1", LIVE}, {"DEBUG_VIEW_KILL_PLANE", "1", "0|1", LIVE}, {"DEBUG_VIEW_HEALTH", "0", "0|1", LIVE}, {"DEBUG_VIEW_BOMBS", "0", "0|1", LIVE}, {"DEBUG_VIEW_HOOKSHOT", "0", "0|1", LIVE}, {"DEBUG_VIEW_COLLISION", "0", "0|1", LIVE}, {"DEBUG_COLLISION_RANGE", "250", "10..5000", LIVE}, {"DEBUG_COLLISION_POLYS", "30000", "1000..1000000", LIVE}, {"DEBUG_HIDE_MESHES", "0", "0|1", LIVE}, {"DEBUG_HIDE_PLAYER", "0", "0|1", LIVE}, {"DEBUG_VIEW_STYLE", "wire", "wire|solid|both", LIVE}, {"DEBUG_VIEW_OPACITY", "35", "10..100", LIVE}, {"DEBUG_VIEW_COLOR_WALLS", "pink", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_LOADING", "cyan", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_TRIGGERS", "yellow", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_HIDDEN", "green", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_DEATH", "red", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_VOID", "purple", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_COLOR_HOOKSHOT", "orange", "pink|green|cyan|yellow|orange|purple|red|blue|white", LIVE}, {"DEBUG_VIEW_LABELS", "1", "0|1", LIVE}, {"DEBUG_VIEW_OCCLUDE", "0", "0|1", LIVE}, {"DEBUG_VIEW_RANGE", "150", "10..1000", LIVE}, {"DEBUG_PAUSE_INPUTS", "1", "1..16", LIVE}, {"DEBUG_DRAW_DISTANCE", "1", "0.25..8", RESTART},
+    {"DISCORD_APP_ID", OOTPC_DISCORD_APP_ID_DEFAULT, NULL, LIVE},
+    {"DISCORD_IMAGE", OOTPC_DISCORD_IMAGE_DEFAULT, NULL, LIVE},
+    // Co-op (coop.c), while the Steam Co-op mod is on: in a room COOP_SHARE shares progress, items and songs with the
+    // other players (coop_game.c), COOP_NAMES shows the other players' names where they stand, COOP_CHAT shows the
+    // chat's lines over the game.
+    {"COOP_SHARE", "1", "0|1", LIVE}, {"COOP_NAMES", "1", "0|1", LIVE}, {"COOP_CHAT", "1", "0|1", LIVE},
     // Advanced: scheduling
     {"ASYNC_PREEMPT", "1", "0|1|2", RESTART}, {"REPLAY_ASYNC", "0", "0|1", RESTART},
     // kernel.c cores_enabled: how many virtual cores run game threads at once (empty: all NCORE); the Game tab's
@@ -307,7 +333,7 @@ static const CfgMeta metas[] = {
     {"REPLAY_SMALL", "0", "0..63", RESTART},   // vk_exec.c group_start
     {"FREE_CORES", "0", "0|1", RESTART}, {"TIMER_1MS", "1", "0|1", RESTART},
     // dynamic resolution (dynres.c): the scene follows the GPU time toward DYN_RES_TARGET milliseconds
-    {"DYN_RES", "0", "0|1", LIVE}, {"DYN_RES_TARGET", "16.7", "1..100", LIVE}, {"DYN_RES_STEP", "45", "8..600", LIVE},
+    {"DYN_RES", "0", "0|1", LIVE}, {"DYN_RES_TARGET", "0", "0..100", LIVE}, {"DYN_RES_STEP", "45", "8..600", LIVE},
     // the recording thread: a core of its own (auto: with 12 or more logical processors) and the highest priority
     // (vk_exec.c rec_claim)
     {"RECORDER_CORE", "0", "auto|0|1", RESTART}, {"RECORDER_PRIO", "1", "0|1", RESTART}, {"REPLAY_TIME", "0", "0|1", RESTART}, {"LOCK_TIME", "0", "0|1", RESTART}, {"POOL_CREATE_BUDGET", "16", "1..4096", RESTART}, {"POOL_CREATE_MS", "6", "0..100", RESTART}, {"POOL_FINI_IDLE", "0", "0|1", RESTART}, {"FREEZE_BUDGET_US", "1000", "0..100000", RESTART}, {"POOL_LOAD_BACKLOG", "512", "0..65536", RESTART}, {"POOL_LOAD_MS", "50", "1..1000", RESTART},
@@ -353,6 +379,7 @@ static const CfgMeta metas[] = {
     // gives the set its default (patches.c rt_patches_init).
     {"PATCH_OCCLUSION_OFF", "0", "0|1", RESTART},
     {"GATE_WAIT_MS", "10", "0..100", RESTART},   // vk_exec.c vk_exec_gate_wait
+    {"GAME_WAIT", "fence", "fence|recorded", RESTART},   // vk_sync.c game_wait_recorded: the game's fence waits
     {"LIB_PREBUILD", "1", "0|1", RESTART}, {"LIB_PREBUILD_THREADS", "", "1..64", RESTART},
     {"LIB_WARM", "1", "0|1|force", RESTART},   // vk_pipeline.c lw_start: the driver's cache of stage libraries, warmed when cold
     {"PIPE_PREBUILD", "1", "0|1", RESTART}, {"PIPE_SEED", "1", "0|1", RESTART}, {"PIPE_SEED_BOOT", "auto", "0|1|auto", RESTART},   // vk_pipeline.c keys_open_seed
@@ -361,7 +388,7 @@ static const CfgMeta metas[] = {
     {"PIPELINE_CACHE_MAX_MB", "", "0..65536", RESTART},   // vk_pipeline.c cache_cap: unset, from the RAM (1024 to 4096)
     {"FFX_PIPE_CACHE", "1", "0|1", RESTART},   // vk_ffx.cpp vk_ffx_proc_addr: FSR 3.1's pipelines through the pipeline caches
     {"PIPELINE_CACHE_PLAY", "1", "0|1", RESTART}, {"PIPELINE_CACHE_PLAY_MB", "64", "1..65536", RESTART},   // vk_pipeline.c "the play cache": what a run compiles goes into a file of its own
-    {"PIPE_BINARIES", "0", "0|1", RESTART}, {"ONESHOT_WAIT_MS", "30000", "0..60000", RESTART}, {"ONESHOT_BUDGET", "1", "0|1", RESTART}, {"PIPE_BINARIES_MAX_MB", "1024", "0..65536", RESTART}, {"BIG_BUILD_FREE_MB", "8192", "0..262144", RESTART},
+    {"PIPE_BINARIES", "0", "0|1", RESTART}, {"INDEX_UINT8", "1", "0|1", RESTART}, {"ONESHOT_WAIT_MS", "30000", "0..60000", RESTART}, {"ONESHOT_BUDGET", "1", "0|1", RESTART}, {"PIPE_BINARIES_MAX_MB", "1024", "0..65536", RESTART}, {"BIG_BUILD_FREE_MB", "8192", "0..262144", RESTART},
     {"BIG_BUILD_MAX_MB", "4096", "0..262144", RESTART},
     {"BUILD_FREE_MB", "4096", "0..1048576", RESTART}, {"BUILD_RESERVE_MB", "64", "0..65536", RESTART},   // vk_pipeline.c gate_enter
     {"MEM_NEED_MB", "24576", "0..1048576", RESTART},   // memory.c mem_start_note; the default is mem_need.h MEM_NEED_DEFAULT_MB
@@ -374,10 +401,18 @@ static const CfgMeta metas[] = {
     {"SHADER_COMPRESS_IDLE_S", "30", "1..3600", RESTART},
     // the low-end GPU mode's rows in the menu's Game tab (ui/menu.cpp rows_low_end)
     {"TEX_RELEASED_MAX", "", NULL, RESTART},   // vk_texture.c released_max: "" by the video memory budget, else 1..16384
-    {"MIRROR_HOT", "0", "0..1000", RESTART}, {"FREEZE_IDLE", "1800", "0..100000", RESTART},
+    {"MIRROR_HOT", "0", "0..1000", RESTART},
+    // vk_memory.c capture_stage and vk_sync.c: the Performance tab's "Overlap CPU and GPU frames" row sets both
+    {"MIRROR_STAGE", "0", "0|1", RESTART}, {"SUBMIT_FINISH_GPU", "1", "0|1", RESTART}, {"FREEZE_IDLE", "1800", "0..100000", RESTART},
     {"SUBMIT_FINISH_KINDS", "31", "0..31", RESTART},   // vk_sync.c res_mask
     {"FOLIAGE", "full", "full|reduced|off", RESTART},
     {"FOLIAGE_SHADOWS", "full", "full|reduced|off", RESTART},   // vk_exec_draw.c foliage_skip
+    // vk_exec_draw.c foliage_shadow_cull and mesh_shading_rate: the first shadow cascade each acts in, 3 neither
+    {"FOLIAGE_SHADOW_CULL", "1", "0|1|2|3|0f|1f|2f", RESTART}, {"FOLIAGE_SHADOW_VRS", "2", "0|1|2|3", RESTART},
+    {"DLAA_EDGE_FILL", "auto", "auto|0|1|2", RESTART},   // vk_dlaa.c edge_fill_mode: auto by the GPU's vendor
+    {"SPV_OPT", "1", "0|1", RESTART},   // spirv_opt.c: needs the SPIRV-Tools library
+    {"SPV_OPT_MIN_WORDS", "1024", "0..1000000", RESTART},
+    {"SPV_OPT_STAGES", "6", "0..15", RESTART},   // spirv_opt.c stage_bit
     {"VRAM_HEAP_LIMIT", "0", NULL, RESTART},   // vk_device.c vram_heap_limits: auto, 0 or MiB
     {"VRAM_RESERVE_MB", "0", "0..4096", RESTART},   // vk_vma_budget.c: video memory kept free of VMA's allocations
     // vk_memory.c vk_upload_end: MiB of staging before a batch goes early. 0: at 64 MiB, the staging pool's own limit
@@ -425,10 +460,10 @@ static const CfgMeta metas[] = {
     {"MIRROR_CAPTURE_KB", "0", "0..1048576", RESTART}, {"WB_SKIP_MB", "0", "0..4096", RESTART},   // vk_memory.c capture_cap, wb_skip
     {"WB_MERGE_MAX", "32", "1..256", RESTART}, {"TEXUP_LOG_MS", "0", "0..60000", RESTART},   // vk_texture.c vk_texstat_frame
     {"WAIT_WATCH_S", "0", "0..3600", RESTART},   // kernel.c wait_watch: a lock or thread-end wait this long is logged; 0 off
-    {"VMA_BLOCK_MB", "64", "16..256", RESTART},   // vk_headroom.c vk_vma_block_size
+    {"VMA_BLOCK_MB", "16", "16..256", RESTART},   // vk_headroom.c vk_vma_block_size
     // vk_texture.c compact_on: idle textures move out of sparsely used blocks of video memory; the free space inside
     // the blocks from which a pass starts, and the bytes moved per frame (also the largest texture that moves)
-    {"TEX_COMPACT", "0", "0|1", RESTART}, {"TEX_COMPACT_MIN_MB", "256", "64..65536", RESTART},
+    {"TEX_COMPACT", "1", "0|1", RESTART}, {"TEX_COMPACT_MIN_MB", "256", "64..65536", RESTART},
     {"TEX_COMPACT_FRAME_MB", "8", "1..32", RESTART},
     {"ASTC_BC1", "1", "0|1", RESTART},   // vk_astc.c bc1_on
     {"PASS_CRUMBS", "", "0|1", RESTART},   // vk_crumbs.c pass marks; unset: VK_AMD_buffer_marker only
@@ -501,6 +536,7 @@ static char *trim(char *s) {
 // The upper-case key without the prefix, in place.
 static char *norm_key(char *key) {
     for (char *p = key; *p; p++) *p = (char)toupper((unsigned char)*p);
+    if (!strncmp(key, LEGACY_PREFIX, LEGACY_PREFIX_LEN)) return key + LEGACY_PREFIX_LEN;
     return strncmp(key, PREFIX, PREFIX_LEN) ? key : key + PREFIX_LEN;
 }
 
@@ -510,7 +546,7 @@ static void add(char *key, char *value, int line) {
     if (vl >= 2 && value[0] == '"' && value[vl - 1] == '"') value[vl - 1] = 0, value++;
     if (!*key) return;
     if (!is_known(key)) {
-        rt_log("cfg: nx2navi.ini line %d: unknown key '%s'", line, key);
+        rt_log("cfg: OOT-PC.ini line %d: unknown key '%s'", line, key);
         note_unknown(key);
     }
     if (!*value) return;   // "key =" leaves the setting at its default
@@ -538,7 +574,7 @@ static void migrate(void) {
     layout->value = strdup("nintendo");
     layout->dirty = 1;
     if (!prompts && n_entries < CFG_MAX_KEYS) entries[n_entries++] = (CfgEntry){strdup("PROMPTS"), strdup("xbox"), 1, 0};
-    rt_log("cfg: nx2navi.ini pad_layout = xbox_prompts is read as pad_layout = nintendo and prompts = %s",
+    rt_log("cfg: OOT-PC.ini pad_layout = xbox_prompts is read as pad_layout = nintendo and prompts = %s",
            prompts ? prompts->value : "xbox");
 }
 
@@ -589,7 +625,7 @@ int cfg_load(const char *path) {
         char *s = trim(p);
         char *eq = strchr(s, '=');
         if (*s && *s != '#' && *s != ';' && *s != '[') {
-            if (!eq) rt_log("cfg: nx2navi.ini line %d: no '=' in '%s'", line, s);
+            if (!eq) rt_log("cfg: OOT-PC.ini line %d: no '=' in '%s'", line, s);
             else {
                 *eq = 0;
                 add(trim(s), trim(eq + 1), line);
@@ -603,8 +639,8 @@ int cfg_load(const char *path) {
     return 1;
 }
 
-// ---- device profiles: defaults for a known machine, below the environment and nx2navi.ini and above the table, so any
-// key the player sets wins and resetting a key in the menu returns to the profile's value. NX2NAVI_DEVICE_PROFILE = auto
+// ---- device profiles: defaults for a known machine, below the environment and OOT-PC.ini and above the table, so any
+// key the player sets wins and resetting a key in the menu returns to the profile's value. OOTPC_DEVICE_PROFILE = auto
 // (default: the Steam Deck when the firmware says so), desktop (none) or deck.
 //
 // The Steam Deck (LCD Jupiter, OLED Galileo; 1280x800, 16:10, 4 Zen 2 cores, RDNA 2 with 8 CUs sharing 16 GB): the game
@@ -642,7 +678,7 @@ static int on_steam_deck(void) {
 
 static const char *raw_get(const char *name);
 
-// low_end_gpu = 1 in nx2navi.ini (NX2NAVI_LOW_END_GPU): defaults for the keys the player does not set, as the device
+// low_end_gpu = 1 in OOT-PC.ini (OOTPC_LOW_END_GPU): defaults for the keys the player does not set, as the device
 // profile gives them. They turn on what was written for older graphics cards and ones short of video memory or bus
 // bandwidth, and measured on a Radeon RX 580: mesh shaders run as compute where the card has none (vk_pipeline.c
 // mesh_emu_on), a texture read after another image drew over its pool memory gets memory of its own (vk_texture.c
@@ -651,7 +687,7 @@ static const char *raw_get(const char *name);
 // texture checks share their write-watch queries (vk_memory.c snap_widen_n), video memory stays within the heaps'
 // budgets (vk_device.c vram_heap_limits, vk_vma_budget.c), large upload batches go to the queue early (vk_memory.c
 // vk_upload_end) and pools the game refills every frame stay in system memory (vk_memory.c hot_check). Without the
-// key each of these keeps what 0.9.1 did. Asynchronous replay (vk_backend.c, NX2NAVI_REPLAY_ASYNC) is not among them:
+// key each of these keeps what 0.9.1 did. Asynchronous replay (vk_backend.c, OOTPC_REPLAY_ASYNC) is not among them:
 // it can show a dark or flickering frame now and then, so the mode leaves it off and its row under the mode's switch
 // turns it on for a player who wants it.
 static const struct { const char *key, *value; } LOWEND[] = {
@@ -661,12 +697,13 @@ static const struct { const char *key, *value; } LOWEND[] = {
 // The keys that count only while the mode is on (LOWEND_ONLY): without it each reads as unset, whatever the settings
 // file or the environment says, so nothing of the mode acts unless a player turned it on. The menu shows their rows
 // only then (ui/menu.cpp rows_low_end). Keys the game had before the mode (replay_async, freeze_idle, zstd_native,
-// tex_released_max, astc_scratch_keep), mirror_hot (a row of the Game tab's Performance group, for any card short of
-// video memory; the mode only gives it a default), and general CPU detail and build options are not among them.
+// tex_released_max, astc_scratch_keep), pass_times (a diagnostic for any card), mirror_hot (a row of the Game tab's Performance group, for any card short of
+// video memory; the mode only gives it a default), mirror_stage and the submit_finish_* keys (the frame's first
+// submission waiting for the CPU's copies only, not the GPU: any card; the mode only gives them defaults), and general
+// CPU detail and build options are not among them.
 static const char *const LOWEND_ONLY[] = {
-    "MESH_EMULATION", "MESH_EMU_MB", "MESH_EMU_TASKS", "MESH_EMU_BATCH", "TEX_CLOBBER", "MIRROR_STAGE",
-    "SUBMIT_FINISH_GPU", "SUBMIT_FINISH_RESULTS", "SUBMIT_FINISH_KINDS", "SNAP_WIDEN", "VRAM_HEAP_LIMIT",
-    "VRAM_RESERVE_MB", "UPLOAD_BATCH_MB", "FLUSH_SKIP_CLEAN", "VEC_INDEX_FIX", "PASS_TIMES",
+    "MESH_EMULATION", "MESH_EMU_MB", "MESH_EMU_TASKS", "MESH_EMU_BATCH", "TEX_CLOBBER", "SNAP_WIDEN", "VRAM_HEAP_LIMIT",
+    "VRAM_RESERVE_MB", "UPLOAD_BATCH_MB", "FLUSH_SKIP_CLEAN", "VEC_INDEX_FIX",
     "DUMP_KEY", "LOG_TEX_NEW", "SVC_WAITS",
 };
 static int lowend_only(const char *key) {
@@ -724,7 +761,7 @@ static const char *cfg_get_now(const char *name) {
     return lowend_value(name + PREFIX_LEN);
 }
 
-// Whether name's value comes from the player (the environment or nx2navi.ini), not a profile or the table.
+// Whether name's value comes from the player (the environment or OOT-PC.ini), not a profile or the table.
 int cfg_is_set(const char *name) { return raw_get(name) != NULL; }
 
 unsigned cfg_version(void) { return __atomic_load_n(&version, __ATOMIC_ACQUIRE); }
@@ -841,7 +878,7 @@ static const char *cfg_value_now(const char *name) {
 // entries and the settings table by name, and several per-draw paths ask for live settings: on the replay thread those
 // lookups were about a sixth of the samples in a play profile (ucrtbase's string routines). Each thread keeps the
 // answers it got per name until the settings version changes (cfg_set, cfg_reset, cfg_load); values stay valid that
-// long because a set keeps the old string for readers and a load bumps the version. NX2NAVI_CFG_MEMO=0 (environment
+// long because a set keeps the old string for readers and a load bumps the version. OOTPC_CFG_MEMO=0 (environment
 // only, read once) asks every time.
 #define CFG_MEMO_N 256
 typedef struct { unsigned ver; uint32_t h; uint8_t kind; char name[55]; const char *v; } CfgMemo;
@@ -992,7 +1029,7 @@ static void put(Out *o, const char *s, size_t n) {
     if (o->n + n + 1 > o->cap) {
         o->cap = (o->n + n + 1) * 2;
         o->buf = realloc(o->buf, o->cap);
-        if (!o->buf) rt_fatal("cfg: out of memory writing nx2navi.ini");
+        if (!o->buf) rt_fatal("cfg: out of memory writing OOT-PC.ini");
     }
     memcpy(o->buf + o->n, s, n);
     o->n += n;
@@ -1053,7 +1090,7 @@ int cfg_save_to(const char *path) {
     // after[i]: entries to write after line i (-1 = none); replace[i]: the entry whose value line i now carries
     int *replace = malloc(sizeof(int) * ((size_t)nl + 1)), *after_key = malloc(sizeof(int) * (size_t)(n + 1));
     char *drop = calloc((size_t)nl + 1, 1);   // lines of a reset key
-    if (!lines || !replace || !after_key || !drop) rt_fatal("cfg: out of memory writing nx2navi.ini");
+    if (!lines || !replace || !after_key || !drop) rt_fatal("cfg: out of memory writing OOT-PC.ini");
     for (int i = 0, at = 0; i < nl; i++) {
         size_t start = (size_t)at;
         while ((uint64_t)at < size && text[at] != '\n') at++;
@@ -1167,8 +1204,15 @@ static int find_ini(void) {
     char *cut = plat_last_sep(path);
     if (!cut) cut = strrchr(path, '/');
     if (!cut || cut + 12 >= path + sizeof path) return 0;   // room for "nx2navi.ini" and its NUL after the separator
-    strcpy(cut + 1, "nx2navi.ini");
+    strcpy(cut + 1, LEGACY_INI);
+    char legacy[1024];
+    snprintf(legacy, sizeof legacy, "%s", path);
+    strcpy(cut + 1, "OOT-PC.ini");
     snprintf(ini_path, sizeof ini_path, "%s", path);
+    if (!plat_file_exists(ini_path) && plat_file_exists(legacy)) {
+        if (plat_fs_rename(legacy, ini_path, 1)) rt_log("cfg: renamed %s to OOT-PC.ini", legacy);
+        else snprintf(ini_path, sizeof ini_path, "%s", legacy);   // read and keep the old file where it is
+    }
     return 1;
 }
 
@@ -1214,28 +1258,43 @@ static void load_ini(void) {
         return;
     }
     rt_log("cfg: read %s: %d keys", ini_path, n_entries);
-    log_file_settings("nx2navi.ini");
+    log_file_settings("OOT-PC.ini");
     for (int i = 0; i < n_entries; i++) {
         char var[128];
         snprintf(var, sizeof var, PREFIX "%s", entries[i].key);
-        if (getenv(var)) rt_log("cfg: %s is set in the environment and overrides nx2navi.ini", var);
+        if (getenv(var)) rt_log("cfg: %s is set in the environment and overrides OOT-PC.ini", var);
+    }
+}
+
+// An environment variable with the old prefix sets the setting as the new one would, unless the new one is set too.
+static void legacy_env(void) {
+    for (size_t i = 0; i < sizeof known / sizeof *known; i++) {
+        char old[80], var[80];
+        snprintf(old, sizeof old, LEGACY_PREFIX "%s", known[i]);
+        const char *e = getenv(old);
+        if (!e) continue;
+        snprintf(var, sizeof var, PREFIX "%s", known[i]);
+        if (getenv(var)) continue;
+        plat_setenv(var, e);
+        rt_log("cfg: %s is read as %s", old, var);
     }
 }
 
 void cfg_init(void) {
+    legacy_env();
     load_ini();
     __atomic_store_n(&lowend, -1, __ATOMIC_RELEASE);   // asked before the file was read: decided again (lowend_of)
     if (profile_of())
-        rt_log("cfg: device profile Steam Deck: defaults for the keys nx2navi.ini does not set (NX2NAVI_DEVICE_PROFILE=desktop "
+        rt_log("cfg: device profile Steam Deck: defaults for the keys OOT-PC.ini does not set (OOTPC_DEVICE_PROFILE=desktop "
                "turns it off)");
     if (lowend_of())
-        rt_log("cfg: low_end_gpu = 1: the settings for older graphics cards are on for the keys nx2navi.ini does not set "
+        rt_log("cfg: low_end_gpu = 1: the settings for older graphics cards are on for the keys OOT-PC.ini does not set "
                "(mesh shaders as compute, video memory budgets, staged uploads and the shorter wait for the GPU, frames "
                "prepared on their own thread)");
     start_values();
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): settings entries, and the replaced values cfg_set keeps for readers.
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): settings entries, and the replaced values cfg_set keeps for readers.
 void cfg_sizes(PerfSizes *s) {
     plat_mutex_lock(&set_lock);
     uint64_t n = (uint64_t)n_entries, kn = kept_n, kb = kept_bytes;

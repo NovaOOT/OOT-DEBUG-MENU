@@ -6,14 +6,14 @@
 // listed whatever it holds; what the port cannot use is its problem, shown in the menu and logged, and never stops the
 // start. romfs.c serves the RomFS files of the enabled mods, the top one winning a path.
 //
-// The order and the switches are nx2navi.ini keys (cfg.c): NX2NAVI_MODS_ORDER lists names top first, separated by '|' (a
+// The order and the switches are OOT-PC.ini keys (cfg.c): OOTPC_MODS_ORDER lists names top first, separated by '|' (a
 // Windows file name cannot hold '|'; a folder whose name does on Linux is listed as unusable); a folder it does not name
-// goes below the named ones, by name. NX2NAVI_MODS_DISABLED lists the switched-off names. The menu changes the list in
+// goes below the named ones, by name. OOTPC_MODS_DISABLED lists the switched-off names. The menu changes the list in
 // place and writes both keys; the scan's state is kept to tell the menu a restart is due.
 //
 // ExeFS patch files: an .ips or .pchtxt file in the exefs folder or in atmosphere/exefs_patches/<name>/ is for the game
 // when its build id is main's (an IPS file's name, a pchtxt file's @nsobid line); others are another version's and
-// counted. The setup builds every mod's files into patch sets and writes build-cache/exefs.status next to nx2navi.exe
+// counted. The setup builds every mod's files into patch sets and writes build-cache/exefs.status next to ocarina.exe
 // (tools/exefs_patches.py has the format): a file whose line is missing or has another content hash waits for the
 // rebuild at start (cheats.c), and its mod stays off until then.
 #include <ctype.h>
@@ -30,11 +30,17 @@
 
 #define TITLE "0400486024DEC000"   // the game's title id, which names a mod's Atmosphere folders
 #define MAX_MODS 512
+#define FEATURE_FILE "ootpc-feature.txt"
+#define MAX_FEATURES 8
 
 static ModInfo *mods;
 static int nmods;
 static char dir[2048];
 static char start_order[MAX_MODS][256];   // names in the scan's order, for mods_changed
+// The features of the mods on at the scan, copied out of mods[] (which the menu reorders in place) so that other
+// threads read a table nothing changes afterwards; features_ready publishes it.
+static struct { char feature[32], mod[256]; } features[MAX_FEATURES];
+static int nfeatures, features_ready;
 
 // 1 when a file lies anywhere under path.
 // Folders nest at most MOD_DEPTH deep below it: each level costs a stack frame, and the RomFS has no deeper paths.
@@ -92,6 +98,29 @@ static int cheats_cb(const char *name, int kind, uint64_t size, void *ctx) {
     return 1;
 }
 
+// The feature a mod's ootpc-feature.txt names (its first line, without the spaces around it) into m->feature; 1 when
+// the file is there. A name this version does not know goes into the note instead.
+static int feature_scan(ModInfo *m, const char *path) {
+    char file[2200];
+    snprintf(file, sizeof file, "%s/" FEATURE_FILE, path);
+    uint64_t size = 0;
+    uint8_t *data = plat_file_exists(file) ? plat_file_read(file, &size) : NULL;
+    if (!data) return 0;
+    size_t i = 0, n = 0;
+    if (size >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) i = 3;   // a UTF-8 byte order mark
+    while (i < size && (data[i] == ' ' || data[i] == '\t')) i++;
+    char name[64];
+    while (i < size && data[i] != '\r' && data[i] != '\n' && n < sizeof name - 1) name[n++] = (char)data[i++];
+    while (n && (name[n - 1] == ' ' || name[n - 1] == '\t')) n--;
+    name[n] = 0;
+    free(data);
+    if (!strcmp(name, MOD_FEATURE_STEAM_COOP) || !strcmp(name, MOD_FEATURE_N64) || !strcmp(name, MOD_FEATURE_DARK_LINK) ||
+        !strcmp(name, MOD_FEATURE_DESERT_FREE_ROAM))
+        snprintf(m->feature, sizeof m->feature, "%s", name);
+    else snprintf(m->note, sizeof m->note, "%s names \"%.64s\"", FEATURE_FILE, name);
+    return 1;
+}
+
 // 1 when name is one of the '|'-separated names of list.
 static int listed(const char *list, const char *name) {
     size_t n = strlen(name);
@@ -118,7 +147,7 @@ static int list_pos(const char *list, const char *name) {
 }
 
 // A mod's setting (mods.h): the first folder under <mod>/settings by name, its value folders in the order shown, and the
-// value NX2NAVI_MODS_SETTINGS names for it (none, or a value it does not have: the first).
+// value OOTPC_MODS_SETTINGS names for it (none, or a value it does not have: the first).
 typedef struct { char names[MOD_VALUES][64]; int n; } Names;
 static int names_cb(const char *name, int kind, uint64_t size, void *ctx) {
     (void)size;
@@ -178,7 +207,7 @@ static void setting_scan(ModInfo *m, const char *path) {
     memcpy(m->values, val.names, sizeof val.names);
     m->nvalues = val.n;
     char want[64];
-    setting_lookup(cfg_get("NX2NAVI_MODS_SETTINGS"), m->setting, want, sizeof want);
+    setting_lookup(cfg_get("OOTPC_MODS_SETTINGS"), m->setting, want, sizeof want);
     for (int i = 0; i < val.n; i++)
         if (!strcmp(val.names[i], want)) m->value = i;
     m->start_value = m->value;
@@ -187,7 +216,7 @@ static void setting_scan(ModInfo *m, const char *path) {
         m->romfs[0] = 0;
 }
 
-static const char *order_list;   // NX2NAVI_MODS_ORDER while sorting
+static const char *order_list;   // OOTPC_MODS_ORDER while sorting
 static int by_order(const void *a, const void *b) {
     const ModInfo *x = a, *y = b;
     int px = list_pos(order_list, x->name), py = list_pos(order_list, y->name);
@@ -204,6 +233,7 @@ static const char *problem_name(ModProblem p) {
     case MOD_EXEFS_UNSUPPORTED: return "an ExeFS patch file cannot be applied; the whole mod stays off";
     case MOD_EXEFS_OTHER: return "its ExeFS patches are for another game version";
     case MOD_BAD_NAME: return "its folder name holds '|', which the order list uses; rename the folder";
+    case MOD_FEATURE_UNKNOWN: return "it turns on a feature this version does not have";
     default: return "ok";
     }
 }
@@ -271,7 +301,7 @@ static int pchtxt_build(const char *data, size_t n, const char **id, size_t *len
     return found;
 }
 
-// build-cache/exefs.status next to nx2navi.exe, read once; "" when there is none.
+// build-cache/exefs.status next to ocarina.exe, read once; "" when there is none.
 static const char *exefs_status(void) {
     static char *text;
     if (text) return text;
@@ -424,12 +454,15 @@ static int scan_cb(const char *name, int kind, uint64_t size, void *ctx) {
     if (m->exefs[0]) plat_fs_list(m->exefs, exefs_cb, &m->kind);
     if (m->cheats[0]) plat_fs_list(m->cheats, cheats_cb, &m->kind);
     int unsupported = exefs_check(m, path);
+    int has_feature = feature_scan(m, path);
+    if (m->feature[0]) m->kind |= MOD_FEATURE;
     // a mod whose code part the port cannot use is off as a whole: its RomFS files may expect that code
     m->problem = strchr(m->name, '|')                                ? MOD_BAD_NAME
                : m->kind & MOD_SUBSDK                                ? MOD_PLUGIN
                : unsupported                                         ? MOD_EXEFS_UNSUPPORTED
                : m->pending                                          ? MOD_EXEFS_LATER
-               : m->nsets || m->kind & (MOD_ROMFS | MOD_CHEATS)     ? MOD_OK
+               : has_feature && !m->feature[0]                       ? MOD_FEATURE_UNKNOWN
+               : m->nsets || m->kind & (MOD_ROMFS | MOD_CHEATS | MOD_FEATURE) ? MOD_OK
                : m->kind & MOD_EXEFS                                 ? MOD_EXEFS_OTHER
                                                                      : MOD_EMPTY;
     m->enabled = m->start_enabled = !listed(disabled, m->name);
@@ -437,12 +470,18 @@ static int scan_cb(const char *name, int kind, uint64_t size, void *ctx) {
     return 1;
 }
 
+static void scan(void);
 void mods_scan(void) {
     static int done;
     if (done) return;
     done = 1;
-    // a relative mods_dir is under the folder of nx2navi.exe, as the default is, whatever folder the game started in
-    const char *d = cfg_get("NX2NAVI_MODS_DIR");
+    scan();
+    __atomic_store_n(&features_ready, 1, __ATOMIC_RELEASE);   // mods_feature answers from now on, also with no mods
+}
+
+static void scan(void) {
+    // a relative mods_dir is under the folder of ocarina.exe, as the default is, whatever folder the game started in
+    const char *d = cfg_get("OOTPC_MODS_DIR");
     if (!d || !*d) d = "mods";
     int absolute = d[0] == '/' || d[0] == '\\' || (d[0] && d[1] == ':');
     char exe[2048];
@@ -467,22 +506,43 @@ void mods_scan(void) {
     rando_apply_pending(dir);   // a seed the Randomizer tab made last session, before its files are listed
     mods = calloc(MAX_MODS, sizeof *mods);
     if (!mods) return;
-    if (plat_fs_list(dir, scan_cb, (void *)cfg_get("NX2NAVI_MODS_DISABLED")) != PLAT_FS_OK)
+    if (plat_fs_list(dir, scan_cb, (void *)cfg_get("OOTPC_MODS_DISABLED")) != PLAT_FS_OK)
         rt_log("mods: cannot list %s (error %d); no mods", dir, plat_fs_os_error());
-    order_list = cfg_get("NX2NAVI_MODS_ORDER");
+    order_list = cfg_get("OOTPC_MODS_ORDER");
     qsort(mods, nmods, sizeof *mods, by_order);
     order_list = NULL;
     for (int i = 0; i < nmods; i++) {
         snprintf(start_order[i], sizeof start_order[i], "%s", mods[i].name);
         const ModInfo *m = &mods[i];
         if (m->nvalues) rt_log("mods: %s: %s = %s", m->name, m->setting, m->values[m->value]);
-        rt_log("mods: %s: %s,%s%s%s%s%s, %s%s%s", m->name, m->enabled ? "on" : "off", m->kind & MOD_ROMFS ? " romfs" : "",
+        rt_log("mods: %s: %s,%s%s%s%s%s%s%s, %s%s%s", m->name, m->enabled ? "on" : "off", m->kind & MOD_ROMFS ? " romfs" : "",
                m->kind & MOD_EXEFS ? " exefs" : "", m->kind & MOD_SUBSDK ? " subsdk" : "",
-               m->kind & MOD_CHEATS ? " cheats" : "", m->kind ? "" : " no files", problem_name(m->problem),
-               m->note[0] ? ": " : "", m->note);
+               m->kind & MOD_CHEATS ? " cheats" : "", m->feature[0] ? " feature " : "", m->feature,
+               m->kind ? "" : " no files", problem_name(m->problem), m->note[0] ? ": " : "", m->note);
+        // the top mod that is on names a feature
+        int known = 0;
+        for (int k = 0; k < nfeatures; k++) known |= !strcmp(features[k].feature, m->feature);
+        if (m->start_enabled && m->problem == MOD_OK && m->feature[0] && !known && nfeatures < MAX_FEATURES) {
+            snprintf(features[nfeatures].feature, sizeof features[0].feature, "%s", m->feature);
+            snprintf(features[nfeatures].mod, sizeof features[0].mod, "%s", m->name);
+            nfeatures++;
+            rt_log("mods: %s turns on %s", m->name, m->feature);
+        }
     }
     rt_log("mods: %d folders in %s", nmods, dir);
 }
+
+int mods_feature(const char *feature, char *mod_name, size_t cap) {
+    if (!__atomic_load_n(&features_ready, __ATOMIC_ACQUIRE)) return 0;
+    for (int k = 0; k < nfeatures; k++) {
+        if (strcmp(features[k].feature, feature)) continue;
+        if (mod_name && cap) snprintf(mod_name, cap, "%s", features[k].mod);
+        return 1;
+    }
+    return 0;
+}
+
+int mods_features_known(void) { return __atomic_load_n(&features_ready, __ATOMIC_ACQUIRE); }
 
 void mods_exefs_switch(void) {
     mods_scan();
@@ -521,7 +581,7 @@ const char *mods_dir(void) { return dir; }
 int mods_count(void) { return nmods; }
 ModInfo *mods_at(int i) { return i >= 0 && i < nmods ? &mods[i] : NULL; }
 
-// NX2NAVI_MODS_ORDER as every listed name top first; NX2NAVI_MODS_DISABLED as the switched-off names. A name holding '|'
+// OOTPC_MODS_ORDER as every listed name top first; OOTPC_MODS_DISABLED as the switched-off names. A name holding '|'
 // would split into two; it is left out of both (its mod is unusable anyway).
 static void write_keys(void) {
     size_t cap = (size_t)nmods * 257 + 1;
@@ -536,8 +596,8 @@ static void write_keys(void) {
                 strcat(off, mods[i].name);
             }
         }
-        cfg_set("NX2NAVI_MODS_ORDER", order);
-        cfg_set("NX2NAVI_MODS_DISABLED", off);
+        cfg_set("OOTPC_MODS_ORDER", order);
+        cfg_set("OOTPC_MODS_DISABLED", off);
     }
     free(order);
     free(off);
@@ -555,7 +615,7 @@ static void write_keys(void) {
         strcat(set, "=");
         strcat(set, mods[i].values[mods[i].value]);
     }
-    cfg_set("NX2NAVI_MODS_SETTINGS", set);
+    cfg_set("OOTPC_MODS_SETTINGS", set);
     free(set);
 }
 

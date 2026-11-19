@@ -1,4 +1,4 @@
-"""Build a release of the OOT-DEBUG-MENU launcher (docs/launcher.md, "Releases").
+"""Build a release of the OOT-PC launcher (docs/launcher.md, "Releases").
 
     python tools/make_launcher.py --xlate build/xlate [--ffx amd_fidelityfx_vk.dll] [--dlss nvngx_dlss.dll | --no-dlss]
                                   [--ffx4 FOLDER]
@@ -13,21 +13,21 @@ checked against the sha256 in PINS.
 
 The release folder (--out) holds:
 
-    OOT-DEBUG-MENU/               the launcher folder exactly as OOT-DEBUG-MENU-Setup.exe installs it:
-      OOT-DEBUG-MENU.exe          launcher/native/nx2navi.c with the Navi icon (launcher/ui/art.py)
+    OOT-PC/               the launcher folder exactly as OOT-PC-Setup.exe installs it:
+      OOT-PC.exe          launcher/native/ootpc.c with the project's icon (runtime/ootpc.ico)
       python/                     python.org's embeddable Python 3.14.9, tkinter and Tcl/Tk 9.0 from its tcltk.msi,
                                   the packages of tools/requirements-launcher.txt, runtime-id.txt
       app/current.txt, app/<version>/   launcher/ (without native/), runtime/, recomp/, the tools make_game.py uses,
-                                  bin/nx2navi_xlate.exe and .id (and amd_fidelityfx_vk.dll with --ffx, AMD's two
+                                  bin/ootpc_xlate.exe and .id (and amd_fidelityfx_vk.dll with --ffx, AMD's two
                                   FSR 4 libraries with --ffx4),
                                   bin/nvngx_dlss.dll and its notice (NVIDIA DLSS at the version tools/dlss_pin.py
                                   pins, downloaded from NVIDIA's DLSS SDK repository and checked, or --dlss; not with
                                   --no-dlss),
-                                  bin/dlssg/ with --dlssg (DLSS Frame Generation: nx2navi_dlssg.dll, Streamline's
+                                  bin/dlssg/ with --dlssg (DLSS Frame Generation: ootpc_dlssg.dll, Streamline's
                                   runtime DLLs and nvngx_dlssg.dll at the version tools/streamline_pin.py pins,
                                   downloaded from NVIDIA's Streamline SDK release and checked, or --streamline; their
                                   licences and a notice),
-                                  lib/libnx2navirt.a (the runtime, prebuilt with the release's compiler),
+                                  lib/libootpcrt.a (the runtime, prebuilt with the release's compiler),
                                   data/pgo-v111.profdata and .json with --pgo (the execution profile make_game.py
                                   compiles the lifted code and the runtime with, the prebuilt runtime included, and
                                   its record: tools/pgo.py merge),
@@ -35,11 +35,11 @@ The release folder (--out) holds:
                                   PlayStation, Steam Deck and keyboard and mouse prompts from, tools/prompt_art.py art_files),
                                   toolchain.lock.json (the MSYS2 packages of today, pinned), feed.json, VERSION, the
                                   licence files
-    OOT-DEBUG-MENU-Setup-<version>.exe   launcher/native/setup.c with the folder above appended as a zip: the one file
+    OOT-PC-Setup-<version>.exe   launcher/native/setup.c with the folder above appended as a zip: the one file
                                   players download
-    OOT-DEBUG-MENU-app-<version>.zip     app/<version> alone: what the launcher downloads to update itself
-    OOT-DEBUG-MENU-runtime-<id>.zip      python/ alone: downloaded only when a release changes the Python
-    OOT-DEBUG-MENU-update.json           the manifest the launcher reads (launcher/feed.py)
+    OOT-PC-app-<version>.zip     app/<version> alone: what the launcher downloads to update itself
+    OOT-PC-runtime-<id>.zip      python/ alone: downloaded only when a release changes the Python
+    OOT-PC-update.json           the manifest the launcher reads (launcher/feed.py)
 
 --prompt-art names the button art: folders that hold XGamepad, P5Gamepad and Keyboard_Mouse, or those three folders
 themselves. Only the pictures tools/pad_prompts.py reads are copied; the art stays out of the repository. Without it
@@ -48,7 +48,7 @@ the release has no prompt-art folder and builds the game with the game's own pro
 --pgo names the execution profile of a play session (docs/building.md, "Profile-guided build"). It is derived from
 the game's code and stays out of the repository; its record must name this checkout's recomp/, or the release stops
 (tools/pgo.py fitting). Without it the release builds the game as before, the lifted code at -O1. The profile is
-part of NX2navi-app-<version>.zip, so an update brings it and the launcher's next build of the game compiles with it.
+part of OOT-PC-app-<version>.zip, so an update brings it and the launcher's next build of the game compiles with it.
 
 --publish uploads the four files as GitHub release v<version> of the --feed repository with the gh CLI (a draft
 first is wiser: add --draft). check_content runs over everything before it is packed: the release holds no game data.
@@ -87,14 +87,14 @@ PINS = {
     'tcltk': (f'https://www.python.org/ftp/python/{PY_VERSION}/amd64/tcltk.msi',
               'ac87609db3f715404dd41a989c2f1706ea1512f3d86217f938d11c63af8eb505'),
 }
-TOOLS = ('make_game.py', 'nup.py', 'romfs_index.py', 'check_content.py', 'hostmem.py', 'prepare_shaders.py',
+TOOLS = ('make_game.py', 'build_menu_art.py', 'nup.py', 'romfs_index.py', 'check_content.py', 'hostmem.py', 'prepare_shaders.py',
          'shader_census.py', 'shader_list.py', 'pipeline_list.py', 'zstd_compat.py', 'pad_prompts.py', 'prompt_art.py', 'button_icons.py', 'romfs_check.py',
          'pack_shader_cache.py', 'mod_files.py', 'cheats.py', 'exefs_patches.py', 'randomizer.py')
-TOP = ('LICENSE', 'LICENSE-ADDITIONS', 'THIRD_PARTY_NOTICES.md', 'nx2navi.ini.example')
+TOP = ('LICENSE', 'LICENSE-ADDITIONS', 'THIRD_PARTY_NOTICES.md', 'OOT-PC.ini.example')
 SKIP_DIRS = {'__pycache__', '.pytest_cache', 'native'}
 SKIP_SUFFIXES = {'.o', '.obj', '.pyc', '.exe', '.dll', '.a', '.lib'}
 TCLTK_FILES = ('_tkinter.pyd', 'tcl90.dll', 'tcl9tk90.dll', 'zlib1.dll', 'libtommath.dll')
-DEFAULT_FEED = 'NovaOOT/OOT-DEBUG-MENU'
+DEFAULT_FEED = 'NovaOOT/OOT-PC'
 
 
 def say(msg):
@@ -194,6 +194,10 @@ def build_app(app, ver, xlate, feed_repo, lock, ffx=None, dlss=None, art=None, d
     # runtime/ (make_game.py) and has no shader compiler. Build the missing and the stale ones before the copy.
     build_shaders.build(ROOT / 'runtime')
     copy_tree(ROOT / 'launcher', app / 'launcher')
+    skin=ROOT/'generated'/'menu-ui'
+    (app/'generated'/'menu-ui').mkdir(parents=True,exist_ok=True)
+    for name in ('forest-chassis.png','forest-widgets.png'):
+        shutil.copy2(skin/name,app/'generated'/'menu-ui'/name)
     for d in ('runtime', 'recomp'):
         copy_tree(ROOT / d, app / d)
     (app / 'tools').mkdir(parents=True)
@@ -204,7 +208,7 @@ def build_app(app, ver, xlate, feed_repo, lock, ffx=None, dlss=None, art=None, d
             shutil.copy2(ROOT / t, app / t)
     (app / 'VERSION').write_text(ver + '\n', encoding='utf-8')
     (app / 'bin').mkdir()
-    for n in ('nx2navi_xlate.exe', 'nx2navi_xlate.id'):
+    for n in ('ootpc_xlate.exe', 'ootpc_xlate.id'):
         if not (xlate / n).is_file():
             sys.exit(f'{xlate / n} is missing: build the shader translator first (tools/build_xlate.py)')
         shutil.copy2(xlate / n, app / 'bin' / n)
@@ -219,6 +223,17 @@ def build_app(app, ver, xlate, feed_repo, lock, ffx=None, dlss=None, art=None, d
         dlss_pin.place(dlss, app / 'bin')
     if dlssg:   # DLSS Frame Generation (runtime/vk_dlssg.c): make_game.py place_dlssg copies it beside the game
         streamline_pin.place(dlssg[0], dlssg[1], app / 'bin' / 'dlssg')
+    # The SPIR-V optimiser (runtime/spirv_opt.c): make_game.py place_spvopt copies bin/spvopt/ beside the game.
+    # Without it the large lit materials (the Lake Hylia water) cost several milliseconds more per frame.
+    spv = ROOT / 'build' / 'spvopt'
+    if (spv / 'ootpc_spvopt.dll').is_file():
+        (app / 'bin' / 'spvopt').mkdir()
+        for p in sorted(spv.iterdir()):
+            if p.is_file():
+                shutil.copy2(p, app / 'bin' / 'spvopt' / p.name)
+    else:
+        say('shader optimiser: build/spvopt has no ootpc_spvopt.dll (tools/build_spvopt.py): the game will send its '
+            'shaders to the driver as translated')
     if art:   # make_game.py draws the button prompts from it (its prompts step)
         n, size = prompt_art.copy_art(art, app / prompt_art.FOLDER)
         say(f'button art: {n} pictures, {size / 1e6:.1f} MB')
@@ -258,7 +273,7 @@ def native_compiler(lock):
 
 
 def build_runtime_lib(folder, ver, out, wine):
-    """app/<version>/lib/libnx2navirt.a: the runtime compiled once here with the release's MSYS2 clang, so players
+    """app/<version>/lib/libootpcrt.a: the runtime compiled once here with the release's MSYS2 clang, so players
     compile only the few runtime files that include per-install headers (tools/make_game.py --make-runtime-lib). It
     needs MSYS2's own clang.exe: native on Windows, through Wine with --wine elsewhere; without either players compile
     runtime/ themselves."""
@@ -270,13 +285,13 @@ def build_runtime_lib(folder, ver, out, wine):
     elif wine:
         def win(p):
             return 'Z:' + str(Path(p).resolve()).replace('/', '\\')
-        env = dict(os.environ, WINEDEBUG='-all', NX2NAVI_AR=win(msys / 'bin' / 'ar.exe'))
+        env = dict(os.environ, WINEDEBUG='-all', OOTPC_AR=win(msys / 'bin' / 'ar.exe'))
         run(['wine', folder / 'python' / 'python.exe', win(app / 'tools' / 'make_game.py'),
              *[win(a) if isinstance(a, Path) else a for a in args]], env=env)
     else:
         say('note: no prebuilt runtime (it is built on Windows, or with --wine): players compile runtime/ themselves')
         return
-    if not (app / 'lib' / 'libnx2navirt.a').is_file():
+    if not (app / 'lib' / 'libootpcrt.a').is_file():
         sys.exit('the prebuilt runtime was not written')
     # The release's compiler is the one players build with (toolchain.lock.json): a profile it left out of the
     # runtime (make_game.py pgo_profile says why in the lines above) their builds would leave out too
@@ -287,9 +302,8 @@ def build_runtime_lib(folder, ver, out, wine):
 
 
 def build_native(work, cc, windres):
-    from launcher.ui import art
     work.mkdir(parents=True, exist_ok=True)
-    (work / 'nx2navi.ico').write_bytes(art.navi_ico())
+    shutil.copy2(ROOT / 'runtime' / 'ootpc.ico', work / 'ootpc.ico')   # tools/make_icon.py
     shutil.copy2(ROOT / 'launcher' / 'native' / 'app.manifest', work / 'app.manifest')
     shutil.copy2(ROOT / 'launcher' / 'native' / 'res.rc', work / 'res.rc')
     res = (work / 'res.o').resolve()
@@ -302,9 +316,9 @@ def build_native(work, cc, windres):
     env = dict(os.environ, PATH=str(Path(windres[0]).parent) + os.pathsep + os.environ.get('PATH', ''))
     run([*windres, *pp, '-I', '.', 'res.rc', '-O', 'coff', '-o', res], env=env, cwd=work)
     flags = ['-municode', '-mwindows', '-O2', '-Wall', '-static', '-s']
-    stub = work / 'OOT-DEBUG-MENU.exe'
+    stub = work / 'OOT-PC.exe'
     setup = work / 'setup-stub.exe'
-    run([*cc, *flags, ROOT / 'launcher' / 'native' / 'nx2navi.c', res, '-o', stub, '-lshell32', '-lole32', '-luuid'])
+    run([*cc, *flags, ROOT / 'launcher' / 'native' / 'ootpc.c', res, '-o', stub, '-lshell32', '-lole32', '-luuid'])
     run([*cc, *flags, ROOT / 'launcher' / 'native' / 'setup.c', res, '-o', setup, '-l:libz.a', '-lshell32',
          '-lole32', '-luuid', '-ladvapi32'])
     return stub, setup
@@ -325,7 +339,7 @@ def make_setup(stub, payload, dest, ver):
     data = stub.read_bytes()
     off = len(data)
     z = payload.read_bytes()
-    trailer = b'NX2NSET1' + off.to_bytes(8, 'little') + len(z).to_bytes(8, 'little') + \
+    trailer = b'OOTPSET1' + off.to_bytes(8, 'little') + len(z).to_bytes(8, 'little') + \
         ver.encode('utf-8')[:24].ljust(24, b'\0')
     dest.write_bytes(data + z + trailer)
     return dest
@@ -344,7 +358,7 @@ def entry(path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--xlate', type=Path, required=True, help='folder with nx2navi_xlate.exe and nx2navi_xlate.id')
+    ap.add_argument('--xlate', type=Path, required=True, help='folder with ootpc_xlate.exe and ootpc_xlate.id')
     ap.add_argument('--ffx', type=Path, help="AMD's signed amd_fidelityfx_vk.dll (FidelityFX SDK 1.1.4, MIT) for FSR 3.1")
     ap.add_argument('--ffx4', type=Path, help="the folder with AMD's signed amd_fidelityfx_loader_vk.dll and "
                                               'amd_fidelityfx_upscaler_vk.dll (FSR SDK 2.4.0, MIT) for FSR 4, and its '
@@ -353,7 +367,7 @@ def main():
                                                "downloading it from NVIDIA's DLSS SDK repository")
     ap.add_argument('--no-dlss', action='store_true', help='leave NVIDIA DLSS out of the release')
     ap.add_argument('--dlssg', type=Path, metavar='DLL',
-                    help='nx2navi_dlssg.dll (tools/build_dlssg.py) for DLSS Frame Generation')
+                    help='ootpc_dlssg.dll (tools/build_dlssg.py) for DLSS Frame Generation')
     ap.add_argument('--streamline', type=Path, metavar='SDK',
                     help=f'the Streamline {streamline_pin.VERSION} SDK folder whose bin/x64 gives the Streamline and '
                          'nvngx_dlssg.dll files, instead of downloading the SDK release with --dlssg')
@@ -386,7 +400,7 @@ def main():
         pgo.fitting(a.pgo)   # the profile fits this checkout's recomp/ before anything is downloaded or built
     out = a.out
     shutil.rmtree(out, ignore_errors=True)
-    folder = out / 'OOT-DEBUG-MENU'
+    folder = out / 'OOT-PC'
     t0 = time.time()
     lock = (json.loads(a.lock.read_text(encoding='utf-8')) if a.lock
             else toolchain.make_lock(fast_repo=toolchain.FAST_REPO))
@@ -410,26 +424,33 @@ def main():
     cc, windres = native_compiler(lock)
     build_runtime_lib(folder, ver, out, a.wine)
     stub, setup_stub = build_native(out / 'native', cc, windres)
-    shutil.copy2(stub, folder / 'OOT-DEBUG-MENU.exe')
+    shutil.copy2(stub, folder / 'OOT-PC.exe')
+    # The stub in the app too: an update reaches installs from before the rename to OOT-PC, whose folder holds only
+    # OOT-DEBUG-MENU.exe, and the launcher puts this one beside it (launcher/rebrand.py).
+    (folder / 'app' / ver / 'native').mkdir(parents=True, exist_ok=True)
+    shutil.copy2(stub, folder / 'app' / ver / 'native' / 'OOT-PC.exe')
     check_folder(folder)
-    app_zip = zip_dir(folder / 'app' / ver, out / f'OOT-DEBUG-MENU-app-{ver}.zip')
-    rt_zip = zip_dir(folder / 'python', out / f'OOT-DEBUG-MENU-runtime-{runtime_id()}.zip')
+    app_zip = zip_dir(folder / 'app' / ver, out / f'OOT-PC-app-{ver}.zip')
+    rt_zip = zip_dir(folder / 'python', out / f'OOT-PC-runtime-{runtime_id()}.zip')
     payload = zip_dir(folder, out / 'native' / 'payload.zip')
-    setup = make_setup(setup_stub, payload, out / f'OOT-DEBUG-MENU-Setup-{ver}.exe', ver)
+    setup = make_setup(setup_stub, payload, out / f'OOT-PC-Setup-{ver}.exe', ver)
     notes = a.notes.read_text(encoding='utf-8') if a.notes else ''
     manifest = {'format': 1, 'version': ver, 'build': build, 'notes': notes,
                 'app': entry(app_zip), 'runtime': {'id': runtime_id(), **entry(rt_zip)},
                 'toolchain': toolchain.lock_digest(lock), 'setup': entry(setup),
                 'made': time.strftime('%Y-%m-%d %H:%M')}
-    man = out / 'OOT-DEBUG-MENU-update.json'
+    man = out / 'OOT-PC-update.json'
     man.write_text(json.dumps(manifest, indent=1), encoding='utf-8')
+    # the same manifest under the name launchers from before the rename to OOT-PC look for (launcher/feed.py)
+    legacy_man = out / 'OOT-DEBUG-MENU-update.json'
+    legacy_man.write_text(json.dumps(manifest, indent=1), encoding='utf-8')
     for p in (setup, app_zip, rt_zip, man):
         say(f'{p.name}: {p.stat().st_size / 1e6:.1f} MB')
     say(f'release folder {out} in {time.time() - t0:.0f} s')
     if a.publish:
-        cmd = ['gh', 'release', 'create', f'v{ver}', setup, app_zip, rt_zip, man, '--repo', a.feed,
-               '--title', f'OOT-DEBUG-MENU {ver}']
-        cmd += ['--notes-file', a.notes] if a.notes else ['--notes', f'OOT-DEBUG-MENU {ver}']
+        cmd = ['gh', 'release', 'create', f'v{ver}', setup, app_zip, rt_zip, man, legacy_man, '--repo', a.feed,
+               '--title', f'OOT-PC {ver}']
+        cmd += ['--notes-file', a.notes] if a.notes else ['--notes', f'OOT-PC {ver}']
         if a.draft:
             cmd.append('--draft')
         run(cmd)

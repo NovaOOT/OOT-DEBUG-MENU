@@ -110,10 +110,10 @@ static _Atomic int enabled = -1, seconds = 0, overlays = 0;
 static const char *const view2_keys[CLIP_VIEW2_MODES] = {"off", "above", "side", "front"};
 static void settings_load(void) {
     if (atomic_load(&enabled) >= 0) return;
-    atomic_store(&overlays, cfg_bool("NX2NAVI_DEBUG_CLIP_OVERLAYS") != 0);
-    int s = cfg_int("NX2NAVI_DEBUG_CLIP_SECONDS");
+    atomic_store(&overlays, cfg_bool("OOTPC_DEBUG_CLIP_OVERLAYS") != 0);
+    int s = cfg_int("OOTPC_DEBUG_CLIP_SECONDS");
     atomic_store(&seconds, s < SECONDS_MIN ? SECONDS_MIN : s > SECONDS_MAX ? SECONDS_MAX : s);
-    atomic_store(&enabled, cfg_bool("NX2NAVI_DEBUG_CLIP") != 0);
+    atomic_store(&enabled, cfg_bool("OOTPC_DEBUG_CLIP") != 0);
 }
 // Read again when the settings change (the Game tab's Performance row writes the key itself); clip_set_enabled writes
 // both, so the two agree.
@@ -121,31 +121,31 @@ int clip_enabled(void) {
     settings_load();
     static _Atomic unsigned seen = ~0u;
     unsigned v = cfg_version();
-    if (atomic_exchange(&seen, v) != v) atomic_store(&enabled, cfg_bool("NX2NAVI_DEBUG_CLIP") != 0);
+    if (atomic_exchange(&seen, v) != v) atomic_store(&enabled, cfg_bool("OOTPC_DEBUG_CLIP") != 0);
     return atomic_load(&enabled) == 1;
 }
 int clip_seconds(void) { settings_load(); return atomic_load(&seconds); }
 void clip_set_enabled(int on) {
     settings_load();
     atomic_store(&enabled, on != 0);
-    dbg_keep("NX2NAVI_DEBUG_CLIP", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_CLIP", on ? "1" : "0");
 }
 int clip_overlays(void) { settings_load(); return atomic_load(&overlays) == 1; }
 void clip_set_overlays(int on) {
     settings_load();
     atomic_store(&overlays, on != 0);
-    dbg_keep("NX2NAVI_DEBUG_CLIP_OVERLAYS", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_CLIP_OVERLAYS", on ? "1" : "0");
 }
 // read from the setting each time (a few calls a frame): the console's cfg command changes it too
 int clip_view2(void) {
-    const char *v = cfg_value("NX2NAVI_DEBUG_CLIP_VIEW2");
+    const char *v = cfg_value("OOTPC_DEBUG_CLIP_VIEW2");
     for (int i = 1; v && i < CLIP_VIEW2_MODES; i++)
         if (!strcmp(v, view2_keys[i])) return i;
     return 0;
 }
 void clip_set_view2(int mode) {
     mode = mode < 0 ? 0 : mode >= CLIP_VIEW2_MODES ? CLIP_VIEW2_MODES - 1 : mode;
-    dbg_keep("NX2NAVI_DEBUG_CLIP_VIEW2", view2_keys[mode]);
+    dbg_keep("OOTPC_DEBUG_CLIP_VIEW2", view2_keys[mode]);
 }
 const char *clip_view2_name(int mode) {
     static const char *const names[CLIP_VIEW2_MODES] = {"Off", "Above", "Beside", "In front"};
@@ -157,7 +157,7 @@ void clip_set_seconds(int s) {
     atomic_store(&seconds, s);
     char v[16];
     snprintf(v, sizeof v, "%d", s);
-    dbg_keep("NX2NAVI_DEBUG_CLIP_SECONDS", v);
+    dbg_keep("OOTPC_DEBUG_CLIP_SECONDS", v);
 }
 
 // ---- the recorder's thread and what is handed to it (lk)
@@ -1055,7 +1055,7 @@ static void saver(void *arg) {
     plat_file_mkdir_p(dir);
     struct tm tm;
     plat_local_time(&tm);
-    strftime(name, sizeof name, "OOT-DEBUG-MENU %Y-%m-%d %H-%M-%S", &tm);
+    strftime(name, sizeof name, "OOT-PC %Y-%m-%d %H-%M-%S", &tm);
     snprintf(path, sizeof path, "%s/%s.mp4", dir, name);
     int ok = write_file(path, d, o);
     free(d);

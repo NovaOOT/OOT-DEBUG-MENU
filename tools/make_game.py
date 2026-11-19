@@ -28,7 +28,7 @@ Steps, each skipped when a run before finished it for the same inputs (state in 
   7. prompts  only with button art in the kit (<kit>/prompt-art, tools/make_launcher.py and make_kit.py
               --prompt-art): tools/pad_prompts.py draws the Xbox, PlayStation, Steam Deck and keyboard and mouse button prompts
               from it into <out>/romfs-patches-* (the Controls menu's Button prompts loads them), the keys as the
-              bind_ lines of <out>/nx2navi.ini give them. Its key names everything it reads (the RomFS, the art, the
+              bind_ lines of <out>/OOT-PC.ini give them. Its key names everything it reads (the RomFS, the art, the
               tools, those lines), so it runs again only when one of them changed or a folder is gone, and running
               it makes no other step run again. A failure here leaves the game and its shaders complete.
   8. scan     tools/romfs_check.py decompresses every file of the game data once, writes <out>/romfs-check.json and
@@ -43,7 +43,7 @@ compile step keeps every object with the dependency list clang wrote for it (bui
 compiles a file again only when it, a header it includes, the flags or the compiler changed; the kit's own folder
 is not part of that key, so a kit in another folder (the launcher keeps each version in its own) reuses the objects.
 The list goes to disk every 25 objects while the compile runs, so a compile that is cut short keeps what it finished.
-A kit with lib/libnx2navirt.a built by --make-runtime-lib for the same runtime/ and the same compiler links the
+A kit with lib/libootpcrt.a built by --make-runtime-lib for the same runtime/ and the same compiler links the
 runtime from it and compiles only the runtime files that include headers written per install. The new ocarina.exe
 replaces the old one only once it links (with lld when the toolchain has it), so a failed build leaves the last good
 one in place. Compiles run on every logical processor, or on as many as the free memory allows (default_jobs; --jobs
@@ -56,7 +56,7 @@ Profile-guided build (docs/building.md, "Profile-guided build"). A kit with data
 the runtime with it too (pgo_profile); functions the profile never saw run are optimised for size. The profile is
 left out, and the build is the one a kit without a profile makes (the lifted code at -O1), when its record names
 another recomp/ than this kit's, when the compilers cannot read the file (one trial compile before the others start),
-or with NX2NAVI_PGO=off. --pgo gen (NX2NAVI_PGO=gen, which a launcher started with it passes on) builds an
+or with OOTPC_PGO=off. --pgo gen (OOTPC_PGO=gen, which a launcher started with it passes on) builds an
 instrumented game instead: it adds its counts to <out>/pgo/*.profraw every minute and at exit, for tools/pgo.py merge.
 
     python tools/make_game.py --make-runtime-lib <kit>/lib --msys <ucrt64>   # the release's prebuilt runtime
@@ -64,7 +64,7 @@ instrumented game instead: it adds its counts to <out>/pgo/*.profraw every minut
 On Linux the same steps make <out>/ocarina with the clang, clang++ and lld on PATH and the system's libraries
 (Vulkan, SDL3, Opus, libvpx, dav1d, zstd; libstdc++ static, rpath $ORIGIN), as tools/build_game.py's Linux
 build does: the runtime's *_sdl.* and platform/linux.c take the place of its *_win.*, platform/win32.c and
-nx2navi.rc, and --msys is not used. VMA_INCLUDE can name the directory holding vk_mem_alloc.h; otherwise the
+ootpc.rc, and --msys is not used. VMA_INCLUDE can name the directory holding vk_mem_alloc.h; otherwise the
 system header or the pinned download is used. README-BuildKit.md, "Linux", lists the packages.
 
 Game content is written only to --out; a downloaded VMA header is cached in toolchain/vma, and --make-runtime-lib
@@ -182,11 +182,11 @@ else:   # tools/build_game.py's Linux libraries, plus dav1d (the AV1 movies) and
                  '-lm', '-lpthread', '-ldl']
 SYSTEM_DLLS_SKIP = {'vulkan-1.dll'}   # the graphics driver's loader, never a copy
 EXE_NAME = 'ocarina.exe' if WIN else 'ocarina'
-XLATE_NAME = 'nx2navi_xlate.exe' if WIN else 'nx2navi_xlate'
+XLATE_NAME = 'ootpc_xlate.exe' if WIN else 'ootpc_xlate'
 # Headers this build writes per install (gen.py, romfs_index.py): a runtime source that includes one, directly or
 # through a runtime header, is compiled on the player's PC; every other runtime source can come prebuilt.
 GENERATED_HEADERS = ('layout.h', 'patches.h', 'romfs_config.h')
-RUNTIME_LIB = 'libnx2navirt.a'
+RUNTIME_LIB = 'libootpcrt.a'
 FFX4_DLLS = ('amd_fidelityfx_loader_vk.dll', 'amd_fidelityfx_upscaler_vk.dll')   # AMD's FSR SDK 2.4, for FSR 4
 FFX4_FG_DLL = 'amd_fidelityfx_framegeneration_vk.dll'   # ... and its frame generation, with the two above
 RUNTIME_PATTERNS = ('*.c', '*.cpp', 'platform/*.c', 'ui/*.cpp', 'third_party/imgui/*.cpp',
@@ -794,7 +794,7 @@ def copy_if_changed(src, dst):
         pass
     replacement = None
     try:
-        fd, name = tempfile.mkstemp(dir=dst.parent, prefix='.nx2navi-copy-')
+        fd, name = tempfile.mkstemp(dir=dst.parent, prefix='.ootpc-copy-')
         os.close(fd)
         replacement = Path(name)
         shutil.copy2(src, replacement)
@@ -814,12 +814,12 @@ DLSS_DLL, DLSS_NOTICE = 'nvngx_dlss.dll', 'nvngx_dlss-NOTICE.txt'   # tools/dlss
 # The Linux library's name ends in the DLSS version (tools/dlss_pin.py): it is found by its prefix, as the runtime
 # finds it beside the game (runtime/resolution.c dlss_dll).
 DLSS_SO_PREFIX, DLSS_SO_NOTICE = 'libnvidia-ngx-dlss.so.', 'libnvidia-ngx-dlss-NOTICE.txt'
-# DLSS Frame Generation (runtime/vk_dlssg.c) loads these from beside the game: nx2navi_dlssg.dll (runtime/dlssg/,
+# DLSS Frame Generation (runtime/vk_dlssg.c) loads these from beside the game: ootpc_dlssg.dll (runtime/dlssg/,
 # tools/build_dlssg.py), NVIDIA Streamline's interposer and the plugins it uses, and NGX's frame generation library.
 # A release carries them with their licence texts in bin/dlssg/ (tools/make_launcher.py --dlssg); without the whole set
 # the game leaves DLSS Frame Generation off.
 DLSSG_DIR = 'dlssg'
-DLSSG_FILES = ('nx2navi_dlssg.dll', 'sl.interposer.dll', 'sl.common.dll', 'sl.dlss_g.dll', 'sl.pcl.dll', 'sl.reflex.dll',
+DLSSG_FILES = ('ootpc_dlssg.dll', 'sl.interposer.dll', 'sl.common.dll', 'sl.dlss_g.dll', 'sl.pcl.dll', 'sl.reflex.dll',
                'nvngx_dlssg.dll')
 
 
@@ -876,6 +876,24 @@ def place_dlssg(out):
     for p in files:
         copy_if_changed(p, out / p.name)
     return len(files)
+
+
+# The SPIR-V optimiser (runtime/spirv_opt.c) loads ootpc_spvopt.dll from beside the game; tools/build_spvopt.py makes
+# it with the Visual C++ runtime DLLs it needs and SPIRV-Tools' licence text, in build/spvopt/ (a kit: bin/spvopt/).
+# Without it the game sends its shaders to the driver as translated.
+SPVOPT_DIR = 'spvopt'
+
+
+def place_spvopt(out):
+    """The SPIR-V optimiser's folder beside the game: the kit's bin/spvopt/ or a source build's build/spvopt/.
+    Returns how many files it holds, 0 when neither has ootpc_spvopt.dll."""
+    for src in (KIT / 'bin' / SPVOPT_DIR, KIT / 'build' / SPVOPT_DIR):
+        if (src / 'ootpc_spvopt.dll').is_file():
+            files = sorted(p for p in src.iterdir() if p.is_file())
+            for p in files:
+                copy_if_changed(p, out / p.name)
+            return len(files)
+    return 0
 
 
 def copy_dlls(exe, msys_bin, out):
@@ -1234,6 +1252,8 @@ def runtime_headers(rt):
     the repository as source only, so from a source checkout they are not there until they are built, and every
     runtime file that includes one would fail to compile. A kit carries them built; a release's kit carries neither
     tools/build_shaders.py nor the compilers it calls, and skips this."""
+    import build_menu_art
+    build_menu_art.build(Path(rt).parent)
     try:
         import build_shaders
     except ModuleNotFoundError:
@@ -1282,7 +1302,7 @@ def preflight(msys, jobs, sources=None):
               f'The compiler ({version}) or a library\'s headers are older than the runtime needs: the releases are '
               f'built with clang 23, and the Vulkan headers come ' +
               (f'from {vulkan[1]}' if vulkan else 'from the system') + '. The errors above name what is missing.'))
-    with tempfile.TemporaryDirectory(prefix='nx2navi-check-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='ootpc-check-') as tmp:
         probe = Path(tmp) / 'probe.c'
         probe.write_text('int main(void) { return 0; }\n', encoding='ascii')
         ld = (['-fuse-ld=lld'] if shutil.which('ld.lld') else []) + ['-no-pie']
@@ -1453,7 +1473,10 @@ def clang_version(clang, env):
 
 
 def runtime_digest():
-    return tree_digest(KIT / 'runtime', ('**/*',))
+    # The skin is embedded during compilation, so changing its authored PNGs must invalidate the runtime too.
+    sources=tree_digest(KIT / 'runtime', ('**/*',))
+    skin=tree_digest(KIT / 'generated' / 'menu-ui', ('*.png',))
+    return sha256_bytes((sources+'|'+skin).encode())
 
 
 # The x86-64 levels the lifted code is built and tested for (docs/building.md, "Checks"), as the macros clang defines
@@ -1527,7 +1550,7 @@ PGO_USE = '-fprofile-use='
 # A static function's profile name carries its source's path by default; the file's base name alone keeps the names
 # equal between the folder the profile was trained in and this kit's (tools/build_game.py PGO_NAMES).
 PGO_NAMES = ['-mllvm', '-static-func-full-module-prefix=false']
-PGO_MODE = ''                    # --pgo; without it NX2NAVI_PGO decides (pgo_mode)
+PGO_MODE = ''                    # --pgo; without it OOTPC_PGO decides (pgo_mode)
 
 
 def pgo_name():
@@ -1537,8 +1560,8 @@ def pgo_name():
 
 def pgo_mode():
     """'gen': build an instrumented game; 'off': build without the kit's profile; '': build with it when it fits.
-    From --pgo, else from NX2NAVI_PGO, which reaches a build the launcher starts through its environment."""
-    mode = (PGO_MODE or os.environ.get('NX2NAVI_PGO', '')).strip().lower()
+    From --pgo, else from OOTPC_PGO, which reaches a build the launcher starts through its environment."""
+    mode = (PGO_MODE or os.environ.get('OOTPC_PGO', '')).strip().lower()
     return mode if mode in ('gen', 'off') else ''
 
 
@@ -1608,9 +1631,9 @@ def pgo_use_flags(profile):
 def pgo_gen_flags(out):
     """Every compile's flags for an instrumented build of the game folder out. The folder for the counts is baked in
     as an absolute path: left relative, the game would resolve it against whatever folder it was started from.
-    NX2NAVI_PGO_GEN: the runtime adds the counts to the file every minute and when it ends the process
+    OOTPC_PGO_GEN: the runtime adds the counts to the file every minute and when it ends the process
     (runtime/platform/win32.c pgo_flush_thread, plat_exit)."""
-    return [f'-fprofile-generate={(Path(out) / PGO_RAW).as_posix()}', *PGO_NAMES, '-DNX2NAVI_PGO_GEN']
+    return [f'-fprofile-generate={(Path(out) / PGO_RAW).as_posix()}', *PGO_NAMES, '-DOOTPC_PGO_GEN']
 
 
 def pgo_trial(profile, compilers, env, work):
@@ -1621,7 +1644,7 @@ def pgo_trial(profile, compilers, env, work):
     try:
         work.mkdir(parents=True, exist_ok=True)
         src, obj = work / 'trial.c', work / 'trial.o'
-        src.write_text('int nx2navi_pgo_trial(int x) { return x + 1; }\n', encoding='ascii')
+        src.write_text('int ootpc_pgo_trial(int x) { return x + 1; }\n', encoding='ascii')
         for cc in compilers:
             cmd = [*map(str, cc), '-c', '-std=gnu11', '-O2', '-w', *pgo_use_flags(profile), '-o', str(obj), str(src)]
             try:
@@ -1639,7 +1662,7 @@ def pgo_trial(profile, compilers, env, work):
 
 def pgo_profile(clang, env, work, fast=None, msys=None):
     """(the kit's execution profile, '') when this build compiles with it, else (None, why not). It is left out, and
-    the build is the one a kit without a profile makes, when the kit has none, with NX2NAVI_PGO=off, off Windows
+    the build is the one a kit without a profile makes, when the kit has none, with OOTPC_PGO=off, off Windows
     (the profile is trained on the Windows build), when its record names another recomp/ (pgo_record), and when a
     compiler of this build cannot read it (pgo_trial; fast: fast_clang's compiler, which compiles the lifted code,
     with msys as its sysroot). work: a folder of its own for the trial compile."""
@@ -1647,7 +1670,7 @@ def pgo_profile(clang, env, work, fast=None, msys=None):
     if not profile:
         return None, 'this kit has no execution profile'
     if pgo_mode() == 'off':
-        return None, f'the execution profile {profile.name} is left out (NX2NAVI_PGO=off)'
+        return None, f'the execution profile {profile.name} is left out (OOTPC_PGO=off)'
     if not WIN:
         return None, f'the execution profile {profile.name} is for the Windows build'
     why = pgo_record(profile)
@@ -1679,7 +1702,7 @@ def pgo_gen_check(clangxx, env, work, msys, ld):
         shutil.rmtree(work, ignore_errors=True)
     if p.returncode:
         said = (p.stderr.strip().splitlines() or [f'exit code {p.returncode}'])[0][-300:]
-        fail('an instrumented build (NX2NAVI_PGO=gen) needs the compiler\'s profile runtime, and these build tools do '
+        fail('an instrumented build (OOTPC_PGO=gen) needs the compiler\'s profile runtime, and these build tools do '
              f'not link it ({said}). ' +
              (f'Unpack the MSYS2 package mingw-w64-ucrt-x86_64-compiler-rt of this clang\'s version into {msys.parent}'
               if WIN else 'Install the compiler-rt package of this clang\'s version'))
@@ -1699,31 +1722,31 @@ def pgo_gen_record(out, clang, env):
 def guest_opt_ini(out):
     """Read the Game tab's CPU optimisation choice for the next build, unless the environment overrides it.
     This setting is available on every GPU, independently of low_end_gpu."""
-    if os.environ.get('NX2NAVI_GUEST_OPT', '').strip():
+    if os.environ.get('OOTPC_GUEST_OPT', '').strip():
         return
     found = ''
     try:
-        for line in (Path(out) / 'nx2navi.ini').read_text(encoding='utf-8', errors='replace').splitlines():
+        for line in (Path(out) / 'OOT-PC.ini').read_text(encoding='utf-8', errors='replace').splitlines():
             key, eq, value = line.partition('=')
             key = key.strip().lower()
             value = value.split('#')[0].split(';')[0].strip().strip('"')
-            if eq and key in ('guest_opt', 'nx2navi_guest_opt') and value:
+            if eq and key in ('guest_opt', 'ootpc_guest_opt') and value:
                 found = value
     except OSError:
         pass
     if found in ('1', '2'):
-        os.environ['NX2NAVI_GUEST_OPT'] = found
+        os.environ['OOTPC_GUEST_OPT'] = found
 
 
 def runtime_cmd(clang, clangxx, inc, level=0, fast=None, msys=None, first=(), pgo=()):
     """fast: fast_clang's compiler for the lifted code, with msys as its sysroot. first: include flags that go
     ahead of inc for the runtime's sources only (vulkan_headers); the lifted code includes none of those headers,
-    and its command, which is part of its objects' keys, stays as it was. NX2NAVI_GUEST_OPT (an environment variable,
-    or guest_opt in nx2navi.ini) 2 builds the lifted code at -O2; by default -O1: the game's own threads run it and
+    and its command, which is part of its objects' keys, stays as it was. OOTPC_GUEST_OPT (an environment variable,
+    or guest_opt in OOT-PC.ini) 2 builds the lifted code at -O2; by default -O1: the game's own threads run it and
     bound the frame on a slower CPU; the build takes several times longer. pgo: the flags of a profile-guided build
     for every compile (pgo_use_flags, pgo_gen_flags); with them the lifted code is built at -O2 too, the level the
     profile's inlining and its layout of hot and cold code work at. Without them every command is what it was."""
-    guest_opt = '-O2' if pgo or os.environ.get('NX2NAVI_GUEST_OPT', '').strip() == '2' else '-O1'   # -O1 unless guest_opt = 2
+    guest_opt = '-O2' if pgo or os.environ.get('OOTPC_GUEST_OPT', '').strip() == '2' else '-O1'   # -O1 unless guest_opt = 2
     def cmd_for(src, dst):
         cpp = src.suffix in ('.cpp', '.cxx')
         # the lifted code at -O1 (its size makes -O2 slow to build), the runtime at -O2; neither may assume strict
@@ -1743,7 +1766,7 @@ def runtime_cmd(clang, clangxx, inc, level=0, fast=None, msys=None, first=(), pg
 
 def make_runtime_lib(dest, msys, jobs, obj=None):
     """--make-runtime-lib: compile every runtime source that does not include a per-install header into
-    <dest>/libnx2navirt.a, with runtime-lib.json naming the runtime/ tree and the compiler it was built from. The
+    <dest>/libootpcrt.a, with runtime-lib.json naming the runtime/ tree and the compiler it was built from. The
     objects stay in obj (default <dest>/obj), which a release keeps out of what it ships. A kit with an execution
     profile compiles the library with it, under pgo_profile's conditions; runtime-lib.json then names the profile."""
     dest = Path(dest).resolve()
@@ -1752,12 +1775,14 @@ def make_runtime_lib(dest, msys, jobs, obj=None):
     obj.mkdir(parents=True, exist_ok=True)
     clang, clangxx, env, vma = toolchain(msys)
     rt = KIT / 'runtime'
+    import build_menu_art
+    build_menu_art.build(rt.parent)
     tainted = per_install_names()
     srcs = [(p, obj / name) for p, name in runtime_sources() if not per_install(p, tainted)]
     inc = ['-I', str(rt), '-I', str(rt / 'third_party' / 'imgui'), '-I', str(vma)]
     cache = ObjectCache(obj / 'objects.json', {'<kit>': KIT})
     if pgo_mode() == 'gen':
-        fail('the prebuilt runtime is never an instrumented one: an instrumented build (NX2NAVI_PGO=gen) compiles '
+        fail('the prebuilt runtime is never an instrumented one: an instrumented build (OOTPC_PGO=gen) compiles '
              'runtime/ itself')
     profile, why = pgo_profile(clang, env, obj / 'pgo-trial')
     say(f'  the runtime is compiled with the execution profile {profile.name}' if profile else f'  {why}')
@@ -1774,9 +1799,9 @@ def make_runtime_lib(dest, msys, jobs, obj=None):
     lib.unlink(missing_ok=True)
     rsp = dest / 'ar.rsp'
     rsp.write_text('\n'.join('"%s"' % o.as_posix() for _, o in srcs), encoding='utf-8')
-    ar = os.environ.get('NX2NAVI_AR') or (str(msys / 'bin' / 'ar.exe') if WIN else shutil.which('ar'))
+    ar = os.environ.get('OOTPC_AR') or (str(msys / 'bin' / 'ar.exe') if WIN else shutil.which('ar'))
     if not ar:
-        fail('ar is not on PATH: install binutils or set NX2NAVI_AR')
+        fail('ar is not on PATH: install binutils or set OOTPC_AR')
     if subprocess.run([ar, 'rcs', str(lib), '@' + str(rsp)], env=env).returncode:
         fail('the runtime library could not be archived')
     meta = {'runtime': runtime_digest(), 'compiler': clang_version(clang, env),
@@ -1806,17 +1831,17 @@ def romfs_index(out, gen):
 
 
 def windres_command(msys, rco):
-    """MSYS2's windres on nx2navi.rc, run with runtime/ as the working directory (compile_resources says why)."""
+    """MSYS2's windres on ootpc.rc, run with runtime/ as the working directory (compile_resources says why)."""
     pp = ('-E', '-xc', '-DRC_INVOKED')   # windres's own preprocessor flags, which --preprocessor replaces
     return [str(msys / 'bin' / 'windres.exe'), '--use-temp-file', f'--preprocessor={msys / "bin" / "gcc.exe"}',
-            *(f'--preprocessor-arg={a}' for a in pp), '-O', 'coff', '-i', 'nx2navi.rc', '-o', str(rco)]
+            *(f'--preprocessor-arg={a}' for a in pp), '-O', 'coff', '-i', 'ootpc.rc', '-o', str(rco)]
 
 
 RC_LINE = re.compile(r'(\d+)\s+(24|ICON)\s+"([^"]+)"')
 
 
 def resource_file(rt):
-    """runtime/nx2navi.rc as a .res file (the format Windows' resource compiler writes): the manifest as resource 24,
+    """runtime/ootpc.rc as a .res file (the format Windows' resource compiler writes): the manifest as resource 24,
     the icon's images as RT_ICON 1..n and their directory as RT_GROUP_ICON, US English as windres gives them. lld
     takes a .res among its inputs and builds the exe's resource section from it.
 
@@ -1828,7 +1853,7 @@ def resource_file(rt):
         return struct.pack('<II', len(data), 8 + len(head)) + head + data + b'\0' * (-len(data) % 4)
 
     out = bytearray(struct.pack('<II', 0, 32) + struct.pack('<HHHHIHHII', 0xffff, 0, 0xffff, 0, 0, 0, 0, 0, 0))
-    for line in (rt / 'nx2navi.rc').read_text(encoding='utf-8').splitlines():
+    for line in (rt / 'ootpc.rc').read_text(encoding='utf-8').splitlines():
         m = RC_LINE.fullmatch(line.strip())
         if not m:
             continue
@@ -1849,9 +1874,9 @@ def resource_file(rt):
 
 
 def compile_resources(msys, rt, obj, env, lld=False):
-    """With lld (lld=True) obj/nx2navi.res written by resource_file, which lld links in itself; else windres below.
+    """With lld (lld=True) obj/ootpc.res written by resource_file, which lld links in itself; else windres below.
 
-    runtime/nx2navi.rc into obj/nx2navi_rc.o: the manifest of the game's exe (per-monitor DPI awareness, so the
+    runtime/ootpc.rc into obj/ootpc_rc.o: the manifest of the game's exe (per-monitor DPI awareness, so the
     picture keeps the monitor's real size rather than one Windows stretches) and its icon.
 
     windres preprocesses the .rc with gcc through one command line it writes itself, quoting each path that holds a
@@ -1869,12 +1894,12 @@ def compile_resources(msys, rt, obj, env, lld=False):
     The object is written under another name and replaces the old one only when its bytes differ, so an unchanged
     resource keeps its time and does not make the link key change (a rebuild with nothing new does not link again)."""
     if lld:
-        res = obj / 'nx2navi.res'
+        res = obj / 'ootpc.res'
         data = resource_file(rt)
         if not res.is_file() or res.read_bytes() != data:   # same bytes: keep the time, so the link key holds
             res.write_bytes(data)
         return res
-    rco, new = obj / 'nx2navi_rc.o', obj / 'nx2navi_rc.o.new'
+    rco, new = obj / 'ootpc_rc.o', obj / 'ootpc_rc.o.new'
     tmp = obj / 'windres-tmp'
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir()
@@ -1885,7 +1910,7 @@ def compile_resources(msys, rt, obj, env, lld=False):
         shutil.rmtree(tmp, ignore_errors=True)
     if r.returncode:
         new.unlink(missing_ok=True)
-        fail(f'windres failed on runtime/nx2navi.rc: {r.stderr.strip()[:400]}')
+        fail(f'windres failed on runtime/ootpc.rc: {r.stderr.strip()[:400]}')
     if rco.is_file() and rco.read_bytes() == new.read_bytes():
         new.unlink()
     else:
@@ -1942,7 +1967,7 @@ def xlate_id():
     worked out before the steps run (steps_to_run), and the shaders step itself says what is missing when it runs."""
     for d in (KIT / 'bin', KIT / 'build' / 'xlate'):
         if (d / XLATE_NAME).is_file():
-            return sha256_file(d / 'nx2navi_xlate.id')
+            return sha256_file(d / 'ootpc_xlate.id')
     return 'missing'
 
 
@@ -1987,7 +2012,7 @@ def retune_due(obj, msys):
 def write_runtime_map(full, dst):
     """The linker's map (the build cache's, which tools/prof_report.py reads) without the lines of the lifted game
     functions (f_<hex>): the runtime's and the libraries' symbols, a few MiB, next to the exe to send with a crash log
-    or a NX2NAVI_PROFILE profile of the render thread."""
+    or a OOTPC_PROFILE profile of the render thread."""
     lifted = re.compile(r'\bf_[0-9a-f]{4,}\b')   # any line naming a lifted function: its symbol or its section
     try:
         with open(full, encoding='utf-8', errors='replace') as i, open(dst, 'w', encoding='utf-8') as o:
@@ -2002,7 +2027,7 @@ def step_compile(out, cache_dir, msys, jobs, romfs_job=None, update=False):
     """romfs_job: the RomFS step still running beside this one (a first build). Everything that does not include
     romfs_config.h compiles meanwhile; the RomFS index and the few files that include it follow once it is done.
     update: a rebuild after a kit update (lifted_level). The kit's execution profile, when this build can use it
-    (pgo_profile), goes into every compile; NX2NAVI_PGO=gen makes an instrumented game instead (pgo_gen_flags), its
+    (pgo_profile), goes into every compile; OOTPC_PGO=gen makes an instrumented game instead (pgo_gen_flags), its
     runtime compiled here too, as the prebuilt one counts nothing."""
     lift, gen, obj = cache_dir / 'lift', cache_dir / 'gen', cache_dir / 'obj'
     gen.mkdir(parents=True, exist_ok=True)
@@ -2032,8 +2057,8 @@ def step_compile(out, cache_dir, msys, jobs, romfs_job=None, update=False):
     now = cpu_level(clang, env)
     level = lifted_level(obj, now, update)
     guest_opt_ini(out)
-    if os.environ.get('NX2NAVI_GUEST_OPT', '').strip() == '2':   # runtime_cmd's guest_opt
-        say('  lifted code at -O2 (NX2NAVI_GUEST_OPT): a long build')
+    if os.environ.get('OOTPC_GUEST_OPT', '').strip() == '2':   # runtime_cmd's guest_opt
+        say('  lifted code at -O2 (OOTPC_GUEST_OPT): a long build')
     if level == now:
         say(f'  the lifted code is built for x86-64-v{level}, this processor\'s level' if level else
             '  the lifted code is built for generic x86-64: the processor\'s level could not be read')
@@ -2049,7 +2074,7 @@ def step_compile(out, cache_dir, msys, jobs, romfs_job=None, update=False):
     profile = None
     if gen_counts:
         pgo = pgo_gen_flags(out)
-        say(f'  an instrumented build (NX2NAVI_PGO=gen): the lifted code at -O2 and a slower game, which adds its '
+        say(f'  an instrumented build (OOTPC_PGO=gen): the lifted code at -O2 and a slower game, which adds its '
             f'counts to {out / PGO_RAW} every minute and at exit')
     else:
         profile, why = pgo_profile(clang, env, cache_dir / 'pgo-trial', fast, msys)
@@ -2132,7 +2157,7 @@ def step_compile(out, cache_dir, msys, jobs, romfs_job=None, update=False):
         ld = ld + ['-no-pie', '-Wl,-z,noexecstack', '-Wl,-rpath,$ORIGIN']
     if gen_counts:   # the link takes in the profile runtime, which writes the counts
         ld.append('-fprofile-generate')
-    # the link map feeds tools/prof_report.py (symbols for an NX2NAVI_PROFILE sampling profile); both linkers write one.
+    # the link map feeds tools/prof_report.py (symbols for an OOTPC_PROFILE sampling profile); both linkers write one.
     # -Xlinker passes the path as one argument; -Wl, would cut it at every comma of the game folder's path (issue #470)
     ld += ['-Xlinker', '--Map=' + (cache_dir / 'ocarina.map').as_posix()]
     lib = ['-Wl,--whole-archive', str(prebuilt[0]), '-Wl,--no-whole-archive'] if prebuilt else []
@@ -2159,12 +2184,12 @@ def step_compile(out, cache_dir, msys, jobs, romfs_job=None, update=False):
         except PermissionError:
             tmp.unlink(missing_ok=True)
             fail(f'{exe} is in use: close the game and try again')
-        write_runtime_map(cache_dir / 'ocarina.map', out / 'nx2navi.map')   # next to the exe, to send with a crash log
+        write_runtime_map(cache_dir / 'ocarina.map', out / 'ootpc.map')   # next to the exe, to send with a crash log
         state_link.write_text(link_key, encoding='utf-8')
     copy_if_changed(gen / 'romfs-index.bin', out / 'romfs-index.bin')
     xlate = xlate_source()
     note_cache_translator(out)   # before the new translator replaces the one the shader cache was made with
-    for name in (XLATE_NAME, 'nx2navi_xlate.id'):
+    for name in (XLATE_NAME, 'ootpc_xlate.id'):
         copy_if_changed(xlate / name, out / name)
     if (KIT / 'bin' / 'amd_fidelityfx_vk.dll').is_file():   # FSR 3.1 (runtime/vk_ffx.cpp)
         copy_if_changed(KIT / 'bin' / 'amd_fidelityfx_vk.dll', out / 'amd_fidelityfx_vk.dll')
@@ -2177,7 +2202,9 @@ def step_compile(out, cache_dir, msys, jobs, romfs_job=None, update=False):
     if kept:
         say(f'  {kept}')
     if WIN and place_dlssg(out):   # DLSS Frame Generation (runtime/vk_dlssg.c): Windows DLLs too
-        say('  DLSS Frame Generation: nx2navi_dlssg.dll, Streamline and nvngx_dlssg.dll beside the game')
+        say('  DLSS Frame Generation: ootpc_dlssg.dll, Streamline and nvngx_dlssg.dll beside the game')
+    if WIN and place_spvopt(out):   # the SPIR-V optimiser (runtime/spirv_opt.c)
+        say('  shader optimiser: ootpc_spvopt.dll and the Visual C++ runtime beside the game')
     if (KIT / 'tools' / 'randomizer.py').is_file():   # the Randomizer tab runs it from here (runtime/randomizer.c find_tool)
         (out / 'tools').mkdir(exist_ok=True)
         copy_if_changed(KIT / 'tools' / 'randomizer.py', out / 'tools' / 'randomizer.py')
@@ -2197,7 +2224,7 @@ SHADER_BEAT_S = 10     # a progress event at least this often while the step run
 
 def shader_progress(phase, done, total, quiet_s, elapsed_s, build_only=False):
     """The shaders step's progress event fields: the translation fills the first half of the bar, the build into the
-    driver's cache the second (nx2navi.exe prints both counts, runtime/gfx_shader.c prepare_files and
+    driver's cache the second (ocarina.exe prints both counts, runtime/gfx_shader.c prepare_files and
     runtime/vk_pipeline.c lb_warm_prepared); before either count, reading the game's shaders. quiet_s: seconds since a
     count last moved, said once it passes SHADER_STALL_S, so a slow step never looks frozen without a word. The
     detail ends without a full stop: the launcher adds one (launcher/ui/app.py).
@@ -2220,7 +2247,7 @@ def shader_progress(phase, done, total, quiet_s, elapsed_s, build_only=False):
 
 
 # In the game's shader-cache/: the translator identities its translations are of, newest first (runtime/gfx_shader.c,
-# "Carry"): '#' comment lines, then one identity a line in 64 hex digits, the content of nx2navi_xlate.id.
+# "Carry"): '#' comment lines, then one identity a line in 64 hex digits, the content of ootpc_xlate.id.
 SHADER_IDS = 'identities.txt'
 HEX64 = re.compile(r'[0-9a-fA-F]{64}')
 
@@ -2244,7 +2271,7 @@ def note_cache_translator(out):
     if not cache.is_dir() or ids.exists():
         return
     try:
-        old = (out / 'nx2navi_xlate.id').read_text(encoding='ascii', errors='replace').strip()[:64]
+        old = (out / 'ootpc_xlate.id').read_text(encoding='ascii', errors='replace').strip()[:64]
     except OSError:
         return
     if not HEX64.fullmatch(old):
@@ -2256,16 +2283,16 @@ def note_cache_translator(out):
 
 
 def shader_carry(out):
-    """Whether the game carries the shaders prepared before an update over (runtime/gfx_shader.c, NX2NAVI_SHADER_CARRY,
-    on unless the environment or nx2navi.ini sets it to 0) and there are some: shader-prepared.bin is written by a
+    """Whether the game carries the shaders prepared before an update over (runtime/gfx_shader.c, OOTPC_SHADER_CARRY,
+    on unless the environment or OOT-PC.ini sets it to 0) and there are some: shader-prepared.bin is written by a
     finished preparation, and the cache must name the translator its translations are of (SHADER_IDS,
     note_cache_translator), else the game has nothing to carry them over by."""
-    if os.environ.get('NX2NAVI_SHADER_CARRY', '').strip() == '0':
+    if os.environ.get('OOTPC_SHADER_CARRY', '').strip() == '0':
         return False
     try:
-        for line in (out / 'nx2navi.ini').read_text(encoding='utf-8-sig', errors='replace').splitlines():
+        for line in (out / 'OOT-PC.ini').read_text(encoding='utf-8-sig', errors='replace').splitlines():
             k, eq, v = line.strip().partition('=')
-            if eq and k.strip().upper().removeprefix('NX2NAVI_') == 'SHADER_CARRY' and v.strip().strip('"') == '0':
+            if eq and k.strip().upper().removeprefix('OOTPC_').removeprefix('NX2NAVI_') == 'SHADER_CARRY' and v.strip().strip('"') == '0':
                 return False
     except OSError:
         pass
@@ -2315,7 +2342,7 @@ def seed_changed(out):
 
 def shader_run(cmd, cwd=None, build_only=False):
     """Runs a shader preparation command and returns its exit code. Its output is read as it comes: the counts
-    nx2navi.exe prints become progress events, the other lines go on to the log, and while nothing moves an event
+    ocarina.exe prints become progress events, the other lines go on to the log, and while nothing moves an event
     every few seconds keeps saying the step is running and for how long. build_only: shader_progress."""
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding='utf-8', errors='replace', bufsize=1)
@@ -2377,7 +2404,7 @@ def refresh_pipeline_seed(out):
 
 def warm_driver_cache(out):
     """After an update that carries the shaders over: every prepared stage library is built into the graphics driver's
-    cache again (`nx2navi.exe --warm-shaders`). It takes seconds while the driver still has them. It takes minutes when
+    cache again (`ocarina.exe --warm-shaders`). It takes seconds while the driver still has them. It takes minutes when
     the update changed what a library is built with, which gives each one another entry in the driver's cache: without
     this run every pipeline a draw first needed then compiled in play, which skipped that draw for some frames or made
     it wait (on an RX 7900 XT 100 to 340 ms a library against 3 ms from the cache, after dynamic vertex input was
@@ -2412,7 +2439,7 @@ def step_shaders(out, update=False):
     for d in (KIT / 'bin', KIT / 'build' / 'xlate'):
         if (d / XLATE_NAME).is_file():
             note_cache_translator(out)
-            for name in (XLATE_NAME, 'nx2navi_xlate.id'):
+            for name in (XLATE_NAME, 'ootpc_xlate.id'):
                 copy_if_changed(d / name, out / name)
             break
     cmd = [sys.executable, '-u', str(KIT / 'tools' / 'prepare_shaders.py'), str(out), '--romfs', str(out / 'romfs'),
@@ -2490,10 +2517,10 @@ def prompt_art_dir():
 
 
 def bind_lines(out):
-    """The bind_ lines of the game folder's nx2navi.ini, comments cut off: the keys the keyboard and mouse prompts
+    """The bind_ lines of the game folder's OOT-PC.ini, comments cut off: the keys the keyboard and mouse prompts
     show (tools/pad_prompts.py pc_keys reads the same lines)."""
     try:
-        text = (out / 'nx2navi.ini').read_text(encoding='utf-8', errors='replace')
+        text = (out / 'OOT-PC.ini').read_text(encoding='utf-8', errors='replace')
     except OSError:
         return []
     lines = (ln.split('#')[0].split(';')[0].strip() for ln in text.splitlines())
@@ -2542,7 +2569,7 @@ def keep_awake():
     if os.name != 'nt':
         if AWAKE is None:
             try:
-                AWAKE = subprocess.Popen(['systemd-inhibit', '--what=sleep', '--mode=block', '--who=NX2navi',
+                AWAKE = subprocess.Popen(['systemd-inhibit', '--what=sleep', '--mode=block', '--who=OOT-PC',
                                           '--why=Building the game', 'cat'], stdin=subprocess.PIPE,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                          start_new_session=True)   # a Ctrl+C meant for the build leaves the lock
@@ -2647,7 +2674,7 @@ def step_key(step, identity, out=None):
     the mods' code cheats and ExeFS patches (mod_digest); compile: the lift, the runtime sources, this script and the
     processor (cpu_tag); shaders: the compile without the mods' code, the preparing script and the translator;
     prompts: the game files, the kit's button art, the version of the tools that draw it (PROMPT_TOOLS), the bind_
-    lines of nx2navi.ini, and whether every folder it writes is still there; scan: the game files, the check's version
+    lines of OOT-PC.ini, and whether every folder it writes is still there; scan: the game files, the check's version
     (SCAN_TOOL) and whether its report is still there. The compile's key also names the kit's execution profile or
     an instrumented build (pgo_tag); the shaders' key does not, as neither changes what the shaders are prepared
     from."""
@@ -2669,7 +2696,7 @@ def step_key(step, identity, out=None):
         return lift
 
     def compile_of(lift):
-        return (f'compile|{lift}|{tree_digest(KIT / "runtime", ("**/*",))}|{sha256_file(Path(__file__))}'
+        return (f'compile|{lift}|{runtime_digest()}|{sha256_file(Path(__file__))}'
                 f'|{kit_version()}|cpu {cpu_tag()}')
     if step == 'compile':
         return compile_of(lift) + pgo_tag()
@@ -2684,6 +2711,35 @@ def out_path(arg):
     its server and share instead (a UNC path), which is a second connection to the same share, and some servers drop
     that one under the compilers' load while the mapped drive stays up."""
     return Path(os.path.abspath(arg)) if WIN else Path(arg).resolve()
+
+
+# A game folder from before the project was renamed to OOT-PC. Before the build, the settings file and the shader
+# translator's identity are copied to their new names (the identity keeps the shader caches, note_cache_translator);
+# the old files stay until the build has finished (legacy_cleanup), so a build that stops leaves the old game with
+# everything it reads.
+LEGACY_RENAMES = (('nx2navi.ini', 'OOT-PC.ini'), ('nx2navi_xlate.id', 'ootpc_xlate.id'))
+LEGACY_REMOVED = ('nx2navi.ini', 'nx2navi_xlate.id', 'nx2navi_xlate.exe', 'nx2navi_xlate', 'nx2navi_dlssg.dll')
+
+
+def legacy_names(out):
+    for old, new in LEGACY_RENAMES:
+        if (out / old).is_file() and not (out / new).exists():
+            try:
+                shutil.copy2(out / old, out / new)
+                say(f'  {old} copied to {new}')
+            except OSError as e:
+                say(f'  {old} could not be copied to {new}: {error_text(e)}')
+
+
+def legacy_cleanup(out):
+    """After a finished build: the files of the old names go, as the new game reads the new ones."""
+    for old in LEGACY_REMOVED:
+        try:
+            (out / old).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            say(f'  {old} could not be removed: {error_text(e)}')
 
 
 def main():
@@ -2728,7 +2784,7 @@ def build_main():
     ap.add_argument('--pgo', choices=('gen', 'off'),
                     help='gen: build an instrumented game, which adds its execution counts to <out>/pgo/*.profraw '
                          '(for tools/pgo.py merge); off: build without the execution profile of the kit. Default: the '
-                         'environment variable NX2NAVI_PGO, else build with the profile of the kit when it fits')
+                         'environment variable OOTPC_PGO, else build with the profile of the kit when it fits')
     ap.add_argument('--until', choices=STEPS, help=argparse.SUPPRESS)   # tests: stop after this step
     a = ap.parse_args()
     EVENTS = a.events
@@ -2758,6 +2814,8 @@ def build_main():
     if a.rebuild and not a.out:
         ap.error('--rebuild needs --out')
     out = out_path(a.out) if a.out else None
+    if out:
+        legacy_names(out)
     cache = out / 'build-cache' if out else None
     state_path = cache / 'state.json' if cache else None
     state = load_state(state_path) if state_path else {}
@@ -2899,6 +2957,7 @@ def build_main():
             romfs_job.thread.join()
         raise
     save()
+    legacy_cleanup(out)
     say(f'\nfinished in {(time.time() - t0) / 60:.1f} min: {out / EXE_NAME}')
     emit('end', exe=str(out / EXE_NAME), seconds=round(time.time() - t0, 1), kit=kit_version())
 

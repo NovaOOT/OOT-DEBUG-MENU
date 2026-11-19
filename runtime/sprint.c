@@ -71,14 +71,14 @@ static double wait_frames;         // sprint_link only: 60 Hz frames stood still
 static int last_button = -1;       // sprint_link only: the button setting at the last update
 
 static int setting_button(void) {
-    const char *v = cfg_value("NX2NAVI_SPRINT_BUTTON");
+    const char *v = cfg_value("OOTPC_SPRINT_BUTTON");
     for (int i = 0; i < (int)(sizeof button_names / sizeof *button_names); i++)
         if (v && !strcmp(v, button_names[i])) return i;
     return BTN_OFF;
 }
 
 static int setting_hold(void) {
-    const char *v = cfg_value("NX2NAVI_SPRINT_MODE");
+    const char *v = cfg_value("OOTPC_SPRINT_MODE");
     return v && !strcmp(v, "hold");
 }
 
@@ -113,7 +113,7 @@ static int state_kind(uint64_t link) {
 }
 
 // The set runs only while a button is chosen, so with the sprint button off its sites cost nothing. Whether it may run
-// at all is read once, after the start: NX2NAVI_SPRINT_BUTTON_PATCH=0 or a mod whose code patches the same sites (mods.c
+// at all is read once, after the start: OOTPC_SPRINT_BUTTON_PATCH=0 or a mod whose code patches the same sites (mods.c
 // mods_exefs_switch) leaves it off then, and switching it on later must not undo that.
 static _Atomic int allowed = -1;
 static int sprint_set(void) { return rt_patch_set("sprint"); }

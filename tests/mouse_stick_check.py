@@ -23,7 +23,7 @@ def main():
     env = dict(os.environ)
     if win and MSYS_BIN.exists():
         env['PATH'] = str(MSYS_BIN) + os.pathsep + env.get('PATH', '')
-    with tempfile.TemporaryDirectory(prefix='nx2navi-mouse-stick-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='ootpc-mouse-stick-') as tmp:
         exe = Path(tmp) / ('check.exe' if win else 'check')
         subprocess.check_call([cc, '-O2', '-Wall', '-fno-strict-aliasing', '-I', str(ROOT / 'runtime'),
                                str(ROOT / 'tests' / 'mouse_stick_check.c'), str(ROOT / 'runtime' / 'input_map.c'),

@@ -1,8 +1,8 @@
 """Where the launcher keeps everything.
 
-An installed launcher (OOT-DEBUG-MENU-Setup.exe puts it in %LOCALAPPDATA%\\Programs\\OOT-DEBUG-MENU) is one folder:
+An installed launcher (OOT-PC-Setup.exe puts it in %LOCALAPPDATA%\\Programs\\OOT-PC) is one folder:
 
-    OOT-DEBUG-MENU.exe       launcher/native/nx2navi.c: starts python\\pythonw.exe on app\\<current>\\launcher\\start.pyw
+    OOT-PC.exe       launcher/native/ootpc.c: starts python\\pythonw.exe on app\\<current>\\launcher\\start.pyw
     python/                  the embeddable Python with tkinter, numpy, lz4 and zstandard (tools/make_launcher.py)
     app/current.txt          the version the stub starts; app/previous.txt the one before it, kept for a rollback
     app/<version>/           one release: launcher/, runtime/, recomp/, tools/, bin/, VERSION, toolchain.lock.json
@@ -58,7 +58,7 @@ def long_path_problem(game_dir):
         return ''
     return (f'the path of the game folder is {n} characters long, and the game\'s files need {LONGEST_IN_GAME} more: '
             f'Windows and the build tools stop at {WINDOWS_PATH_MAX + 1} for a file\'s whole path. Choose a folder '
-            f'whose path has at most {most} characters, such as D:\\Games\\NX2navi')
+            f'whose path has at most {most} characters, such as D:\\Games\\OOT-PC')
 
 
 def fixed_drive(drive):
@@ -77,7 +77,8 @@ class Layout:
     def __init__(self, root=None, app=None):
         self.app = Path(app or APP)
         self.dev = not _is_release_app(self.app)
-        env = os.environ.get('NX2NAVI_LAUNCHER_ROOT')
+        # NX2NAVI_LAUNCHER_ROOT: what a stub from before the rename to OOT-PC sets
+        env = os.environ.get('OOTPC_LAUNCHER_ROOT') or os.environ.get('NX2NAVI_LAUNCHER_ROOT')
         if root:
             self.root = Path(root)
         elif env:
@@ -88,7 +89,11 @@ class Layout:
             self.root = self.app / 'build' / 'launcher-dev'
         self.apps = self.root / 'app'
         self.python = self.root / 'python'
-        self.stub = self.root / 'OOT-DEBUG-MENU.exe'
+        self.stub = self.root / 'OOT-PC.exe'
+        self.legacy_stub = self.root / 'OOT-DEBUG-MENU.exe'   # an install from before the rename (launcher/rebrand.py)
+        if not self.stub.is_file() and self.legacy_stub.is_file():
+            self.stub = self.legacy_stub   # until launcher/rebrand.py has put OOT-PC.exe beside it
+        self.app_stub = self.app / 'native' / 'OOT-PC.exe'     # the stub a release carries in its app (make_launcher)
         self.pydeps = self.root / 'pydeps'
         self.data = self.root / 'data'
         self.logs = self.data / 'logs'
@@ -100,7 +105,10 @@ class Layout:
         self.instance_lock = self.data / 'launcher.lock'
         tool_root = self.root
         if not ansi_safe(tool_root):
-            tool_root = Path(os.environ.get('SystemDrive', 'C:') + '\\') / 'OOT-DEBUG-MENU'
+            drive = Path(os.environ.get('SystemDrive', 'C:') + '\\')
+            tool_root = drive / 'OOT-PC'
+            if not (tool_root / 'toolchain').is_dir() and (drive / 'OOT-DEBUG-MENU' / 'toolchain').is_dir():
+                tool_root = drive / 'OOT-DEBUG-MENU'   # the build tools of an install from before the rename
         self.toolchain = tool_root / 'toolchain'
         self.msys_root = self.toolchain / 'msys64'
         self.msys = self.msys_root / 'ucrt64'
@@ -138,7 +146,7 @@ class Layout:
                 except OSError:
                     continue
                 if best is None or free > best[0]:
-                    best = (free, drive / 'Games' / 'OOT-DEBUG-MENU')
+                    best = (free, drive / 'Games' / 'OOT-PC')
         return best[1] if best else here
 
     def python_for_builds(self):

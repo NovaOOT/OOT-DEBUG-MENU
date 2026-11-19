@@ -26,13 +26,13 @@ static const char *const speed_names[] = {"normal", "fast", "instant"};
 #define PAGE_INSTANT 0x20c
 
 static int setting_speed(void) {
-    const char *v = cfg_value("NX2NAVI_TEXT_SPEED");
+    const char *v = cfg_value("OOTPC_TEXT_SPEED");
     for (int i = 0; i < (int)(sizeof speed_names / sizeof *speed_names); i++)
         if (v && !strcmp(v, speed_names[i])) return i;
     return SPEED_NORMAL;
 }
 
-// Whether the set may run at all is read once, after the start: NX2NAVI_TEXT_SPEED_PATCH=0, or a mod whose code
+// Whether the set may run at all is read once, after the start: OOTPC_TEXT_SPEED_PATCH=0, or a mod whose code
 // patches the same sites (mods.c mods_exefs_switch), leaves it off then, and switching it on later must not undo that.
 static _Atomic int allowed = -1;
 static int speed_set(void) { return rt_patch_set("text_speed"); }

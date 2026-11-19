@@ -1,5 +1,5 @@
 // runtime/vk_oq_hold.h: the count a samples-passed report writes when the full occlusion query ring left some of its
-// draws uncounted (vk_exec_xfer.c oq_report_count, NX2NAVI_OQ_HOLD). Built and run by tests/oq_hold_check.py; prints
+// draws uncounted (vk_exec_xfer.c oq_report_count, OOTPC_OQ_HOLD). Built and run by tests/oq_hold_check.py; prints
 // each failed check and exits 1 on any.
 #include <stdio.h>
 #include <string.h>

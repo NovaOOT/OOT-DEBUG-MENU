@@ -38,7 +38,7 @@ typedef struct {
     const char *why;   // the end of the log line "mem: lazy write-back on|off: "
 } WblChoice;
 
-// set: the value the player gave NX2NAVI_WB_LAZY (the environment or nx2navi.ini), NULL or "" when they gave none.
+// set: the value the player gave OOTPC_WB_LAZY (the environment or OOT-PC.ini), NULL or "" when they gave none.
 // windows: the game runs on Windows (WBL_ON_WINDOWS). driver_id: the device's VkDriverId.
 static inline WblChoice wb_lazy_choice(const char *set, int windows, uint32_t driver_id) {
     if (set && *set) {

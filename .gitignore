@@ -15,6 +15,10 @@ __pycache__/
 /game/
 /build/
 /generated/
+# N64 ROMs (the source of N64 models and textures, read in place, never copied in)
+*.z64
+*.n64
+*.v64
 # Button art a release carries (tools/make_launcher.py --prompt-art); a checkout may hold it for a test build
 /prompt-art/
 # The shared pipeline list a release carries (tools/pipeline_list.py merge; tools/prepare_shaders.py reads it here)
@@ -93,7 +97,7 @@ desktop.ini
 # Agent task worktrees (tools/worktree.py)
 /.worktrees/
 
-# The release folder (tools/make_release.py): nx2navi_xlate.exe with its id file, hactool, ninja and the DLLs
+# The release folder (tools/make_release.py): ootpc_xlate.exe with its id file, hactool, ninja and the DLLs
 /bin/
 
 # Private project documentation: kept locally, never uploaded

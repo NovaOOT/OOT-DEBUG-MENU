@@ -16,6 +16,7 @@
 
 #include "cfg.h"
 #include "cheats.h"
+#include "coop.h"
 #include "debug_tools.h"
 #include "fs.h"
 #include "kernel.h"
@@ -58,7 +59,7 @@ static const RtLoaded *module_named(const char *name) {
     rt_fatal("boot: module %s is not loaded", name);
 }
 
-// The constructor flag is a NX2navi symbol the loader resolves; a title without it (or with a different
+// The constructor flag is a OOT-PC symbol the loader resolves; a title without it (or with a different
 // name) reports "done" rather than dereferencing a null address.
 static uint32_t ctor_state(const RtLoaded *m) { return m->ctor_flag ? LD32(m->ctor_flag) : CTOR_DONE; }
 
@@ -167,7 +168,7 @@ void rt_boot_event(const char *what, Cpu *c, const char *detail) {
 
 // ---- --seconds S
 // A PNG with stored (uncompressed) deflate blocks: no compression library, and the shot is only read by tools.
-// rt_write_png (declared in vk.h) is shared with the NX2NAVI_DUMP frame dump (vk_dump.c).
+// rt_write_png (declared in vk.h) is shared with the OOTPC_DUMP frame dump (vk_dump.c).
 static uint32_t crc32_update(uint32_t crc, const uint8_t *p, size_t n) {
     static uint32_t table[256];
     if (!table[1])
@@ -252,9 +253,9 @@ static void save_shot(const tex_t *t, const char *path) {
     rt_logf("boot: shot %s (%ux%u)\n", path, w, h);
 }
 
-// NX2NAVI_SHOTS=lo-hi:step [NX2NAVI_SHOTS_DIR=dir]: every step-th present in [lo, hi] saved as <dir>/f<n>.png (n the
-// present), box-filtered to 480x270; NX2NAVI_SHOTS=w<lo>-<hi>:<step> takes them by world-clock seconds instead, the first
-// present at or after each step (full size with NX2NAVI_SHOTS_FULL=1), for finding short glitches. Pipeline builds stay asynchronous, so the
+// OOTPC_SHOTS=lo-hi:step [OOTPC_SHOTS_DIR=dir]: every step-th present in [lo, hi] saved as <dir>/f<n>.png (n the
+// present), box-filtered to 480x270; OOTPC_SHOTS=w<lo>-<hi>:<step> takes them by world-clock seconds instead, the first
+// present at or after each step (full size with OOTPC_SHOTS_FULL=1), for finding short glitches. Pipeline builds stay asynchronous, so the
 // pictures show what a player sees.
 static void series_shot(const tex_t *t, uint64_t n) {
     static int parsed;
@@ -262,14 +263,14 @@ static void series_shot(const tex_t *t, uint64_t n) {
     static const char *dir;
     static int full, world;
     if (!parsed) {
-        full = cfg_get("NX2NAVI_SHOTS_FULL") != NULL;
-        const char *e = cfg_get("NX2NAVI_SHOTS");
+        full = cfg_get("OOTPC_SHOTS_FULL") != NULL;
+        const char *e = cfg_get("OOTPC_SHOTS");
         double wl, wh, ws;
         if (e && e[0] == 'w' && sscanf(e + 1, "%lf-%lf:%lf", &wl, &wh, &ws) == 3 && ws > 0)   // world-clock seconds
             world = 1, lo = (unsigned long long)(wl * 1e6), hi = (unsigned long long)(wh * 1e6),
             step = (unsigned long long)(ws * 1e6), next = lo;
         else if (!e || sscanf(e, "%llu-%llu:%llu", &lo, &hi, &step) != 3 || !step) hi = 0;
-        dir = cfg_get("NX2NAVI_SHOTS_DIR") ? cfg_get("NX2NAVI_SHOTS_DIR") : ".";
+        dir = cfg_get("OOTPC_SHOTS_DIR") ? cfg_get("OOTPC_SHOTS_DIR") : ".";
         if (hi) plat_file_mkdir_p(dir);
         parsed = 1;
     }
@@ -285,7 +286,7 @@ static void series_shot(const tex_t *t, uint64_t n) {
     if (!bgra && fmt != NVN_FORMAT_RGBA8 && fmt != NVN_FORMAT_RGBA8_SRGB) return;
     uint32_t w = t->d.width, h = t->d.height, ow = full ? w : 480, oh = full ? h : 270;
     uint8_t *px = malloc(4ull * w * h), *out = malloc(4ull * ow * oh);
-    if (!px || !out) rt_fatal("boot: out of memory for a NX2NAVI_SHOTS frame");
+    if (!px || !out) rt_fatal("boot: out of memory for a OOTPC_SHOTS frame");
     view_t view;
     memset(&view, 0, sizeof view);
     NVNcopyRegion r = {.width = (int)w, .height = (int)h, .depth = 1};
@@ -330,6 +331,7 @@ void rt_frame_presented(const tex_t *t, uint64_t n) {
     fflush(stdout);
     fflush(stderr);
     input_rumble_hd_stop();   // a controller on HD rumble gets the neutral value before the exit
+    coop_shutdown();   // leaves the room, before the process ends
     fs_save_flush();
     vk_pipeline_prewarm_marker_clear();   // an orderly end, not a driver crash in the boot's builds (vk_pipeline.c pm_skipped)
     vk_mem_exit_log();         // the memory report's ranking of the session
@@ -357,7 +359,7 @@ static void guest_main(Cpu *c) {
 static void prewarm_main(void *arg) {
     (void)arg;
     vk_pipeline_prewarm();
-    const char *prep = cfg_get("NX2NAVI_TEST_PREPARE_SHADERS");   // Task 2.3 test hook; Task 2.6 builds the preparation
+    const char *prep = cfg_get("OOTPC_TEST_PREPARE_SHADERS");   // Task 2.3 test hook; Task 2.6 builds the preparation
     if (prep && !strcmp(prep, "1")) {
         int cpus = (int)plat_cpu_usable();
         gfx_shader_prepare_recorded(cpus, cpus / 2 > 16 ? 16 : cpus / 2 < 1 ? 1 : cpus / 2);
@@ -371,7 +373,7 @@ static void prewarm_main(void *arg) {
 // rt_boot's wait for the prewarm, polled every 50 ms. A warm start is done in about half a second and shows nothing.
 // When the prewarm translates shaders (a new translator, GPU or driver, or an emptied cache) or runs past
 // BOOT_SCREEN_MS, the window shows the boot screen with its progress at 10 frames a second, and a black frame once it is
-// done. cap_ms (NX2NAVI_PREWARM_WAIT_MS) bounds the wait, 0 none. Without progress for BOOT_STALL_MS (a translator or
+// done. cap_ms (OOTPC_PREWARM_WAIT_MS) bounds the wait, 0 none. Without progress for BOOT_STALL_MS (a translator or
 // driver that hangs) the guest starts anyway; the prewarm then goes on in the background.
 #define BOOT_SCREEN_MS 1000
 #define BOOT_STALL_MS 60000
@@ -388,7 +390,7 @@ static void boot_wait(PlatThread *warm, uint64_t cap_ms) {
             vk_pipeline_prewarm_marker_clear();
             vk_pipeline_prewarm_detach();
             rt_log("boot: the prewarm goes on in the background after %llu ms (%s)", (unsigned long long)(now - t0),
-                   cap_ms && now - t0 >= cap_ms ? "NX2NAVI_PREWARM_WAIT_MS" : "no progress for 60 s");
+                   cap_ms && now - t0 >= cap_ms ? "OOTPC_PREWARM_WAIT_MS" : "no progress for 60 s");
             break;
         }
         if (!screen && (p.sh_translated > 0 || now - t0 >= BOOT_SCREEN_MS)) {
@@ -433,10 +435,10 @@ void rt_boot(void) {
     // translator, GPU or driver) translated 2,987 shaders in about 11 s and then builds the recorded pipelines, with the
     // boot screen showing its progress; after a driver change also the compute pipelines and the driver's cache of
     // stage libraries (vk_pipeline.c bf_decide). Started early instead, the game would meet those shaders in play and
-    // wait for each one there. NX2NAVI_PREWARM_WAIT_MS caps the wait (0, the default: none); past it the prewarm goes
+    // wait for each one there. OOTPC_PREWARM_WAIT_MS caps the wait (0, the default: none); past it the prewarm goes
     // on in the background. A --shot image waits for all of it without the screen, so that it does not depend on build
     // timing.
-    const char *pw = cfg_get("NX2NAVI_PREWARM_WAIT_MS");
+    const char *pw = cfg_get("OOTPC_PREWARM_WAIT_MS");
     uint64_t wait_ms = pw && *pw ? strtoull(pw, NULL, 10) : 0;
     if (warm && rt_config()->shot) plat_thread_join(warm);
     else if (warm) boot_wait(warm, wait_ms);

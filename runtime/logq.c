@@ -21,7 +21,7 @@
 // thread had not reached yet.
 //
 // Every write is timed. One that took LOGQ_SLOW_NS or longer is counted, and a line says so at most every ten
-// seconds: with the queue that time was the log thread's, without it (NX2NAVI_LOG_ASYNC=0) the logging thread's.
+// seconds: with the queue that time was the log thread's, without it (OOTPC_LOG_ASYNC=0) the logging thread's.
 #include <stdlib.h>
 #include <string.h>
 
@@ -71,7 +71,7 @@ static void say_slow(void) {
     if ((at && now - at < LOGQ_SAY_NS) || plat_xchg32(&Q.saying, 1)) return;
     __atomic_store_n(&Q.said, slow, __ATOMIC_RELAXED);
     __atomic_store_n(&Q.said_at, now ? now : 1, __ATOMIC_RELAXED);
-    rt_log("log: %lld writes of the log took over %d ms so far, the longest %.1f ms, %s (NX2NAVI_LOG_ASYNC); %lld lines "
+    rt_log("log: %lld writes of the log took over %d ms so far, the longest %.1f ms, %s (OOTPC_LOG_ASYNC); %lld lines "
            "found the queue full and waited for its write", (long long)slow, (int)(LOGQ_SLOW_NS / 1000000),
            __atomic_load_n(&Q.worst_ns, __ATOMIC_RELAXED) / 1e6,
            __atomic_load_n(&Q.on, __ATOMIC_ACQUIRE) ? "on the log thread" : "on the threads that logged",

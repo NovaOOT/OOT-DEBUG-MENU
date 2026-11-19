@@ -4,7 +4,7 @@ profile folder made here:
 
 - export: the zip holds the save the game would load next (a finished commit waiting in save-tx before the committed
   save), its manifest as the launcher writes it (launcher/saves.py check_manifest takes it), no key file; with a bug
-  report the log and nx2navi.ini; nothing saved yet is refused
+  report the log and OOT-PC.ini; nothing saved yet is refused
 - import: zips the launcher exports wait in profile/save-import; at the next start the save the game would load goes
   to saves/backup <time> beside the program, the import becomes the save (the finished commit it replaces too), and
   the start says where the old save went; a second start changes nothing
@@ -98,26 +98,26 @@ def main():
         (ready / name).parent.mkdir(parents=True, exist_ok=True)
         (ready / name).write_bytes(data)
     (ready / 'prod.keys').write_bytes(b'secret')   # a stray key file in a save folder never goes into a zip
-    (work / 'nx2navi.ini').write_bytes(b'[graphics]\nfps_limit = 60\n')
-    (work / 'game.log').write_bytes(b'version: OOT-DEBUG-MENU 9.9.9-check\n')
+    (work / 'OOT-PC.ini').write_bytes(b'[graphics]\nfps_limit = 60\n')
+    (work / 'game.log').write_bytes(b'version: OOT-PC 9.9.9-check\n')
     line = run('export', profile, out, 'bug', log=work / 'game.log')
     m = re.match(r'result 0 path (.+)$', line)
     check(m is not None, f'export: {line}')
     if m:
         path = Path(m.group(1))
-        check(re.fullmatch(r'OOT-DEBUG-MENU-save-\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d-bug-report\.zip', path.name) is not None,
+        check(re.fullmatch(r'OOT-PC-save-\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d-bug-report\.zip', path.name) is not None,
               f'export name {path.name}')
         with zipfile.ZipFile(path) as z:
             check(z.testzip() is None, 'export zip CRCs')
             got = {n[len('save/'):]: z.read(n) for n in z.namelist() if n.startswith('save/')}
             # the start moved the finished commit in (swap_in) before the export read it
             check(got == newer, f'export holds the newest save: {sorted(got)}')
-            check(z.read('bug-report/nx2navi.log').startswith(b'version: OOT-DEBUG-MENU') and
-                  z.read('bug-report/nx2navi.ini').startswith(b'[graphics]'), 'bug report files')
+            check(z.read('bug-report/ootpc.log').startswith(b'version: OOT-PC') and
+                  z.read('bug-report/OOT-PC.ini').startswith(b'[graphics]'), 'bug report files')
             check(not any(b'secret' in z.read(n) for n in z.namelist()), 'no key file')
             man = json.loads(z.read('manifest.json'))
         saves.check_manifest(man)
-        check((man['exported_by'], man['game_version'], man['nx2navi'], man['files'], man['bug_report']) ==
+        check((man['exported_by'], man['game_version'], man['ootpc'], man['files'], man['bug_report']) ==
               ('game', '1.1.1', '9.9.9-check', len(newer), True), f'manifest {man}')
         check(re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', man['exported']) is not None, 'export time')
         plain = re.match(r'result 0 path (.+)$', run('export', profile, out))
@@ -166,7 +166,7 @@ def main():
         path = work / name
         with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
             if manifest:
-                z.writestr('manifest.json', json.dumps(dict({'format': 'nx2navi-save', 'format_version': 1,
+                z.writestr('manifest.json', json.dumps(dict({'format': 'ootpc-save', 'format_version': 1,
                                                              'title_id': '0400486024dec000'},
                                                             **(manifest if isinstance(manifest, dict) else {}))))
             for n, b in members.items():

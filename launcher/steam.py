@@ -1,4 +1,4 @@
-"""Add to Steam (Customize Launcher): the game as a non-Steam shortcut in the player's Steam library, with Navi as its
+"""Add to Steam (Customize Launcher): the game as a non-Steam shortcut in the player's Steam library, with the project's
 icon and the game's title screen and logo as its pictures (launcher/gameart.py). Windows only.
 
 Steam keeps the shortcuts of each account in <Steam>/userdata/<account id>/config/shortcuts.vdf, a binary key-value
@@ -16,7 +16,7 @@ shortcut nor keep it: Steam is asked to close (steam.exe -shutdown), the files a
 The shortcut starts the launcher's pythonw.exe on data/steam_play.pyw, which starts this launcher with --play: the game
 runs from its own folder with its console hidden, and the Python process waits for it, so Steam shows the game as
 running for as long as it is (the game's own Restart included). Starting ocarina.exe directly would open a console
-window beside the game, and OOT-DEBUG-MENU.exe ends a few seconds after it started the launcher.
+window beside the game, and OOT-PC.exe ends a few seconds after it started the launcher.
 """
 import os
 import shutil
@@ -31,7 +31,7 @@ PLAY_SCRIPT = 'steam_play.pyw'
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 STEAM64_BASE = 76561197960265728
 
-PLAY_TEXT = '''"""Written by the OOT-DEBUG-MENU launcher (Customize Launcher > Add to Steam): Steam starts the game through this file.
+PLAY_TEXT = '''"""Written by the OOT-PC launcher (Customize Launcher > Add to Steam): Steam starts the game through this file.
 It runs the launcher of app/current.txt with --play, which starts the game and waits for it."""
 import os
 import runpy
@@ -40,7 +40,7 @@ import sys
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 with open(os.path.join(root, 'app', 'current.txt'), encoding='utf-8') as f:
     version = f.read().strip()
-os.environ['NX2NAVI_LAUNCHER_ROOT'] = root
+os.environ['OOTPC_LAUNCHER_ROOT'] = root
 sys.argv = [os.path.join(root, 'app', version, 'launcher', 'start.pyw'), '--play'] + sys.argv[1:]
 runpy.run_path(sys.argv[0], run_name='__main__')
 '''
@@ -264,7 +264,7 @@ def close_steam(exe, timeout=45.0):
 
 
 def write_atomic(path, data):
-    tmp = path.with_name(path.name + '.nx2navi-tmp')
+    tmp = path.with_name(path.name + '.ootpc-tmp')
     tmp.write_bytes(data)
     os.replace(tmp, path)
 
@@ -316,8 +316,8 @@ def add(layout, game_dir, dump='', log=print, restart=True):
             except FileNotFoundError:
                 old = b''
             new, got = add_shortcut(old, exe, start, options, str(icon))
-            if old and not (cfg / 'shortcuts.vdf.nx2navi-backup').exists():
-                shutil.copyfile(vdf, cfg / 'shortcuts.vdf.nx2navi-backup')
+            if old and not (cfg / 'shortcuts.vdf.ootpc-backup').exists():
+                shutil.copyfile(vdf, cfg / 'shortcuts.vdf.ootpc-backup')
             write_atomic(vdf, new)
             log(f'steam: shortcut {got} in {vdf}')
     finally:   # Steam comes back also when a file could not be written

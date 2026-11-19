@@ -1,21 +1,14 @@
-"""The window's pictures, drawn with numpy into RGBA arrays and handed to Tk as PNG data.
+"""OOT-PC's forest-and-brass interface art, rendered into antialiased RGBA pictures for Tk.
 
-Everything is drawn here from shapes and colours: the misty green backdrop, the wooden title band, the bronze label
-cells with their mottled texture, the description box, the white glowing cursor, the filigree divider, Navi and
-the small icons. Tk's canvas draws lines and polygons without antialiasing on Windows, so every curved or soft
-shape is a picture; flat rectangles and text stay canvas items.
-
-Colours follow the game's options menu (docs/launcher.md, "Look"). Sizes are in logical pixels times the display
-scale s. PALETTE holds the colours of the colour scheme in use: set_theme fills it from THEMES, each scheme the
-first one with its woods, accents, backdrop and glow turned to other hues. The Custom scheme takes three colours the
-player picks on a colour square (color_square, hue_bar): one for the backdrop, one for the panels and the title band,
-one for the buttons.
+The authored chassis and nine-slice control plates in generated/menu-ui match the in-game menu. Text and hit targets
+remain live canvas items. Procedural masks supply icons, focus animation and the customizable color controls.
 """
 import base64
 import colorsys
 import re
 import struct
 import zlib
+from pathlib import Path
 
 import numpy as np
 
@@ -24,28 +17,28 @@ import numpy as np
 # The first colour scheme, Forest: bronze wood on a misty dark green.
 BASE = {
     'window': '#06180d',
-    'panel': '#3a2b22',
-    'label_top': '#7a5c32', 'label_mid': '#775930', 'label_bottom': '#72552d', 'label_border': '#6a4f29',
-    'ring': '#2a2019',
-    'value': '#2f2d22', 'value_border': '#45402f',
-    'orange': '#d69127', 'orange_light': '#e3a234', 'orange_dark': '#8f5f17',
-    'desc': '#403024', 'desc_border': '#4f3f30',
+    'panel': '#091b11',
+    'label_top': '#142d1c', 'label_mid': '#102719', 'label_bottom': '#0c2015', 'label_border': '#32432b',
+    'ring': '#09190f',
+    'value': '#0c2015', 'value_border': '#263b28',
+    'orange': '#756335', 'orange_light': '#bca263', 'orange_dark': '#4e472b',
+    'desc': '#0b1e14', 'desc_border': '#71603a',
     'text': '#e9dcc0', 'text_bright': '#f1e6cc', 'value_text': '#e3d5b6', 'desc_text': '#e9dfc8',
     'muted': '#d4c6a6', 'dim': '#7d786a', 'off': '#5e5b51', 'on_text': '#fdf4de', 'salmon': '#e88f6c',
     'ok': '#a7d68c', 'gold': '#e6b65a', 'band_text': '#f3ecdc', 'status': '#b9a988', 'log_text': '#cfc4ab',
-    'line': '#54442f', 'dot': '#5d4b36', 'filigree': '#7a6443', 'glow': '#e9ebee',
-    'button_hover': '#8a6c3f', 'close_hover': '#b0402c',
+    'line': '#655735', 'dot': '#a88c4f', 'filigree': '#c2a15a', 'glow': '#dbb969',
+    'button_hover': '#2c4929', 'close_hover': '#b0402c',
     # the backdrop: the field's four heights, its mist, the see-through tint over it (edge, side, middle), the corners
     'scene_0': '#394244', 'scene_1': '#414b4c', 'scene_2': '#474234', 'scene_3': '#3e3523', 'mist': '#262a22',
     'tint_edge': '#05180d', 'tint_side': '#092615', 'tint_mid': '#0c2e1b', 'vignette': '#020e07',
     # the title band's wood from top to bottom and the two lines under it
-    'wood_0': '#4c3b26', 'wood_1': '#5a4529', 'wood_2': '#6b5232', 'wood_3': '#806239',
-    'band_line_dark': '#2c2217', 'band_line_light': '#a9874f',
+    'wood_0': '#0d2116', 'wood_1': '#10281a', 'wood_2': '#102719', 'wood_3': '#0a1a11',
+    'band_line_dark': '#13281a', 'band_line_light': '#8f7845',
     # the cursor's glow near and far from its frame, the sparks drifting over the backdrop, Navi's halo
-    'glow_near': '#afc5e8', 'glow_far': '#96b4e6', 'spark': '#cfe6ff', 'halo': '#7fc4ff',
+    'glow_near': '#c3a45d', 'glow_far': '#89743d', 'spark': '#e5c778', 'halo': '#c1aa65',
     'icon_frame': '#e9dcc0', 'icon_fill': '#efe4ca', 'chevron_dim': '#d9ccae', 'bullet': '#c99a45',
     'badge_top': '#fbbd45', 'badge_bottom': '#e2942a', 'badge_ring': '#3a2a14', 'badge_text': '#3a2208',
-    'text_shadow': '#2a1e10', 'band_shadow': '#1a120a', 'frame': '#140e09',
+    'text_shadow': '#06110b', 'band_shadow': '#06120b', 'frame': '#b19450',
 }
 
 # The colours a scheme turns together, each group to one hue.
@@ -656,8 +649,7 @@ def band(w, h, s):
     img = new(h + pad, w)
     wood = vgradient(h, w, [(0, PALETTE['wood_0']), (0.30, PALETTE['wood_1']), (0.65, PALETTE['wood_2']),
                             (1, PALETTE['wood_3'])])
-    wood = overlay(wood, fractal(h, w, 300 * s, 11 * s, 3, seed=9), 0.32)
-    wood = overlay(wood, fractal(h, w, 33 * s, None, 3, seed=4), 0.2)
+    wood = overlay(wood, fractal(h, w, 33 * s, None, 3, seed=4), 0.055)
     over(img, kept(('band shadow', w, h, s), lambda: shadow(h + pad, w, rect_mask(h + pad, w, 0, 0, w, h + 4 * s),
                                                             '#000000', 0.6, 16 * s, 0, 5 * s)))
     top = new(h, w)
@@ -665,6 +657,153 @@ def band(w, h, s):
     over(img, top)
     paint(img, rect_mask(h + pad, w, 0, h, w, h + 2 * s), PALETTE['band_line_dark'])
     paint(img, rect_mask(h + pad, w, 0, h + 2 * s, w, h + 4 * s), PALETTE['band_line_light'])
+    return img
+
+
+def botanical(size, s, alpha=1.0):
+    """An engraved corner sprig. Curved stems, pointed leaves and veins are rendered at display resolution."""
+    img = new(size, size)
+    lines, veins = [], []
+    for angle in (0.12, 1.45):
+        stem = []
+        for t in np.linspace(0, 1, 28):
+            x, y = 12*s + np.cos(angle)*t*size*.8, 12*s + np.sin(angle)*t*size*.8
+            stem.append((x, y))
+        lines.append(stem)
+        for k in range(1, 8):
+            t = k/9
+            x, y = 12*s + np.cos(angle)*t*size*.8, 12*s + np.sin(angle)*t*size*.8
+            for sign in (-1, 1):
+                a = angle + sign*.8
+                length = (11 + 7*np.sin(t*np.pi))*s
+                tip = (x+np.cos(a)*length, y+np.sin(a)*length)
+                mx, my = (x+tip[0])/2, (y+tip[1])/2
+                width = length*.23
+                leaf = [(x, y)]
+                for q in np.linspace(0, 1, 9):
+                    leaf.append(((1-q)**2*x + 2*(1-q)*q*(mx-np.sin(a)*width) + q*q*tip[0],
+                                 (1-q)**2*y + 2*(1-q)*q*(my+np.cos(a)*width) + q*q*tip[1]))
+                for q in np.linspace(0, 1, 9):
+                    leaf.append(((1-q)**2*tip[0] + 2*(1-q)*q*(mx+np.sin(a)*width) + q*q*x,
+                                 (1-q)**2*tip[1] + 2*(1-q)*q*(my-np.cos(a)*width) + q*q*y))
+                lines.append(leaf)
+                veins.append([(x,y),tip])
+    paint(img, stroke_mask(size,size,lines,1.15*s), PALETTE['gold'], alpha)
+    paint(img, stroke_mask(size,size,veins,.65*s), PALETTE['filigree'], alpha*.65)
+    return img
+
+
+def ornate_frame(w, h, s):
+    """The launcher's own brass frame, shared visually with the in-game menu. No game artwork is needed."""
+    img = new(h,w)
+    for inset, width, color in ((12,1.4,'gold'),(16,.7,'filigree'),(21,.6,'line')):
+        paint(img,ring_mask(h,w,inset*s,inset*s,w-inset*s,h-inset*s,max(.8,width*s)),PALETTE[color])
+    size = min(round(120*s),w//3,h//3)
+    tile = botanical(size,s)
+    for right, bottom in ((False,False),(True,False),(False,True),(True,True)):
+        part=tile[::-1] if bottom else tile
+        part=part[:,::-1] if right else part
+        over(img,part,w-size-round(12*s) if right else round(12*s),h-size-round(12*s) if bottom else round(12*s))
+    return img
+
+
+def ocarina_emblem(size, s):
+    """Gold line relief of a transverse ocarina, with its chamber and side mouthpiece drawn separately."""
+    img=new(size,size)
+    scale=size/100
+    paths=['M 25 43 L 16 18 L 29 13 L 39 40',
+           'M 86 39 C 56 16 16 28 12 54 C 8 87 48 87 86 39 Z',
+           'M 19 62 C 25 82 53 68 77 45', 'M 20 26 L 32 21']
+    lines=[]
+    for path in paths:
+        lines.extend(svg_polylines(path,scale,0,0,steps=20))
+    for x,y,r in ((26,51,4),(39,40,3.3),(53,38,3),(67,39,2.5),(40,62,4),(55,53,3.4)):
+        lines.append([(scale*(x+r*np.cos(a)),scale*(y+r*np.sin(a))) for a in np.linspace(0,2*np.pi,24)])
+    paint(img,stroke_mask(size,size,lines,1.3*scale),PALETTE['gold'])
+    sprig=botanical(size,s*.55,.6)
+    over(img,sprig[:,::-1])
+    return img
+
+
+def _forest_source(name, alpha=False):
+    from tools.build_menu_art import png_rgb
+    source=Path(__file__).resolve().parents[2]/'generated'/'menu-ui'/name
+    def load():
+        w,h,pixels=png_rgb(source,alpha)
+        return np.frombuffer(pixels,dtype=np.uint8).reshape(h,w,4 if alpha else 3).copy()
+    return kept(('forest-source',name),load)
+
+
+def forest_skin(w,h,picture=None,dim=.4,cutout=False):
+    """The same authored frame and forest materials embedded by the runtime. Text stays live canvas content."""
+    from .picture import resize
+    source=_forest_source('forest-chassis.png',True)
+    img=new(h,w)
+    alpha=resize(np.repeat(source[...,3:4],3,axis=2),w,h)/255
+    alpha[alpha<=8/255]=0
+    color=resize(source[...,:3],w,h)/255
+    background=np.broadcast_to(rgb('#010203' if cutout else PALETTE['window']),(h,w,3)).copy()
+    if picture is not None:
+        from .picture import cover
+        background=cover((np.clip(picture,0,1)*255).astype(np.uint8),w,h,True)/255*(1-dim)
+    img[...,:3]=color*alpha+background*(1-alpha)
+    img[...,3]=1
+    if theme != 'forest':
+        surface=(img[...,1]>img[...,0]*.95)&(img[...,:3].mean(axis=2)<.35)&(alpha[...,0]>.5)
+        factor=rgb(PALETTE['panel'])/np.maximum(rgb(BASE['panel']),.03)
+        img[...,:3][surface]=np.clip(img[...,:3][surface]*factor,0,1)
+    return img
+
+
+def forest_bounds(w,h):
+    """Tight client bounds around the actual gold artwork, including its protruding crest and jewels."""
+    source=_forest_source('forest-chassis.png',True)
+    ys,xs=np.where(source[...,3]>8)
+    sh,sw=source.shape[:2]
+    return (max(0,int(xs.min()*w/sw)-1),max(0,int(ys.min()*h/sh)-1),
+            min(w,int((xs.max()+1)*w/sw)+2),min(h,int((ys.max()+1)*h/sh)+2))
+
+
+def forest_widget(w,h,kind=0):
+    """Nine-sliced emerald selection, gold action plate or jewel divider; source alpha is preserved."""
+    from .picture import resize
+    src=_forest_source('forest-widgets.png',True)
+    rects=((48,80,2127,232),(640,319,1532,496),(52,550,2120,677))
+    x0,y0,x1,y1=rects[kind]
+    src=src[y0:y1,x0:x1]
+    def scale(part,pw):
+        if pw<=0: return new(h,0)
+        # Premultiplication avoids dark fringes around the gold's antialiased alpha edges.
+        a=part[...,3:4].astype(np.float32)/255
+        color=resize(part[...,:3].astype(np.float32)*a,pw,h)/255
+        alpha=resize(np.repeat(a,3,axis=2),pw,h)[...,0:1]
+        return np.concatenate((color/np.maximum(alpha,1e-6),alpha),axis=2)
+    cut=330 if kind==0 else 210
+    if kind==2:
+        left,right=786-x0,1386-x0
+        middle=min(round(600*h/(y1-y0)),int(w*.6))
+        a=(w-middle)//2
+        return np.concatenate((scale(src[:,:left],a),scale(src[:,left:right],middle),scale(src[:,right:],w-a-middle)),axis=1)
+    cap=min(round(cut*h/(y1-y0)),int(w*.35))
+    return np.concatenate((scale(src[:,:cut],cap),scale(src[:,cut:-cut],w-2*cap),scale(src[:,-cut:],cap)),axis=1)
+
+
+def navigation_icon(kind,size):
+    paths={
+        'home':['M 9 5 L 25 16 L 9 27 Z'],
+        'updates':['M 26 12 C 22 2 9 4 5 13 M 5 13 L 5 6 M 5 13 L 12 13',
+                   'M 6 20 C 10 30 23 28 27 19 M 27 19 L 20 19 M 27 19 L 27 26'],
+        'versions':['M 5 4 L 24 4 L 24 23 L 5 23 Z M 10 27 L 28 27 L 28 9'],
+        'saves':['M 5 4 L 25 4 L 28 8 L 28 28 L 5 28 Z M 10 4 L 10 12 L 22 12 L 22 4',
+                 'M 11 28 L 11 19 L 23 19 L 23 28'],
+        'mods':['M 4 6 L 13 6 C 10 -2 24 -2 21 6 L 28 6 L 28 14 C 20 11 20 24 28 21 L 28 28 L 20 28 C 23 20 10 20 13 28 L 4 28 Z'],
+        'customize':['M 6 25 L 22 5 L 28 10 L 12 29 Z M 6 25 L 3 30 L 12 29 M 19 9 L 25 14'],
+        'settings':['M 16 3 L 27 10 L 27 23 L 16 30 L 5 23 L 5 10 Z',
+                    'M 22 16 C 22 24 10 24 10 16 C 10 8 22 8 22 16 Z']}
+    lines=[]
+    for path in paths[kind]: lines.extend(svg_polylines(path,size/32,steps=16))
+    img=new(size,size)
+    paint(img,stroke_mask(size,size,lines,max(1.0,size/20)),PALETTE['gold'])
     return img
 
 
@@ -676,7 +815,7 @@ def panel(w, h, s, alpha=1.0):
     over(img, kept(('panel shadow', w, h, s), lambda: shadow(h, w + sh, rect_mask(h, w + sh, 0, 0, w, h), '#000000',
                                                              0.35, 18 * s, 6 * s, 0)))
     col = np.broadcast_to(rgb(PALETTE['panel']), (h, w, 3)).copy()
-    col = overlay(col, fractal(h, w, 33 * s, None, 3, seed=4), 0.18)
+    col = overlay(col, fractal(h, w, 33 * s, None, 3, seed=4), 0.055)
     layer = new(h, w)
     layer[..., :3], layer[..., 3] = col, 1
     over(img, layer)
@@ -690,9 +829,9 @@ def label_cell(w, h, s, bright=False):
     r = max(1, int(round(s)))
     img = new(h + 2 * r, w + 2 * r, PALETTE['ring'], 1.0)
     col = vgradient(h, w, [(0, PALETTE['label_top']), (0.5, PALETTE['label_mid']), (1, PALETTE['label_bottom'])])
-    col = overlay(col, fractal(h, w, 33 * s, None, 3, seed=(w * 7 + h) % 997), 0.22)
+    col = overlay(col, fractal(h, w, 33 * s, None, 3, seed=(w * 7 + h) % 997), 0.05)
     if bright:
-        col = np.clip(col * 1.08, 0, 1)
+        col = np.clip(col * 1.32, 0, 1)
     cell = new(h, w)
     cell[..., :3], cell[..., 3] = col, 1
     over(img, cell, r, r)
@@ -706,7 +845,7 @@ def desc_box(w, h, s, alpha=1.0):
     body = rect_mask(h + 2 * pad, w + 2 * pad, pad, pad, pad + w, pad + h)
     over(img, shadow(h + 2 * pad, w + 2 * pad, body, '#000000', 0.35, 18 * s, 0, 6 * s))
     col = np.broadcast_to(rgb(PALETTE['desc']), (h, w, 3)).copy()
-    col = overlay(col, fractal(h, w, 33 * s, None, 3, seed=11), 0.15)
+    col = overlay(col, fractal(h, w, 33 * s, None, 3, seed=11), 0.045)
     layer = new(h, w)
     layer[..., :3], layer[..., 3] = col, 1
     over(img, layer, pad, pad)
@@ -720,7 +859,7 @@ def desc_box(w, h, s, alpha=1.0):
 def glow_frames(w, h, s, n=12):
     """The selection cursor around a w x h box: a 3 px white frame 6 px outside it with a soft glow of the scheme's
     colour inside and out, n frames of one breath. Returns (frames, margin) where the box sits at (margin, margin)."""
-    gap, thick, spread = 6 * s, 3 * s, 16 * s
+    gap, thick, spread = 2 * s, 1.2 * s, 7 * s
     mg = int(gap + spread)
     H, W = h + 2 * mg, w + 2 * mg
     ring = ring_mask(H, W, mg - gap, mg - gap, mg + w + gap, mg + h + gap, thick)
@@ -730,8 +869,8 @@ def glow_frames(w, h, s, n=12):
     for k in range(n):
         t = 0.5 - 0.5 * np.cos(2 * np.pi * k / n)
         img = new(H, W)
-        paint(img, soft_far, PALETTE['glow_far'], 0.35 + 0.25 * t)
-        paint(img, soft_out, PALETTE['glow_near'], 0.7 + 0.3 * t)
+        paint(img, soft_far, PALETTE['glow_far'], 0.12 + 0.07 * t)
+        paint(img, soft_out, PALETTE['glow_near'], 0.26 + 0.14 * t)
         paint(img, ring, PALETTE['glow'])
         frames.append(img)
     return frames, mg
@@ -832,8 +971,46 @@ def navi_icon(n):
 
 
 def navi_ico():
-    """The launcher's icon (OOT-DEBUG-MENU.exe, the setup, the window, the taskbar) at the sizes Windows asks for."""
+    """Navi as a .ico at the sizes Windows asks for (the Steam shortcut's art draws its own, launcher/gameart.py)."""
     return ico_bytes([navi_icon(n) for n in (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)])
+
+
+ICON_DIR = Path(__file__).resolve().parent
+
+
+def app_ico():
+    """The project's icon as a .ico (the launcher window and the taskbar; tools/make_icon.py writes it)."""
+    return (ICON_DIR / 'icon.ico').read_bytes()
+
+
+def app_icon_png():
+    """The project's icon at 64 x 64 as PNG bytes, for Tk's photo icon (tools/make_icon.py writes it)."""
+    return (ICON_DIR / 'icon-64.png').read_bytes()
+
+
+ICON_RAW = 256   # icon-256.rgba: ICON_RAW x ICON_RAW RGBA bytes (tools/make_icon.py)
+
+
+def app_icon(n, corner=0.18):
+    """The project's icon as an n x n float RGBA array (straight alpha, 0..1), every pixel the average of the source
+    pixels under it, with corners rounded by corner x n (0 keeps them square; the edge is anti-aliased)."""
+    src = np.frombuffer((ICON_DIR / 'icon-256.rgba').read_bytes(), dtype=np.uint8)
+    src = src.reshape(ICON_RAW, ICON_RAW, 4).astype(np.float32) / 255.0
+    pm = src.copy()
+    pm[..., :3] *= pm[..., 3:4]
+    cut = (np.arange(n + 1) * ICON_RAW / n).astype(int)
+    span = np.diff(cut).astype(np.float32)
+    pm = np.add.reduceat(pm, cut[:-1], axis=0) / span[:, None, None]
+    pm = np.add.reduceat(pm, cut[:-1], axis=1) / span[None, :, None]
+    if corner > 0:
+        r = corner * n
+        c = np.arange(n, dtype=np.float32) + 0.5
+        dx = np.maximum(np.maximum(r - c, c - (n - r)), 0)
+        d = np.hypot(dx[None, :], dx[:, None])
+        pm *= np.clip(r - d + 0.5, 0, 1)[..., None]
+    out = pm.copy()
+    out[..., :3] = np.where(pm[..., 3:4] > 0, pm[..., :3] / np.maximum(pm[..., 3:4], 1e-6), 0)
+    return out
 
 
 def title_glyph(kind, size, s):

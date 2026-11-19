@@ -10,7 +10,9 @@ from pathlib import Path
 CREATE_NO_WINDOW = 0x08000000
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
-UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\OOT-DEBUG-MENU'
+UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\OOT-PC'
+# the entry of an install from before the rename to OOT-PC (launcher/rebrand.py moves it to UNINSTALL_KEY)
+LEGACY_UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\OOT-DEBUG-MENU'
 
 
 def dpi_aware():
@@ -30,7 +32,7 @@ def app_id():
     """Group the window under the launcher's own taskbar icon rather than python's."""
     if os.name == 'nt':
         try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('OOT-DEBUG-MENU.Launcher')
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('OOT-PC.Launcher')
         except (AttributeError, OSError):
             pass
 
@@ -273,7 +275,7 @@ def background_thread():
 
 # What the launcher puts in its folder (launcher/paths.py, the stub's python.next and python.old-<n>). Uninstall deletes
 # only these: the default game folder is <root>\game, and a folder given to the setup with --dest may hold other things.
-OWNED = ('OOT-DEBUG-MENU.exe', 'app', 'python', 'python.next', 'pydeps', 'data', 'toolchain')
+OWNED = ('OOT-PC.exe', 'OOT-DEBUG-MENU.exe', 'app', 'python', 'python.next', 'pydeps', 'data', 'toolchain')
 
 
 def uninstall_plan(layout, remove_game=''):
@@ -287,7 +289,7 @@ def uninstall_plan(layout, remove_game=''):
     except OSError:
         pass
     empty = [root]
-    if Path(layout.toolchain).parent != root:   # the toolchain went to C:\OOT-DEBUG-MENU (launcher/paths.py ansi_safe)
+    if Path(layout.toolchain).parent != root:   # the toolchain went to C:\OOT-PC (launcher/paths.py ansi_safe)
         gone.append(Path(layout.toolchain))
         empty.append(Path(layout.toolchain).parent)
     return gone, empty
@@ -315,6 +317,10 @@ def uninstall(layout, remove_game='', log=print):
         try:
             import winreg
             winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY)
+        except OSError:
+            pass
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, LEGACY_UNINSTALL_KEY)
         except OSError:
             pass
         # one command line as cmd.exe reads it: a list would have its quotes escaped as \", which cmd.exe does not

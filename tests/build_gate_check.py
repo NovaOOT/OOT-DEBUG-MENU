@@ -50,9 +50,9 @@ def probe(game):
     for free_mb, must in ((None, None), ('0', 'an ordinary build is admitted now'),
                           ('1048576', 'an ordinary build is refused now')):
         env = dict(os.environ)
-        env.pop('NX2NAVI_BUILD_FREE_MB', None)
+        env.pop('OOTPC_BUILD_FREE_MB', None)
         if free_mb is not None:
-            env['NX2NAVI_BUILD_FREE_MB'] = free_mb
+            env['OOTPC_BUILD_FREE_MB'] = free_mb
         r = subprocess.run([game, '--probe-buildgate'], env=env, capture_output=True, text=True, errors='replace')
         lines = [ln for ln in r.stdout.splitlines() if ln.startswith('probe-buildgate:')]
         print('\n'.join(lines))

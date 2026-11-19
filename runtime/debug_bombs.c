@@ -1,4 +1,4 @@
-// Bomb paths (debug_tools.h, "Bomb paths"): while NX2NAVI_DEBUG_VIEW_BOMBS is on, every bomb and Bombchu leaves its
+// Bomb paths (debug_tools.h, "Bomb paths"): while OOTPC_DEBUG_VIEW_BOMBS is on, every bomb and Bombchu leaves its
 // path through the air, the points where it bounced and where it stopped, for the overlay (ui/debug_tab.cpp
 // draw_bombs) and the console (bombs).
 //
@@ -47,7 +47,7 @@ static int path_next;            // the slot the next path takes
 static uint32_t path_serial;
 static PlatMutex lock;
 
-static int view_on(void) { return dbg_available() && cfg_bool("NX2NAVI_DEBUG_VIEW_BOMBS"); }
+static int view_on(void) { return dbg_available() && cfg_bool("OOTPC_DEBUG_VIEW_BOMBS"); }
 
 static void finder(void *arg) {
     (void)arg;

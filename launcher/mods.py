@@ -1,8 +1,8 @@
 """The game's mods folder, for the launcher's Mods screen and Play.
 
-The game reads <game>/mods (nx2navi.ini mods_dir names another folder; a relative one is under the game folder): one
+The game reads <game>/mods (OOT-PC.ini mods_dir names another folder; a relative one is under the game folder): one
 folder per mod, each part of it where tools/mod_files.py says (runtime/mods.c). The load order and the switches are
-the game's own settings, mods_order and mods_disabled in nx2navi.ini, which this module writes as runtime/cfg.c does:
+the game's own settings, mods_order and mods_disabled in OOT-PC.ini, which this module writes as runtime/cfg.c does:
 the top mod wins a file two mods replace, and a mod nobody switched off is on.
 
 A mod as players download it often does not sit that way, so prepare() puts the mods folder in order before the game
@@ -16,6 +16,10 @@ starts, and add() does the same for an archive or a folder the player picks:
   Atmosphere layouts, atmosphere/, contents/ and the title's folder, already are one as they are).
 Nothing is deleted: files only move inside the mods folder, and a mod that holds several folders with mod files (a
 download with options to pick from) stays as it is, with a note.
+
+A mod can also turn on a feature built into the game: a file ootpc-feature.txt at its top whose first line names
+it (runtime/mods.h). Co-op through Steam is one (STEAM_COOP): make_feature_mod() writes that mod, and feature_on() tells
+Play to put Steam's library file beside the game while it is on (launcher/steamlib.py).
 
 Mods that change the game's code (code cheats, ExeFS patches) need the game built with them (tools/make_game.py lift).
 code_waiting() names the enabled ones whose files the last build did not take in (build-cache/mod-code.json), and
@@ -43,6 +47,14 @@ LOOSE_PARTS = ('romfs', 'romfslite', 'exefs', 'cheats')   # a mod's parts that a
 MOD_TOP = {'romfs', 'romfslite', 'exefs', 'cheats', 'atmosphere', 'contents', mod_files.TITLE.lower()}
 UNWRAP_DEPTH = 4
 UNNAMED = 'Unnamed mod'
+FEATURE_FILE = 'ootpc-feature.txt'   # a mod that turns on a feature built into the game (runtime/mods.c feature_scan)
+STEAM_COOP = 'steam-coop'            # runtime/mods.h MOD_FEATURE_STEAM_COOP
+N64_GRAPHICS = 'n64-graphics'        # runtime/mods.h MOD_FEATURE_N64
+DARK_LINK = 'dark-link'              # runtime/mods.h MOD_FEATURE_DARK_LINK (tools/make_dark_link_mod.py)
+DESERT_FREE_ROAM = 'desert-free-roam'   # runtime/mods.h MOD_FEATURE_DESERT_FREE_ROAM (tools/make_desert_roam_mod.py)
+# the features this version has, with the folder name of their mod
+FEATURES = {STEAM_COOP: 'Steam Co-op', N64_GRAPHICS: 'N64 Graphics', DARK_LINK: 'Dark Link',
+            DESERT_FREE_ROAM: 'Desert free roam'}
 STAND_INS = 'Damaged file stand-ins'   # the launcher's own (tools/romfs_check.py), shown as such
 TITLE_ID = re.compile(r'^[0-9A-Fa-f]{16}$')
 
@@ -54,7 +66,7 @@ class ModError(Exception):
 # ---------------------------------------------------------------- the folder and the settings
 
 def mods_dir(game_dir):
-    """The mods folder the game reads: nx2navi.ini mods_dir, a relative one under the game folder, else mods."""
+    """The mods folder the game reads: OOT-PC.ini mods_dir, a relative one under the game folder, else mods."""
     try:
         d = gameini.get(game_dir, 'MODS_DIR')
     except OSError:
@@ -93,7 +105,7 @@ def order(names, wanted):
 
 
 def set_enabled(game_dir, name, on):
-    """Switch a mod on or off for the game's next start (nx2navi.ini mods_disabled)."""
+    """Switch a mod on or off for the game's next start (OOT-PC.ini mods_disabled)."""
     off = [n for n in _names(game_dir, 'MODS_DISABLED') if n != name]
     if not on:
         off.append(name)
@@ -101,7 +113,7 @@ def set_enabled(game_dir, name, on):
 
 
 def move(game_dir, name, d):
-    """Move a mod d places up (negative) or down in the load order (nx2navi.ini mods_order, every mod named)."""
+    """Move a mod d places up (negative) or down in the load order (OOT-PC.ini mods_order, every mod named)."""
     names = [m.name for m in scan(game_dir, details=False)]
     if name not in names:
         return
@@ -129,6 +141,7 @@ class Mod:
         self.several = []        # folders that each hold a mod (a download with options)
         self.unsupported = ''    # why the last build could not take an ExeFS patch file of it
         self.waiting = False     # code the last build did not take in
+        self.feature, self.unknown_feature = _feature(path)   # the built-in feature its ootpc-feature.txt turns on
 
     @property
     def usable(self):
@@ -140,12 +153,15 @@ class Mod:
         if '|' in self.name:
             return 'Its folder name holds "|", which the load order list uses: rename the folder.'
         if self.code_module:
-            return ('It holds a code module (subsdk or main in its exefs folder), which NX2navi cannot run: the game '
+            return ('It holds a code module (subsdk or main in its exefs folder), which OOT-PC cannot run: the game '
                     'leaves the whole mod off.')
         if self.unsupported:
             return (f'An ExeFS patch file of it cannot be applied ({self.unsupported}): the game leaves the whole mod '
                     'off.')
-        if not (self.files or self.romfs or self.patches or self.cheat_file):
+        if self.unknown_feature:
+            return (f'It turns on "{self.unknown_feature}", a feature this version of OOT-PC does not have: update '
+                    'OOT-PC.')
+        if not (self.files or self.romfs or self.patches or self.cheat_file or self.feature):
             if self.other_game:
                 return f'It is made for another game (title {self.other_game}), not Ocarina of Time.'
             if self.several:
@@ -265,9 +281,46 @@ def _mod_folders_below(folder, depth=2):
 
 def _is_mod_top(folder):
     try:
-        return any(d.is_dir() and d.name.lower() in MOD_TOP for d in folder.iterdir())
+        return any((d.is_dir() and d.name.lower() in MOD_TOP) or (d.is_file() and d.name.lower() == FEATURE_FILE)
+                   for d in folder.iterdir())
     except OSError:
         return False
+
+
+def _feature(folder):
+    """(feature, unknown): the feature the mod's ootpc-feature.txt names when this version has it, else the name it
+    gives; ('', '') with no such file. Its first line, without the spaces around it, as runtime/mods.c reads it."""
+    try:
+        line = (Path(folder) / FEATURE_FILE).read_text(encoding='utf-8-sig', errors='replace').splitlines()
+    except OSError:
+        return '', ''
+    name = line[0].strip(' \t') if line else ''
+    return (name, '') if name in FEATURES else ('', name)
+
+
+def feature_on(game_dir, feature):
+    """1 when a mod that is on and usable turns feature on: the game turns it on at its next start."""
+    try:
+        return any(m.enabled and m.feature == feature and not m.problem for m in scan(game_dir, details=False))
+    except OSError:
+        return False
+
+
+def make_feature_mod(folder, feature):
+    """Writes the mod that turns feature on into folder (made when missing): its ootpc-feature.txt and a readme."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / FEATURE_FILE).write_text(feature + '\n', encoding='utf-8')
+    if feature == STEAM_COOP:
+        (folder / 'README.txt').write_text(
+            'Steam Co-op for OOT-PC\n\n'
+            'Put this folder into the game\'s mods folder (or add the zip on the launcher\'s Mods screen) and switch\n'
+            'it on: the game then has a Co-op tab in its menu, where you make or join a room and invite Steam\n'
+            'friends. Each player plays in their own game and save; progress is shared in a room.\n\n'
+            'Needs Steam running and signed in. The launcher puts Steam\'s library file, steam_api64.dll, beside\n'
+            'ocarina.exe from a Steam game you have installed. Switch the mod off and the game uses no network.\n',
+            encoding='utf-8')
+    return folder
 
 
 def scan(game_dir, details=True):

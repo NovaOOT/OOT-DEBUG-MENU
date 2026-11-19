@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RT = ROOT / 'runtime'
-SOURCES = [ROOT / 'tools' / 'menu_preview.cpp', RT / 'ui' / 'option_rows.cpp', RT / 'ui' / 'menu_skin.cpp',
+SOURCES = [ROOT / 'tools' / 'menu_preview.cpp', RT / 'ui' / 'option_rows.cpp', RT / 'ui' / 'menu_skin.cpp', RT / 'ui' / 'menu_chrome.cpp',
            RT / 'ui' / 'perf_panel.cpp', RT / 'ui_text.c'] + sorted((RT / 'third_party' / 'imgui').glob('imgui*.cpp'))
 FONTS = ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'C:/Windows/Fonts/segoeui.ttf', 'C:/Windows/Fonts/arial.ttf']
 
@@ -37,6 +37,8 @@ def png(path, w, h, rgba):
 
 
 def build(out):
+    import build_menu_art
+    build_menu_art.build(ROOT)
     cxx = shutil.which('clang++') or shutil.which('g++')
     if not cxx:
         sys.exit('needs clang++ or g++ on PATH')
@@ -45,14 +47,16 @@ def build(out):
     for src in SOURCES:
         obj = out / (src.stem + '.o')
         if not obj.is_file() or obj.stat().st_mtime < max(src.stat().st_mtime, (RT / 'ui' / 'menu_skin.h').stat().st_mtime,
-                                                          (RT / 'ui' / 'menu_art.h').stat().st_mtime):
+                                                          (RT / 'ui' / 'menu_art.h').stat().st_mtime,
+                                                          (ROOT / 'generated/menu-ui/forest_pixels.h').stat().st_mtime
+                                                          if (ROOT / 'generated/menu-ui/forest_pixels.h').is_file() else 0):
             lang = ['-x', 'c', '-std=gnu11'] if src.suffix == '.c' else ['-x', 'c++', '-std=gnu++17']
             cmd = [cxx, *lang, '-c', '-O2', '-w', '-I', str(RT), '-I', str(RT / 'third_party' / 'imgui'), str(src), '-o',
                    str(obj)]
             if subprocess.run(cmd).returncode:
                 sys.exit(f'{src.name} did not compile')
         objs.append(str(obj))
-    if subprocess.run([cxx, *objs, '-o', str(exe), '-lm']).returncode:
+    if subprocess.run([cxx, *objs, '-o', str(exe), *([] if os.name == 'nt' else ['-lm'])]).returncode:
         sys.exit('the link failed')
     return exe
 

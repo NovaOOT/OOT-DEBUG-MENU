@@ -55,7 +55,7 @@ static int at_title(void) {
     if (at && now - at < TITLE_POLL_MS * 1000000ull) return last;
     at = now;
     last = 0;
-    if (!cfg_bool("NX2NAVI_DEBUG_TITLE_PROFILES") || !dbg_available()) return 0;
+    if (!cfg_bool("OOTPC_DEBUG_TITLE_PROFILES") || !dbg_available()) return 0;
     // The title and ConfirmationLoad sequences set this enum to Title and Load. Keep
     // their context through the title's Option page; entering gameplay or a game menu
     // clears it, so the in-game Load page cannot switch a running session's save.

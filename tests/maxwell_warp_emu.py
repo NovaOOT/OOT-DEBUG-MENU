@@ -59,7 +59,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_XLATE = ROOT.parent.parent / "build" / "xlate" / ("nx2navi_xlate.exe" if os.name == "nt" else "nx2navi_xlate")
+DEFAULT_XLATE = ROOT.parent.parent / "build" / "xlate" / ("ootpc_xlate.exe" if os.name == "nt" else "ootpc_xlate")
 
 LANES = 32
 RZ = 255
@@ -1122,7 +1122,7 @@ def _normalised(spec) -> dict[int, dict]:
 
 
 def lower(sm86, exe: Path = DEFAULT_XLATE):
-    """Runs nx2navi_xlate --lower on SM86 instructions (a list of [w0, w1, w2, w3] or one such list); returns
+    """Runs ootpc_xlate --lower on SM86 instructions (a list of [w0, w1, w2, w3] or one such list); returns
     (Maxwell words, urbase, local bytes)."""
     if sm86 and not isinstance(sm86[0], (list, tuple)):
         sm86 = [sm86]
@@ -1283,10 +1283,10 @@ def load_cases(path: Path) -> list[dict]:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Lower SM86 vector cases with nx2navi_xlate --lower, run them on the "
+    ap = argparse.ArgumentParser(description="Lower SM86 vector cases with ootpc_xlate --lower, run them on the "
                                              "Maxwell warp emulator and compare with the captured results.")
     ap.add_argument("vectors", type=Path, help="JSON list of cases: name, sm86 [w0..w3], regs_in, smem?, regs_out")
-    ap.add_argument("--xlate", type=Path, default=DEFAULT_XLATE, help="nx2navi_xlate executable")
+    ap.add_argument("--xlate", type=Path, default=DEFAULT_XLATE, help="ootpc_xlate executable")
     ap.add_argument("--prmt", choices=("ryujinx", "maxwell"), default="ryujinx",
                     help="PRMT as the translator runs it (no-op) or as Maxwell hardware does")
     ap.add_argument("--fill", default="0", help="initial value (hex) of registers regs_in does not set")

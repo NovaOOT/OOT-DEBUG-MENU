@@ -1,15 +1,15 @@
 """Read one file out of an unpacked romfs (a folder holding index.json and romfs.bin) and decompress it.
 
-    NX2NAVI_ROMFS=<folder> python tools/debug_romfs_extract.py PATH OUT
+    OOTPC_ROMFS=<folder> python tools/debug_romfs_extract.py PATH OUT
 
 index.json lists files[{path, offset, size}] into romfs.bin. A .zs file is zstd, made with one of the dictionaries in
 Pack/ZsDic.pack.zs; each is tried in turn. Needs the zstandard module (the installed game's python has it).
 """
 import json, os, struct, sys, zstandard
 
-ROMFS = os.environ.get('NX2NAVI_ROMFS')
+ROMFS = os.environ.get('OOTPC_ROMFS')
 if not ROMFS or not os.path.isfile(os.path.join(ROMFS, 'index.json')):
-    sys.exit('set NX2NAVI_ROMFS to the folder that holds the unpacked romfs (index.json and romfs.bin)')
+    sys.exit('set OOTPC_ROMFS to the folder that holds the unpacked romfs (index.json and romfs.bin)')
 d = json.load(open(os.path.join(ROMFS, 'index.json'), encoding='utf-8'))
 idx = {f['path']: f for f in d['files']}
 def raw(path):

@@ -1,7 +1,7 @@
 // Switch 2 (NVN2) shader programs are SM86 (Ampere) code; the shader translator decodes Maxwell (SM5x) only. This file
 // rewrites each SM86 instruction as one or more Maxwell instructions with the same meaning, so its Maxwell decoder,
 // IR and SPIR-V backend run unchanged. Instructions this file does not know make the whole program fail with the opcode
-// and the reason, so coverage grows by census (python nvn2_shaders.py over a NX2NAVI_SHADER_DUMP directory).
+// and the reason, so coverage grows by census (python nvn2_shaders.py over a OOTPC_SHADER_DUMP directory).
 //
 // Encoding facts: the SM70+ instruction field layouts; the Maxwell side is the translator's Decoders/InstTable.cs and
 // InstDecoders.cs. Where SM86 and the translator's Maxwell model differ: MUFU.SIN/COS take turns, BSSY/BSYNC are

@@ -57,7 +57,7 @@ typedef struct PoolRec {
     VPage *pt;                         // POOL_VIRT: size / 64 KiB entries
     uint64_t npages;
     volatile int32_t used;                // resolved at least once: the GPU may still read it at finalize
-    // NX2NAVI_TRACE=perf dirty census (vk_mem_dirty_submit), replay thread under the submit lock only:
+    // OOTPC_TRACE=perf dirty census (vk_mem_dirty_submit), replay thread under the submit lock only:
     uint32_t bound_sub;                // last submit that bound it as a buffer (dirty_sub), 0 never
     uint32_t synced_gen;               // page generation its lazy-mirror count covers; DIRTY_UNSYNCED until scanned
     uint8_t bufbound;                  // ever bound as a vertex, index, uniform, storage or indirect buffer
@@ -74,7 +74,7 @@ typedef struct PoolRec {
     uint32_t acc_sub;                  // replay: the last submission that synced the mirror (mirror_sync)
     uint32_t pm_frame;                 // replay: the frame (pframe) of pm_cur
     uint8_t pm_cur, pm_prev;           // replay: the places in their frame (vk_sub_in_frame, 7 the rest) of the submissions
-                                       // that synced it, in frame pm_frame and in the one before (NX2NAVI_PRESNAP_PLACE)
+                                       // that synced it, in frame pm_frame and in the one before (OOTPC_PRESNAP_PLACE)
     uint32_t wb_sub;                   // replay: the last submission that wrote mirror bytes back to guest memory
     uint64_t wb_fence;                 // replay: that submission's fence (mirror_capture waits for no write-back)
     uint8_t wb_kept;                   // replay: a write-back left bytes in the mirror alone (wb_skip): never evicted
@@ -112,8 +112,8 @@ typedef struct PoolRec {
     uint8_t tlisted;
     uint64_t t_over;                   // whole copy-ins that found such a store in the page they overwrote, so far
     uint64_t t_over_log;               // t_over at the last log line
-    uint64_t s_in;                     // NX2NAVI_SHADOW_CHECK: bytes copied in whole since the last log line
-    // NX2NAVI_TRACE=perf per-pool mirror traffic since the last mirror_pool_log, replay thread (the log reads and clears
+    uint64_t s_in;                     // OOTPC_SHADOW_CHECK: bytes copied in whole since the last log line
+    // OOTPC_TRACE=perf per-pool mirror traffic since the last mirror_pool_log, replay thread (the log reads and clears
     // them without a lock: a count lost to the race only blurs a diagnostic)
     uint64_t st_pages, st_flush, st_wb, st_merge;   // bytes: written pages and flush ranges copied up, GPU writes back
     uint32_t st_syncs;                              // syncs
@@ -167,7 +167,7 @@ static int memory_type(const VkCtx *c, uint32_t bits, VkMemoryPropertyFlags want
 }
 
 // ---------------------------------------------------------------- dma-buf imports
-// Where guest memory is a memfd's (Linux, NX2NAVI_DMABUF, on by default: platform/linux.c "Guest memory as a memfd's"), a
+// Where guest memory is a memfd's (Linux, OOTPC_DMABUF, on by default: platform/linux.c "Guest memory as a memfd's"), a
 // CPU-visible pool is imported as a dma-buf of its own pages, not as a host pointer and not as a shadow copy. It keeps
 // what an import is to the rest of this file (the GPU's writes are in guest memory once the GPU has made them, the
 // device address table's twin is guest memory, mirrors sync from it and write back into it), without amdgpu's costs
@@ -177,7 +177,7 @@ static int memory_type(const VkCtx *c, uint32_t bits, VkMemoryPropertyFlags want
 // never matter to it again: the write watch, the freezes and the lazy write-back's armed pages leave the GPU alone.
 // RADV puts every imported memory object in every submission, at about 0.6 us each (RX 6800 XT, Linux 7.3, Mesa 26.2:
 // 2.6 ms a vkQueueSubmit with 4096 of them, 0.04 ms with 64), and the game keeps over 4,000 pools, so a pool does not
-// get a dma-buf of its own: guest addresses are cut into aligned spans of NX2NAVI_DMABUF_MB (64 by default), the first
+// get a dma-buf of its own: guest addresses are cut into aligned spans of OOTPC_DMABUF_MB (64 by default), the first
 // pool made in a span imports the span's dma-buf, and every pool is a buffer bound into the memory of a span that holds
 // it, at its offset. A pool that no span holds gets a new one over the aligned range around it, cut back at the spans
 // already there (span_get): spans overlap only where such a pool itself lies in an older span, because every span's
@@ -238,7 +238,7 @@ static uint64_t dmabuf_any;            // a page of guest memory a dma-buf can b
 
 // After device creation, before the first pool and before anything asks for the storage mode (vk_mem_lazy_decide): one
 // page of guest memory is made a dma-buf, imported and bound to a buffer, as every pool will be. Any step refused turns
-// the dma-buf imports off for the run: the pools are shadow copies, as with NX2NAVI_DMABUF=0. A refusal later, for
+// the dma-buf imports off for the run: the pools are shadow copies, as with OOTPC_DMABUF=0. A refusal later, for
 // one span, leaves its pools without a GPU buffer (span_log counts them), so the probe asks once for what all need.
 static int s_learn, s_check;
 void vk_mem_dmabuf_probe(VkDevice dev, const VkPhysicalDeviceMemoryProperties *mp, int bda) {
@@ -289,9 +289,9 @@ void vk_mem_dmabuf_probe(VkDevice dev, const VkPhysicalDeviceMemoryProperties *m
     if (!no) return;
     dmabuf_on = 0, shadow_on = 1;
     s_learn = rt_knob("SHADOW_TABLE_STORES", "0") == 1;
-    s_check = cfg_bool("NX2NAVI_SHADOW_CHECK");
+    s_check = cfg_bool("OOTPC_SHADOW_CHECK");
     rt_log("mem: dma-buf imports off: %s (%ld; memory types %#x): CPU-visible pools are host-visible copies of guest "
-           "memory (shadow storage), as with NX2NAVI_DMABUF=0", no, err, bits);
+           "memory (shadow storage), as with OOTPC_DMABUF=0", no, err, bits);
 }
 
 static void span_fail(const char *what, uint64_t lo, uint64_t hi, long err) {   // span_lock held
@@ -582,7 +582,7 @@ static int alloc_physical(VkCtx *c, PoolRec *r) {
 int vk_fix_zero(void) {
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_FIX_ZERO");
+        on = cfg_bool("OOTPC_FIX_ZERO");
     }
     return on;
 }
@@ -619,7 +619,7 @@ static int pool_init(pool_t *p) {
     // virtual pools that map it. Either gets device-local memory: 1.4.3's CPU never writes its 0x18c pool's storage
     // (unchanged over 3600 frames of the intro), so the guest storage and the GPU copy need no sync.
     if ((p->flags & NVN_MEMORY_POOL_FLAGS_GPU_NO_ACCESS) && !(p->flags & NVN_MEMORY_POOL_FLAGS_PHYSICAL)) return 1;
-    // A pool of zero bytes (NX2navi makes some now and then) holds no address the GPU can use: it gets no record. A record
+    // A pool of zero bytes (OOT-PC makes some now and then) holds no address the GPU can use: it gets no record. A record
     // would import 0 bytes (invalid usage; the driver refuses the memory) and put an empty range into the index at the
     // pool's address, where a lookup of the pool that starts there found the empty one first. vk_pool_fini finds no
     // record for it and does nothing.
@@ -753,7 +753,7 @@ static void pool_fini(pool_t *p) {
     else destroy_rec(c, r);
 }
 
-// NX2NAVI_TRACE=perf: a pool's initialize and finalize, with their imports, allocations, uploads and GPU waits, marked
+// OOTPC_TRACE=perf: a pool's initialize and finalize, with their imports, allocations, uploads and GPU waits, marked
 // as work a frame can wait for (perf.c perf_mark_add).
 int vk_pool_init(pool_t *p) {
     uint64_t t0 = perf_mark_begin();
@@ -818,7 +818,7 @@ int vk_pool_map_virtual(pool_t *v, int n, const void *requests) {
 // Per-thread copies of resolved import and physical pools that overlap no other index entry (so pidx_find picks them for
 // any range inside), valid while pool_gen is unchanged: the replay resolves a few dozen pools thousands of times per
 // frame (16 vertex streams and every buffer binding of each draw). Direct-mapped by the 4 KiB page of the address, so
-// a hit is one compare however many pools a frame touches. NX2NAVI_RESOLVE_CHECK=1 compares every hit with the locked
+// a hit is one compare however many pools a frame touches. OOTPC_RESOLVE_CHECK=1 compares every hit with the locked
 // lookup and stops on a difference.
 static int rec_class(const PoolRec *r) {
     if (r->kind != POOL_IMPORT) return VK_MCLS_DEVICE;
@@ -835,7 +835,7 @@ static ResolveHit *rhit_slot(uint64_t addr) { return &rhit[(addr >> 12 ^ addr >>
 static int resolve_check_on(void) {
     static int on = -1;
     if (on < 0) {
-        const char *e = cfg_get("NX2NAVI_RESOLVE_CHECK");
+        const char *e = cfg_get("OOTPC_RESOLVE_CHECK");
         on = e && *e && strcmp(e, "0");
     }
     return on;
@@ -958,7 +958,7 @@ static void flag_names(uint32_t f, char *buf, size_t n) {
 
 // One line per (kind, flags) group of the live pools, then the bytes the replay bound or copied per frame by pool
 // class since the previous census (the first one: since frame 1200). Logged at frame 1800 (in the world from the
-// run-game saves), at frame 600, and with NX2NAVI_TRACE=perf every 1800 frames.
+// run-game saves), at frame 600, and with OOTPC_TRACE=perf every 1800 frames.
 static void dirty_frame(uint64_t frame);
 
 static void mirror_log(uint64_t frame);
@@ -977,7 +977,7 @@ static void up_ts_log(uint64_t frame);
 
 static volatile uint64_t mirror_frame;   // the frame vk_mem_census last saw, for mirror_sync's log lines
 
-// NX2NAVI_TRACE=perf: the 600-frame memory lines now, at a segment's end and once a scene has settled (perf.c).
+// OOTPC_TRACE=perf: the 600-frame memory lines now, at a segment's end and once a scene has settled (perf.c).
 void vk_mem_snapshot(uint64_t frame) {
     if (rt_trace & RT_TRACE_PERF) vram_log(frame);
 }
@@ -989,13 +989,13 @@ void vk_mem_census(uint64_t frame) {
     static uint64_t window_start;
     if ((rt_trace & RT_TRACE_PERF) && frame % 600 == 0) vram_log(frame), mirror_pool_log(frame);
     if (frame && frame % ((rt_trace & RT_TRACE_PERF) ? 600 : HOLES_PERIOD) == 0) holes_log(frame), owner_log(frame);
-    if (vk_texture_compact_due()) compact_look();   // NX2NAVI_TEX_COMPACT: 0 at once with the setting off
+    if (vk_texture_compact_due()) compact_look();   // OOTPC_TEX_COMPACT: 0 at once with the setting off
     if ((rt_trace & RT_TRACE_PERF) && frame % 60 == 0) outside_watch(frame), up_ts_log(frame), vk_gtl_log(frame, 60);
     if ((rt_trace & RT_TRACE_PERF) && !vk_mirror_on) dirty_frame(frame);
     if ((rt_trace & RT_TRACE_PERF) ? frame % 60 == 0 : frame == 600 || frame == 1800)
         mirror_log(frame), shadow_log(frame), span_log(frame);   // mirror_log also logs the write-watch line
     else if (shadow_check_on() && frame % 60 == 0)
-        shadow_log(frame);   // NX2NAVI_SHADOW_CHECK: the shadow lines at that rate without the perf trace
+        shadow_log(frame);   // OOTPC_SHADOW_CHECK: the shadow lines at that rate without the perf trace
     if (frame == 1200) {   // loading is over: the first window starts here
         for (int c = 0; c < VK_MCLS_N; c++)
             for (int u = 0; u < VK_MUSE_N; u++) plat_xchg64(&traffic[c][u], 0);
@@ -1042,22 +1042,22 @@ void vk_mem_census(uint64_t frame) {
     window_start = frame;
 }
 
-// NX2NAVI_VRAM_BUDGET_MB (test; unset or 0: the device's): the device-local budget every decision here and in
+// OOTPC_VRAM_BUDGET_MB (test; unset or 0: the device's): the device-local budget every decision here and in
 // vk_texture.c compares with is at most this many MiB, so a large card behaves as a small one does under pressure
 // (mirrors refused or evicted, textures dropped). The heap lines still log what the driver reports.
 static uint64_t budget_cap(void) {
     static int64_t mb = -1;
     if (mb < 0) {
-        const char *s = cfg_get("NX2NAVI_VRAM_BUDGET_MB");
+        const char *s = cfg_get("OOTPC_VRAM_BUDGET_MB");
         int64_t v = s && *s ? atoll(s) : 0;
-        if (v > 0) rt_log("mem: the VRAM budget is taken as at most %lld MiB (NX2NAVI_VRAM_BUDGET_MB, a test)", (long long)v);
+        if (v > 0) rt_log("mem: the VRAM budget is taken as at most %lld MiB (OOTPC_VRAM_BUDGET_MB, a test)", (long long)v);
         mb = v > 0 ? v : 0;
     }
     return (uint64_t)mb << 20;
 }
 
-// NX2NAVI_VRAM_BALLAST_MB (test; unset or 0: none): that much device-local memory is taken when the allocator is made
-// and held until it goes, in buffers of BALLAST_PIECE of their own memory. NX2NAVI_VRAM_BUDGET_MB above changes only the
+// OOTPC_VRAM_BALLAST_MB (test; unset or 0: none): that much device-local memory is taken when the allocator is made
+// and held until it goes, in buffers of BALLAST_PIECE of their own memory. OOTPC_VRAM_BUDGET_MB above changes only the
 // number the decisions compare with; this fills the card for real, so the driver's own behaviour at its limit (slow
 // allocations, memory moved to system RAM, refusals) shows on a large card as it does on an 8 GB one or beside another
 // program's use.
@@ -1068,7 +1068,7 @@ static VmaAllocation ballast_alloc[BALLAST_MAX];
 static int nballast;
 
 void vk_mem_ballast(VmaAllocator vma) {   // vk_device.c, right after the allocator is made (before vk_ctx answers)
-    const char *s = cfg_get("NX2NAVI_VRAM_BALLAST_MB");
+    const char *s = cfg_get("OOTPC_VRAM_BALLAST_MB");
     uint64_t want = s && *s && atoll(s) > 0 ? (uint64_t)atoll(s) << 20 : 0, got = 0;
     if (!want) return;
     while (got < want && nballast < BALLAST_MAX) {
@@ -1081,7 +1081,7 @@ void vk_mem_ballast(VmaAllocator vma) {   // vk_device.c, right after the alloca
         if (vmaCreateBuffer(vma, &bi, &ai, &ballast_buf[nballast], &ballast_alloc[nballast], NULL) != VK_SUCCESS) break;
         got += bi.size, nballast++;
     }
-    rt_log("mem: %llu of %llu MiB of video memory taken and held for the session (NX2NAVI_VRAM_BALLAST_MB, a test)",
+    rt_log("mem: %llu of %llu MiB of video memory taken and held for the session (OOTPC_VRAM_BALLAST_MB, a test)",
            (unsigned long long)(got >> 20), (unsigned long long)(want >> 20));
 }
 
@@ -1166,7 +1166,7 @@ static uint32_t creg_max[RT_ADDRESS_LIMIT >> REG_SHIFT];
 // mirror summary, all consumers together; the queries that found written pages (they also flush TLBs) apart.
 static uint64_t ww_calls, ww_bytes, ww_ticks, ww_dirty_calls, ww_dirty_ticks, ww_pages;
 
-// NX2NAVI_TRACE=perf: a write-watch query, freeze or its follow-up query that took over 4 ms gets a line (the first
+// OOTPC_TRACE=perf: a write-watch query, freeze or its follow-up query that took over 4 ms gets a line (the first
 // 200). A frame some ten frames after an area load took 51.6 ms of replay with 1.2 ms of it in the replay's ops; the
 // replaying thread's samples sat in GetWriteWatch under vk_mem_mirror_begin and in the freeze's VirtualProtect, and no
 // thread of the process could be sampled for 28 ms in between.
@@ -1317,18 +1317,18 @@ static uint64_t snap_regions(uint64_t r0, uint64_t r1, uint32_t epoch) {
     return calls;
 }
 
-// NX2NAVI_SNAP_WIDEN=<regions> (8 with low_end_gpu = 1, else 0, off): a texture check that has to query widens the query to up to this
+// OOTPC_SNAP_WIDEN=<regions> (8 with low_end_gpu = 1, else 0, off): a texture check that has to query widens the query to up to this
 // many 2 MiB regions on each side, inside the import pool that holds the texture, so the textures of one pool are
-// snapped by one query a submission instead of one each. With freezing off (NX2NAVI_FREEZE_IDLE) an RX 580 in Hyrule
+// snapped by one query a submission instead of one each. With freezing off (OOTPC_FREEZE_IDLE) an RX 580 in Hyrule
 // Field made about 1,130 texture queries a frame, about 6 MiB each on average incl. repeats, 9.4 ms with the pools'.
 static int snap_widen_n(void) {
     static int n = -1;
     if (n < 0) {
-        const char *e = cfg_get("NX2NAVI_SNAP_WIDEN");
+        const char *e = cfg_get("OOTPC_SNAP_WIDEN");
         n = e && *e ? atoi(e) : 0;
         if (n < 0) n = 0;
         rt_log("mem: a texture check's write-watch query takes up to %d neighbouring 2 MiB regions of its pool on each "
-               "side (NX2NAVI_SNAP_WIDEN)", n);
+               "side (OOTPC_SNAP_WIDEN)", n);
     }
     return n;
 }
@@ -1486,7 +1486,7 @@ void vk_mem_snap_stats(uint64_t *checks, uint64_t *calls, uint64_t *untracked) {
     *untracked = __atomic_exchange_n(&n_snap_untracked, 0, __ATOMIC_RELAXED);
 }
 
-// ---------------------------------------------------------------- dirty census (NX2NAVI_TRACE=perf)
+// ---------------------------------------------------------------- dirty census (OOTPC_TRACE=perf)
 // What a device-local mirror of the buffer-bound pools would upload. The replay notes every
 // imported pool it binds as a vertex, index, uniform, storage or indirect buffer (vk_mem_bound_note). At the start of
 // each submit one write-watch query per run of such pools stamps the pages written since with a new generation, in the
@@ -1588,13 +1588,13 @@ static int query_stamp(uint64_t lo, uint64_t hi, uint32_t g) {
 //     B, the CPU has written Y again between the two snapshots: B's sync copies P in whole and uploads it, X
 //       is guest memory's stale word again in both copies, and the draws read that.
 //   An import does not have the fault: its twin is guest memory, and a page copied up from there holds the store.
-//   Measured (NX2NAVI_SHADOW_CHECK, a standing run outdoors, RTX 5090 with NX2NAVI_SHADOW=1, 2026-11-10): the stores
+//   Measured (OOTPC_SHADOW_CHECK, a standing run outdoors, RTX 5090 with OOTPC_SHADOW=1, 2026-11-10): the stores
 //   go into one page each of ten pools of 20 and 44 KiB, and whole copy-ins overwrite one exactly four times a frame
 //   (240 in every 60 frames): A's case, the copy that precedes the frame's stores, which does no harm. B's second
 //   case would add to the four and was not seen in 1,800 frames; nothing proves it cannot happen where the frame's
 //   timing differs. (Counted when every part that used the table synced; a guest submission syncs once now, from the
 //   same write-watch snapshots, and the counts were not taken again.)
-//   NX2NAVI_SHADOW_TABLE_STORES=1 keeps the stores. The pages are found by their content: each whole copy-in leaves a
+//   OOTPC_SHADOW_TABLE_STORES=1 keeps the stores. The pages are found by their content: each whole copy-in leaves a
 //   hash of the page it wrote (smark), and the next one hashes the shadow page first. A different hash means something
 //   stored into the shadow in between, and with no base copy on the page that was a store through the table. That
 //   copy-in still overwrites the store (nothing tells its bytes from the CPU's), and from then on the page keeps a
@@ -1606,11 +1606,11 @@ static int query_stamp(uint64_t lo, uint64_t hi, uint32_t g) {
 //   the replay there (copy_marked). And it puts these pages under the rule of the bullet above: a count the CPU
 //   resets before that write-back has landed keeps counting from its old value, where the whole copy-in of today
 //   resets it every time; whether the game resets any of these words from the CPU is not known.
-// NX2NAVI_SHADOW_CHECK=1 counts, with the shadow line and at its rate every 60 frames (shadow_table_log): the whole
+// OOTPC_SHADOW_CHECK=1 counts, with the shadow line and at its rate every 60 frames (shadow_table_log): the whole
 // copy-ins that overwrote a store through the table, per pool; the write-backs that moved bytes into a page the CPU
 // had written since its copy-in (cpu_wrote_since); the bytes both sides changed since their base copy (taken from the
 // CPU at a copy-in, from the GPU at a fence); what the copy-ins cost by kind.
-// NX2NAVI_SHADOW=1/0 forces the mode on or off; the default is on for Linux and Wine, except for NVIDIA's own driver on
+// OOTPC_SHADOW=1/0 forces the mode on or off; the default is on for Linux and Wine, except for NVIDIA's own driver on
 // Linux, where imports ran about twice as fast on 0.7.1 (mirror_mode).
 #define SB_PAGE 4096ull
 static PlatMutex shadow_lock = PLAT_MUTEX_INIT;   // after pool_lock; before gen_lock
@@ -1623,7 +1623,7 @@ static uint64_t s_wb_seen, s_wb_ticks;            // shadow_lock: bytes the fenc
 static uint64_t s_q_ticks;                        // shadow_lock: the copy-ins' write-watch queries
 static int wb_no_reup(void);
 // Pages a shader stores into through the device address table. The two switches are read in mirror_mode.
-// s_learn (NX2NAVI_SHADOW_TABLE_STORES: such pages get a base copy and a write-back) and s_check (NX2NAVI_SHADOW_CHECK:
+// s_learn (OOTPC_SHADOW_TABLE_STORES: such pages get a base copy and a write-back) and s_check (OOTPC_SHADOW_CHECK:
 // the counts below marked "check") are defined with vk_mem_dmabuf_probe, which may turn shadow storage on late.
 static PoolRec **tpools;                          // shadow_lock: the pools that have such pages
 static int ntpools, ctpools;
@@ -1822,7 +1822,7 @@ static void table_page_add(PoolRec *r, uint64_t pg) {
     r->tlisted = 1;
 }
 
-// NX2NAVI_SHADOW_CHECK: the bytes of [0, n) that both sides changed since the base copy b and that now differ, which a
+// OOTPC_SHADOW_CHECK: the bytes of [0, n) that both sides changed since the base copy b and that now differ, which a
 // merge of src into dst is about to settle in src's favour.
 static uint64_t both_changed(const uint8_t *dst, const uint8_t *src, const uint8_t *b, uint64_t n) {
     uint64_t k = 0;
@@ -1834,10 +1834,10 @@ static uint64_t both_changed(const uint8_t *dst, const uint8_t *src, const uint8
 // whether the shadow page still holds what the last such copy left: if not, a shader stored into it through the table
 // meanwhile, and this copy overwrites that store ("Pages a shader stores into" above says why it cannot be kept, and
 // what the page gets from here on).
-// Only with NX2NAVI_SHADOW_TABLE_STORES or NX2NAVI_SHADOW_CHECK (shadow_copy). A mark is two hashes of the page, one
+// Only with OOTPC_SHADOW_TABLE_STORES or OOTPC_SHADOW_CHECK (shadow_copy). A mark is two hashes of the page, one
 // of them of bytes the copy would not have read: outdoors, where 2,400 pages a frame are copied in whole, the marks
 // cost 1.8 ms a frame of the replay (3.09 against 1.32 ms of copy-ins, 67 against 75 fps, RTX 5090 with
-// NX2NAVI_SHADOW=1, 2026-11-10).
+// OOTPC_SHADOW=1, 2026-11-10).
 static void copy_marked(PoolRec *r, uint64_t a, uint64_t e) {
     if (!r->smark) {
         r->smark = calloc((r->import_hi - r->import_lo) / SB_PAGE, sizeof *r->smark);
@@ -1985,7 +1985,7 @@ void vk_mem_gpu_pending(uint64_t addr, uint64_t size) {
     plat_mutex_unlock_shared(&pool_lock);
 }
 
-// NX2NAVI_WB_NO_REUP (default 1; 0 = off): the pages a VRAM mirror wrote back into guest memory are not copied up into
+// OOTPC_WB_NO_REUP (default 1; 0 = off): the pages a VRAM mirror wrote back into guest memory are not copied up into
 // it again at its next sync. vk_gpu_written stamps the pages the GPU wrote, at the fence, so the texture cache re-reads
 // them; the same stamps made mirror_sync copy them back up into the mirror the write-back had read them from: the
 // storage buffers the game's compute shaders write went down and came back up every frame, about 57 of the 60 MiB copied
@@ -1996,27 +1996,27 @@ static int wb_reup_off = -1;
 static int wb_no_reup(void) {
     if (wb_reup_off < 0) {
         int on = rt_knob("WB_NO_REUP", "1") == 1;
-        rt_log("mem: pages a VRAM mirror wrote back %s (NX2NAVI_WB_NO_REUP)",
+        rt_log("mem: pages a VRAM mirror wrote back %s (OOTPC_WB_NO_REUP)",
                on ? "are not copied up into it again" : "are copied up into it again");
         __atomic_store_n(&wb_reup_off, on, __ATOMIC_RELEASE);
     }
     return wb_reup_off;
 }
 
-// NX2NAVI_SHADOW_BULK_WRITE=1 (default 0): before a write-back stores into guest memory, the write watch's protection
+// OOTPC_SHADOW_BULK_WRITE=1 (default 0): before a write-back stores into guest memory, the write watch's protection
 // of the whole range is cleared in one call (plat_mem_prepare_write). Where the watch protects pages (Linux), the
 // first store into each page otherwise takes a fault of its own; the pages count as written either way.
 static int shadow_bulk_write(void) {
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_SHADOW_BULK_WRITE");
+        on = cfg_bool("OOTPC_SHADOW_BULK_WRITE");
         if (on) rt_log("mem: shadow write-backs clear the write watch's protection of their range in one call "
-                       "(NX2NAVI_SHADOW_BULK_WRITE)");
+                       "(OOTPC_SHADOW_BULK_WRITE)");
     }
     return on;
 }
 
-// NX2NAVI_SHADOW_CHECK: the CPU wrote guest page pg after the copy-in that sgen stands for: a write-watch snapshot
+// OOTPC_SHADOW_CHECK: the CPU wrote guest page pg after the copy-in that sgen stands for: a write-watch snapshot
 // stamped it later, or its write-watch bit is set and no snapshot has read it yet. A write-back that moves bytes into
 // such a page may have come after a CPU write it should have come before ("The game must not get ahead of the
 // write-backs" above); a page of which the CPU wrote other bytes counts too.
@@ -2130,7 +2130,7 @@ static int lazy_clean(uint64_t lo, uint64_t hi, void *ctx);
 
 void vk_gpu_written_back(uint64_t addr, uint64_t size) {
     gpu_written(addr, size, 1);
-    // NX2NAVI_WB_PROBE: the bytes are in guest memory now; note who reads them next. With shadow storage they get there
+    // OOTPC_WB_PROBE: the bytes are in guest memory now; note who reads them next. With shadow storage they get there
     // later, in the submission's shadow_wb_cb, whose thaw would end the probe at once: that job arms it instead.
     if (!shadow_on) mem_probe(addr, size);
     VkMemSpan sp;
@@ -2156,14 +2156,14 @@ int vk_mem_mirrored(uint64_t addr, uint64_t size) {
 }
 
 // shadow_lock held, with the shadow line: the pages a shader stores into through the device address table ("shadow
-// storage" above), and with NX2NAVI_SHADOW_CHECK (pool_lock held shared too, for the index) what the copy-ins did and
+// storage" above), and with OOTPC_SHADOW_CHECK (pool_lock held shared too, for the index) what the copy-ins did and
 // cost and the pools whose stores were overwritten most since the last line.
 #define TABLE_LOG_TOP 6
 static void shadow_table_log(uint64_t frame) {
     rt_log("mem: shadow table stores at frame %llu (%s): %llu pages in %d pools keep a base copy; since the last: %llu whole "
            "copy-ins overwrote a store (%llu so far), %llu pages copied in with a mark; written back %.3f MiB of %.1f "
            "compared in %llu fence jobs, %.2f ms",
-           (unsigned long long)frame, s_learn ? "NX2NAVI_SHADOW_TABLE_STORES=1: kept from the second copy-in on" : "overwritten",
+           (unsigned long long)frame, s_learn ? "OOTPC_SHADOW_TABLE_STORES=1: kept from the second copy-in on" : "overwritten",
            (unsigned long long)s_tab_pages, ntpools, (unsigned long long)s_tab_over, (unsigned long long)s_t_over_all,
            (unsigned long long)s_marked, s_tab_wb / 1048576.0, s_tab_wb_seen / 1048576.0, (unsigned long long)s_tab_wb_jobs,
            qpc_ms(s_tab_wb_ticks));
@@ -2382,7 +2382,7 @@ static void dirty_frame(uint64_t frame) {
 // ---------------------------------------------------------------- VRAM mirror of buffer-bound pools
 // An imported pool keeps vertices, indices, constants
 // and storage buffers in system memory, so a discrete GPU reads them over PCIe on every draw (GTX 1050 Ti and RTX
-// 3090 Ti: about 110 ms of GPU time per frame in the field). In mirror mode (device class discrete, NX2NAVI_MEMORY) an
+// 3090 Ti: about 110 ms of GPU time per frame in the field). In mirror mode (device class discrete, OOTPC_MEMORY) an
 // imported pool gets a device-local buffer over its imported range the first time the replay uses it as a vertex,
 // index, uniform, storage or indirect buffer (vk_mem_use). From then on those bindings, and the buffer copies, fills
 // and uniform updates that touch the pool (vk_mem_pick), use the mirror at the same offsets. Guest memory stays what
@@ -2392,17 +2392,17 @@ static void dirty_frame(uint64_t frame) {
 //   consumer, the shared page generations) and every page the CPU-side tables (cgen_chunk) stamped after the mirror's
 //   mgen goes into a copy. Where a region of the pool is not write-watched, so do the nvnMemoryPoolFlushMappedRange
 //   ranges, each on its own: one span from the lowest to the highest flush of a 252 MiB pool copied up to the whole
-//   pool for a few MiB flushed, 30-50 ms of GPU time over PCIe 3.0 x8 in crowded towns (NX2NAVI_FLUSH_SPAN=1 restores
+//   pool for a few MiB flushed, 30-50 ms of GPU time over PCIe 3.0 x8 in crowded towns (OOTPC_FLUSH_SPAN=1 restores
 //   it). Where the write watch covers the pool, a flushed page the CPU wrote is a written page already, and the game's
 //   flushes of whole pools it had not written cost 47-57 MiB of copies a frame in Kokiri Forest (2026-11-09);
-//   NX2NAVI_FLUSH_UPLOAD=1 copies them anyway. The first use copies the whole range. The copies run in a prologue command
+//   OOTPC_FLUSH_UPLOAD=1 copies them anyway. The first use copies the whole range. The copies run in a prologue command
 //   buffer that vk_sync.c submits right before the part that accessed the mirror first, between full barriers.
 //   vk_mem_mirror_begin snaps the regions of the pools the previous submission accessed in a few merged queries.
 // - GPU -> guest: what the replay writes into a mirror (storage buffers its shaders write, buffer copies, fills,
 //   uniform updates, texture-to-buffer copies: vk_mem_gpu_wrote) goes back into the imported buffer at the end of the
 //   submission, exact byte ranges, before the fence signals (vk_mem_mirror_end). At the fence those pages get a new
 //   generation for the texture checks (vk_gpu_written_back) but not in the CPU-side tables: the mirror holds the bytes.
-// - NX2NAVI_MEMORY=verify: every submission also copies up to VERIFY_BYTES of mirror pages, round robin, into host memory;
+// - OOTPC_MEMORY=verify: every submission also copies up to VERIFY_BYTES of mirror pages, round robin, into host memory;
 //   at its fence the pages the CPU has not written since their sync are compared with guest memory.
 // A pool stays imported when its mirror would not fit the VRAM budget, its range is not write-watched, it overlaps
 // another pool or the allocation fails.
@@ -2418,7 +2418,7 @@ static int mirror_gap = 2;             // pre-snap: hot pools at most this many 
 static uint32_t pframe;                // replay: frames begun (vk_mem_mirror_begin: a place not after the last one's)
 static int pplace = 99;                // replay: the place of the last submission vk_mem_mirror_begin saw
 
-// NX2NAVI_PRESNAP_PLACE=1 (default), 0, ab: a submission's pre-snap (vk_mem_mirror_begin) takes the write-watch
+// OOTPC_PRESNAP_PLACE=1 (default), 0, ab: a submission's pre-snap (vk_mem_mirror_begin) takes the write-watch
 // snapshots of the pools the submission at its place in the last frame synced, not those the submission before it
 // synced. In Kokiri Forest the frame's first submission (#0) and its fourth (#3) use no pool, and their pre-snaps
 // covered the pools of the submission before them, #5's and #2's: 36.8 queries over 282 MiB a frame, 0.23-0.31 ms; then
@@ -2453,11 +2453,11 @@ static int npend, cpend, nwbl, cwbl;
 static VkBufferCopy *mregions;         // replay: vkCmdCopyBuffer regions
 static int cregions;
 static PlatMutex flush_lock = PLAT_MUTEX_INIT;
-static int flush_cap = FLUSH_RANGES;   // ranges a pool keeps; 1 with NX2NAVI_FLUSH_SPAN=1
-static int flush_upload;               // NX2NAVI_FLUSH_UPLOAD=1: flush ranges are copied where the write watch sees them too
-// NX2NAVI_FLUSH_SKIP_CLEAN (flush_clean_bytes in the 0.5.0 and 0.6.0 fixes: flushed ranges upload only the pages the CPU
+static int flush_cap = FLUSH_RANGES;   // ranges a pool keeps; 1 with OOTPC_FLUSH_SPAN=1
+static int flush_upload;               // OOTPC_FLUSH_UPLOAD=1: flush ranges are copied where the write watch sees them too
+// OOTPC_FLUSH_SKIP_CLEAN (flush_clean_bytes in the 0.5.0 and 0.6.0 fixes: flushed ranges upload only the pages the CPU
 // wrote) is this default since 0.6.1: a flush range of a write-watched pool is not copied at all; the key stays known so an
-// nx2navi.ini that sets it reads without a warning, and does nothing.
+// OOT-PC.ini that sets it reads without a warning, and does nothing.
 
 typedef struct {
     uint64_t subs, syncs, upload_bytes, upload_copies, first_n, first_bytes, wb_bytes, wb_copies, wb_ranges;
@@ -2474,27 +2474,27 @@ static volatile int64_t m_live_n, m_live_bytes, m_refused_n[MR_N], m_refused_byt
 static volatile int64_t m_flush_calls, m_flush_bytes, v_pages, v_skipped, v_mismatch;
 
 static void mirror_mode(int discrete, int nvidia_own) {
-    const char *e = cfg_value("NX2NAVI_MEMORY");
+    const char *e = cfg_value("OOTPC_MEMORY");
     int mode = discrete ? 1 : 0;   // 0 import, 1 mirror, 2 verify
     const char *why = discrete ? "auto, discrete gpu" : "auto, uma";
     if (strcmp(e, "auto")) {
-        if (!strcmp(e, "import")) mode = 0, why = "NX2NAVI_MEMORY=import";
-        else if (!strcmp(e, "mirror")) mode = 1, why = "NX2NAVI_MEMORY=mirror";
-        else if (!strcmp(e, "verify")) mode = 2, why = "NX2NAVI_MEMORY=verify";
-        else rt_log("mem: NX2NAVI_MEMORY=%s is not import, mirror, verify or auto: auto", e);
+        if (!strcmp(e, "import")) mode = 0, why = "OOTPC_MEMORY=import";
+        else if (!strcmp(e, "mirror")) mode = 1, why = "OOTPC_MEMORY=mirror";
+        else if (!strcmp(e, "verify")) mode = 2, why = "OOTPC_MEMORY=verify";
+        else rt_log("mem: OOTPC_MEMORY=%s is not import, mirror, verify or auto: auto", e);
     }
     vk_mirror_on = mode > 0;
     mirror_verify = mode == 2;
-    const char *g = cfg_get("NX2NAVI_MIRROR_GAP");
+    const char *g = cfg_get("OOTPC_MIRROR_GAP");
     mirror_gap = g && *g ? atoi(g) : 2;
     if (mirror_gap < 0) mirror_gap = 0;
     if (rt_knob("FLUSH_SPAN", "0")) {
         flush_cap = 1;
-        rt_log("mem: a pool's flushes copy one span from the lowest to the highest (NX2NAVI_FLUSH_SPAN=1)");
+        rt_log("mem: a pool's flushes copy one span from the lowest to the highest (OOTPC_FLUSH_SPAN=1)");
     }
     flush_upload = rt_knob("FLUSH_UPLOAD", "0") == 1;
-    if (flush_upload) rt_log("mem: flushed ranges are copied into the mirrors as well as written pages (NX2NAVI_FLUSH_UPLOAD=1)");
-    // Submissions a region stays unwritten before it is frozen (NX2NAVI_FREEZE_IDLE; 0: no freezing). 60 was chosen
+    if (flush_upload) rt_log("mem: flushed ranges are copied into the mirrors as well as written pages (OOTPC_FLUSH_UPLOAD=1)");
+    // Submissions a region stays unwritten before it is frozen (OOTPC_FREEZE_IDLE; 0: no freezing). 60 was chosen
     // when a thaw by a write cost about 60 us: in a fight 100 of the 257 MiB queried a frame lay in regions idle for
     // 30-299 submissions. While the game streams an area, though, it creates and finalizes up to 1,500 memory pools a
     // second, the driver pins and unpins the imported ones, and every VirtualQuery and VirtualProtect in the process
@@ -2504,10 +2504,10 @@ static void mirror_mode(int discrete, int nvidia_own) {
     // with freezing off, at 3-3.6 ms a frame more of write-watch queries over 3.5 GiB). At 1800 (about 3 s) a walk
     // through Hyrule Field and Ganon's Castle froze 0.1 regions a second, thawed none, queried 14 MiB in 0.03 ms a
     // frame, and had such a frame in 1 of 253 seconds.
-    const char *fi = cfg_get("NX2NAVI_FREEZE_IDLE");
+    const char *fi = cfg_get("OOTPC_FREEZE_IDLE");
     freeze_idle = fi && *fi ? atoi(fi) : 1800;
     if (freeze_idle < 0) freeze_idle = 0;
-    const char *sh = cfg_get("NX2NAVI_SHADOW");
+    const char *sh = cfg_get("OOTPC_SHADOW");
 #ifdef _WIN32
     shadow_on = sh && *sh ? strcmp(sh, "0") != 0 : plat_is_wine();
 #else
@@ -2515,11 +2515,11 @@ static void mirror_mode(int discrete, int nvidia_own) {
     // pages), so there the copies are only the slower path: in Kokiri Forest on 0.7.1 (RTX 4090, driver 615.78) imports
     // with VRAM mirrors ran at 51.9 frames a second and the copies at 27.4, and the copies hold about 5 GB. What a
     // shader stores through the device address table into a pool with a shadow copy also does not come back to guest
-    // memory (vk_gpa.c). The pools stay imports unless NX2NAVI_SHADOW asks for the copies. The open driver for the same
+    // memory (vk_gpa.c). The pools stay imports unless OOTPC_SHADOW asks for the copies. The open driver for the same
     // cards keeps the copies: it is not measured. The AppImage's play.sh has set the same for this driver since 0.6.0.
     shadow_on = sh && *sh ? strcmp(sh, "0") != 0 : !nvidia_own;
-    // Guest memory a memfd's (NX2NAVI_DMABUF, platform/linux.c): the pools are dma-buf imports ("dma-buf imports"),
-    // whatever the driver, unless NX2NAVI_SHADOW=1 asks for the copies. A device that cannot import dma-bufs keeps the
+    // Guest memory a memfd's (OOTPC_DMABUF, platform/linux.c): the pools are dma-buf imports ("dma-buf imports"),
+    // whatever the driver, unless OOTPC_SHADOW=1 asks for the copies. A device that cannot import dma-bufs keeps the
     // copies: a shared mapping's pages are no host-pointer import on RADV.
     uint64_t lim = 0;
     const char *dmwhy = "";
@@ -2534,35 +2534,35 @@ static void mirror_mode(int discrete, int nvidia_own) {
         dmabuf_on = dmabuf_exts && !forced && lim >= (1ull << 30);
         shadow_on = !dmabuf_on;
         dmabuf_limit = lim;
-        const char *mbs = cfg_get("NX2NAVI_DMABUF_MB");
+        const char *mbs = cfg_get("OOTPC_DMABUF_MB");
         int mb = mbs && *mbs ? atoi(mbs) : 64;
         span_size = (uint64_t)(mb > 0 ? mb : 64) << 20;
         if (span_size > dmabuf_limit) span_size = dmabuf_limit & ~0xfffull;
         if (span_size < (2ull << 20)) span_size = 2ull << 20;
         if (dmabuf_on)
             rt_log("mem: guest memory is a memfd's: CPU-visible pools are imported as dma-bufs of it, in spans of %llu MiB "
-                   "(NX2NAVI_DMABUF_MB; udmabuf's limit %llu MiB)", (unsigned long long)(span_size >> 20),
+                   "(OOTPC_DMABUF_MB; udmabuf's limit %llu MiB)", (unsigned long long)(span_size >> 20),
                    (unsigned long long)(dmabuf_limit >> 20));
         else
             rt_log("mem: guest memory is a memfd's, but its pools get shadow copies: %s",
-                   forced ? "NX2NAVI_SHADOW asks for them"
+                   forced ? "OOTPC_SHADOW asks for them"
                    : !dmabuf_exts ? "the device cannot import dma-bufs (VK_KHR_external_memory_fd, VK_EXT_external_memory_dma_buf)"
                                   : small);
     } else if (*dmwhy) {
-        rt_log("mem: guest memory is not a memfd's (NX2NAVI_DMABUF): %s: CPU-visible pools are %s, as with NX2NAVI_DMABUF=0", dmwhy,
+        rt_log("mem: guest memory is not a memfd's (OOTPC_DMABUF): %s: CPU-visible pools are %s, as with OOTPC_DMABUF=0", dmwhy,
                shadow_on ? "host-visible copies of guest memory (shadow storage)" : "host-pointer imports");
     }
 #endif
     if (shadow_on) rt_log("mem: shadow storage: CPU-visible pools are host-visible copies of guest memory, not imports%s",
-                          sh && *sh ? " (NX2NAVI_SHADOW)" : "");
+                          sh && *sh ? " (OOTPC_SHADOW)" : "");
     s_learn = shadow_on && rt_knob("SHADOW_TABLE_STORES", "0") == 1;
-    s_check = shadow_on && cfg_bool("NX2NAVI_SHADOW_CHECK");
+    s_check = shadow_on && cfg_bool("OOTPC_SHADOW_CHECK");
     if (shadow_on)
         rt_log("mem: what shaders store through the device address table into a shadow copy %s "
-               "(NX2NAVI_SHADOW_TABLE_STORES)%s",
+               "(OOTPC_SHADOW_TABLE_STORES)%s",
                s_learn ? "is kept through the copy-ins and written back to guest memory, from the second copy-in of its page on"
                        : "is overwritten by the next whole copy-in of its page",
-               s_check ? "; NX2NAVI_SHADOW_CHECK counts the overwrites" : "");
+               s_check ? "; OOTPC_SHADOW_CHECK counts the overwrites" : "");
     rt_log("mem: mode %s (%s): %s", mode == 2 ? "verify" : mode ? "mirror" : "import", why,
            mode ? "pools used as buffers get a device-local mirror" : "every CPU-visible pool is imported host memory");
     // Import is the integrated-GPU mode. On a discrete card every draw reads the pools over PCIe (the comment above
@@ -2645,7 +2645,7 @@ static void refuse(PoolRec *r, int why, const char *what) {
     plat_add64(&m_refused_bytes[why], (int64_t)n);
 }
 
-// ---- eviction (NX2NAVI_MIRROR_EVICT, default on; 0 = a pool over the budget stays imported, as before)
+// ---- eviction (OOTPC_MIRROR_EVICT, default on; 0 = a pool over the budget stays imported, as before)
 // A pool whose mirror would not fit the VRAM budget stayed imported for good, however hot, while mirrors nothing had
 // used for minutes kept their VRAM; draws that read an imported pool over PCIe bring a discrete GPU down to a few
 // frames per second. Now a new mirror that does not fit takes the room of mirrors no submission synced for MIRROR_IDLE
@@ -2674,7 +2674,7 @@ static uint64_t room_bytes, room_fence;   // replay: bytes evicted that the budg
 static int evict_enabled(void) {
     if (mirror_evict_on < 0) {
         mirror_evict_on = rt_knob("MIRROR_EVICT", "1");
-        rt_log("mem: idle mirrors %s (NX2NAVI_MIRROR_EVICT=%d)", mirror_evict_on ? "make room for new ones and for textures under VRAM pressure"
+        rt_log("mem: idle mirrors %s (OOTPC_MIRROR_EVICT=%d)", mirror_evict_on ? "make room for new ones and for textures under VRAM pressure"
                                                                                : "stay; a pool over the VRAM budget stays imported", mirror_evict_on);
     }
     return mirror_evict_on;
@@ -2743,11 +2743,11 @@ static uint64_t mirror_evict(uint64_t need, uint32_t min_idle, const char *why) 
     return freed;
 }
 
-// ---- twins (NX2NAVI_GPA_TWIN_MAX_KB, default 0: every mirror has one)
+// ---- twins (OOTPC_GPA_TWIN_MAX_KB, default 0: every mirror has one)
 // Shaders write through the device address table into both a mirror and its pool's imported buffer, guest memory
 // (vk_gpa.c, "The twin"): such writes are not recorded as GPU writes, so with the mirror alone the CPU never saw
 // them and a sync of a page the CPU wrote copied the stale guest page over them. On a discrete GPU the second write
-// crosses PCIe: on PCIe 3.0 the twins cost about 3 ms of GPU time a frame in Kokiri Forest (NX2NAVI_GPA_TWIN=0 against
+// crosses PCIe: on PCIe 3.0 the twins cost about 3 ms of GPU time a frame in Kokiri Forest (OOTPC_GPA_TWIN=0 against
 // on). The writes that went wrong without them were the foliage counts and records in pools of 20 and 44 KiB.
 // GPA_TWIN_MAX_KB=n gives a twin only to mirrors of pools up to n KiB; a larger mirror keeps the table's writes to
 // itself (its record names the mirror twice, which sends the second write to the table's scratch page) and its
@@ -2759,16 +2759,16 @@ static int64_t m_untwinned_n, m_untwinned_bytes;
 
 static int twin_wanted(const PoolRec *r) {
     if (twin_max < 0) {
-        int kb = cfg_int("NX2NAVI_GPA_TWIN_MAX_KB");
+        int kb = cfg_int("OOTPC_GPA_TWIN_MAX_KB");
         twin_max = kb > 0 ? (int64_t)kb << 10 : 0;
         if (twin_max)
             rt_log("mem: only mirrors of pools up to %d KiB send the device address table's writes to guest memory "
-                   "too (NX2NAVI_GPA_TWIN_MAX_KB); larger ones keep them and are not evicted", kb);
+                   "too (OOTPC_GPA_TWIN_MAX_KB); larger ones keep them and are not evicted", kb);
     }
     return !twin_max || (int64_t)(r->import_hi - r->import_lo) <= twin_max;
 }
 
-// ---- when the device address table takes up a new mirror (NX2NAVI_GPA_LATE, default 1; 0 = at once, as before)
+// ---- when the device address table takes up a new mirror (OOTPC_GPA_LATE, default 1; 0 = at once, as before)
 // A mirror is made while the replay records a part of a submission, and its first copy of the pool is in that part's
 // prologue. The table is memory the shaders read as they run, so a change of it made here, at record time, reaches
 // every part already handed to the queue (the submissions before, and the earlier parts of this one), which run
@@ -2794,7 +2794,7 @@ static int gpa_late(void) {
     static int on = -1;
     if (on < 0) {
         on = rt_knob("GPA_LATE", "1") == 1;
-        rt_log("mem: the device address table takes up a new VRAM mirror %s (NX2NAVI_GPA_LATE)",
+        rt_log("mem: the device address table takes up a new VRAM mirror %s (OOTPC_GPA_LATE)",
                on ? "in queue order, after the mirror's first copy" : "at once, as before");
     }
     return on;
@@ -3202,7 +3202,7 @@ int vk_mem_mirror_probe(uint64_t addr) {
 
 // ---- write-back merge
 // A storage buffer a shader writes whole records of does not
-// go back to guest memory as a plain copy. The CPU may write fields of the same records while the GPU runs: NX2navi's
+// go back to guest memory as a plain copy. The CPU may write fields of the same records while the GPU runs: OOT-PC's
 // particle emitters write a new particle's whole record into a free slot of a buffer that the simulation shaders update
 // (the waterfall splashes and mist, 2026-11-02), and a plain copy puts the mirror's stale copy of those words back over
 // them. Instead:
@@ -3214,11 +3214,11 @@ int vk_mem_mirror_probe(uint64_t addr) {
 // - vk_mem_mirror_end: shaders/wb_merge.comp writes each 32-bit word that differs between the mirror and the snapshot
 //   into the pool's imported buffer (wb_merge_record), one dispatch per pool and group of ranges.
 // Words the GPU left unchanged keep the CPU's value; a word both changed takes the GPU's, as a plain copy would.
-// NX2NAVI_WB_MERGE=0 restores the plain copies; so does a pipeline or allocation failure.
+// OOTPC_WB_MERGE=0 restores the plain copies; so does a pipeline or allocation failure.
 #define SNAP_CHUNK (1u << 20)
 #define MERGE_SPAN (64ull << 20)   // the bytes of one pool a merge dispatch binds at most
 #define MERGE_WORDS (65535u * 64u) // the words one merge dispatch covers at most
-// Larger written ranges stay plain copies (NX2NAVI_WB_MERGE_MAX, MiB, default 32). A plain copy writes the whole range
+// Larger written ranges stay plain copies (OOTPC_WB_MERGE_MAX, MiB, default 32). A plain copy writes the whole range
 // over PCIe at the end of each submission even when the shader changed a few words; a merge copies it within video
 // memory and writes only the words that changed. With a 4 MiB limit the field ran about 46 MiB of plain write-back a
 // frame in ranges of about 5.5 MiB, just above it; at 16 the same outdoor route went from a median 47.5 to 67.3 fps and
@@ -3230,12 +3230,12 @@ int vk_mem_mirror_probe(uint64_t addr) {
 static uint64_t merge_max(void) {
     static uint64_t m;
     if (!m) {
-        const char *e = cfg_get("NX2NAVI_WB_MERGE_MAX");
+        const char *e = cfg_get("OOTPC_WB_MERGE_MAX");
         uint64_t mib = e && *e ? (uint64_t)strtoull(e, NULL, 10) : 32;
         m = mib << 20;
         if (!m) m = 1;
         if (m > MERGE_MAX_LIMIT) m = MERGE_MAX_LIMIT;
-        rt_log("mem: write-back merge covers ranges up to %.1f MiB (NX2NAVI_WB_MERGE_MAX)", m / 1048576.0);
+        rt_log("mem: write-back merge covers ranges up to %.1f MiB (OOTPC_WB_MERGE_MAX)", m / 1048576.0);
     }
     return m;
 }
@@ -3316,8 +3316,8 @@ fail:
 
 static int merging(void) {
     if (merge_on < 0) {
-        merge_on = cfg_bool("NX2NAVI_WB_MERGE");
-        rt_log("mem: write-back merge %s (NX2NAVI_WB_MERGE)", merge_on ? "on" : "off");
+        merge_on = cfg_bool("OOTPC_WB_MERGE");
+        rt_log("mem: write-back merge %s (OOTPC_WB_MERGE)", merge_on ? "on" : "off");
     }
     if (!merge_on) return 0;
     if (!WM.tried) merge_init(vk_ctx());
@@ -3409,7 +3409,9 @@ static void merge_dispatch(VkCommandBuffer cb, const SnapRange *s, int n, uint64
                                       .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                       .pBufferInfo = &bi[i]};
     rec_push(WM.push, cb, VK_PIPELINE_BIND_POINT_COMPUTE, WM.layout, 0, 5, w);   // in call order (vk_rec.h)
-    uint32_t pc[4] = {(uint32_t)n, total, (uint32_t)(base & (SB_PAGE - 1)), marks >= 0};
+    static int probe = -1;   // OOTPC_WB_MERGE_PROBE=1 (diagnosis): the merge reads and compares but writes nothing
+    if (probe < 0) probe = rt_knob("WB_MERGE_PROBE", "0");
+    uint32_t pc[4] = {(uint32_t)n, total, (uint32_t)(base & (SB_PAGE - 1)), (marks >= 0) | (probe ? 2u : 0u)};
     vkCmdPushConstants(cb, WM.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, pc);
     vkCmdDispatch(cb, (total + 63) / 64, 1, 1);
 }
@@ -3465,7 +3467,7 @@ static void shadow_wb_cb(void *arg) {   // completion thread
         }
         if (run) swb_run(run, end);
     }
-    // NX2NAVI_WB_PROBE (vk_gpu_written_back): every range is in guest memory now; a later range's thaw would end the
+    // OOTPC_WB_PROBE (vk_gpu_written_back): every range is in guest memory now; a later range's thaw would end the
     // probe of a region an earlier one armed, so the probes come last
     for (int i = 0; i < j->n; i++) mem_probe(j->g[i].addr, j->g[i].size);
     free(j);
@@ -3588,7 +3590,7 @@ static void snap_free(void *arg) {   // completion thread: the submission is don
     free(f);
 }
 
-// ---- lazy write-back (NX2NAVI_WB_LAZY; the default by platform and driver, wb_lazy_choice.h; memory.c "Lazy write-back")
+// ---- lazy write-back (OOTPC_WB_LAZY; the default by platform and driver, wb_lazy_choice.h; memory.c "Lazy write-back")
 // A range a shader wrote goes back to guest memory once and is then armed (vk_gpu_written_back, mem_lazy_arm). While it
 // stays armed, gpu_wrote leaves the later writes of its pages in the mirror: no snapshot, no merge, no copy. When the
 // CPU touches a page, memory.c calls lazy_fetch with the mirror and the imported buffer of the range: a copy of its
@@ -3668,11 +3670,11 @@ static int lz_wanted = -1;          // -1 not decided, 0 off, 1 on
 static const char *lz_why = "";     // the reason the log gave
 
 void vk_mem_lazy_decide(void) {
-    const char *set = cfg_is_set("NX2NAVI_WB_LAZY") ? cfg_get("NX2NAVI_WB_LAZY") : NULL;
+    const char *set = cfg_is_set("OOTPC_WB_LAZY") ? cfg_get("OOTPC_WB_LAZY") : NULL;
     WblChoice ch = wb_lazy_choice(set, WBL_ON_WINDOWS, vk_caps.driver_id);
     if (!vk_mirror_on) ch = (WblChoice){0, "no pool has a mirror in import mode"};
     else if (shadow_on) ch = (WblChoice){0, "shadow storage keeps it off"};
-    else if (ch.on && cfg_bool("NX2NAVI_WB_PROBE")) ch = (WblChoice){0, "the write-back probe watches the same pages"};
+    else if (ch.on && cfg_bool("OOTPC_WB_PROBE")) ch = (WblChoice){0, "the write-back probe watches the same pages"};
     lz_why = ch.why;
     __atomic_store_n(&lz_wanted, ch.on, __ATOMIC_RELEASE);
     rt_log("mem: lazy write-back %s: %s", ch.on ? "on" : "off", ch.why);
@@ -3708,7 +3710,7 @@ static int wb_lazy(void) {
 
 static void gpu_wrote_range(const VkMemSpan *sp, uint64_t size, int shader);
 
-// NX2NAVI_WB_SKIP_MB (default 0, off), a test switch for drivers that run without the lazy write-back (AMD's, and
+// OOTPC_WB_SKIP_MB (default 0, off), a test switch for drivers that run without the lazy write-back (AMD's, and
 // outside Windows: wb_lazy_choice.h): there, what a binding written by a shader or a copy holds goes back to guest
 // memory at the end of every submission, up to 66 MiB a frame in Hyrule Field. With it, a written range of at least
 // this many MiB goes back only for its first WB_SKIP_HEAD bytes and the rest stays in the mirror. The CPU reads a few
@@ -3720,11 +3722,11 @@ static void gpu_wrote_range(const VkMemSpan *sp, uint64_t size, int shader);
 static uint64_t wb_skip(void) {
     static int64_t at = -1;
     if (at < 0) {
-        int mb = cfg_int("NX2NAVI_WB_SKIP_MB");
+        int mb = cfg_int("OOTPC_WB_SKIP_MB");
         at = mb > 0 ? (int64_t)mb << 20 : 0;
         if (at)
             rt_log("mem: without the lazy write-back, written ranges of %d MiB or more go back to guest memory only for "
-                   "their first %u KiB (NX2NAVI_WB_SKIP_MB)", mb, WB_SKIP_HEAD >> 10);
+                   "their first %u KiB (OOTPC_WB_SKIP_MB)", mb, WB_SKIP_HEAD >> 10);
     }
     return (uint64_t)at;
 }
@@ -3861,7 +3863,7 @@ int vk_mem_flush_add_probe(void) {
     n = 0;
     n = flush_add(l, n, 0x10000, 0x11000, 1);
     n = flush_add(l, n, 0x40000, 0x41000, 1);
-    if (n != 1 || l[0].lo != 0x10000 || l[0].hi != 0x41000) return 5;                      // NX2NAVI_FLUSH_SPAN=1
+    if (n != 1 || l[0].lo != 0x10000 || l[0].hi != 0x41000) return 5;                      // OOTPC_FLUSH_SPAN=1
     return 0;
 }
 
@@ -3897,7 +3899,7 @@ void nvn_pool_flushed(const pool_t *p, uint64_t off, uint64_t size) {
 // 78 ms, and one freeze of 9 ms followed in each of the next 20 frames. A freeze only saves later write-watch queries
 // (about a microsecond per MiB per submission), so it can wait: a pass stops once it has spent freeze_budget_ns, and a
 // freeze over FREEZE_SLOW_NS holds the passes for FREEZE_BACKOFF_NS, doubled for each slow one in a row up to 2 s.
-// NX2NAVI_FREEZE_BUDGET_US (default 1000; 0: no budget and no backoff, as before).
+// OOTPC_FREEZE_BUDGET_US (default 1000; 0: no budget and no backoff, as before).
 #define FREEZE_SLOW_NS 2000000ull
 #define FREEZE_BACKOFF_NS 250000000ull
 #define FREEZE_BACKOFF_MAX_NS 2000000000ull
@@ -3906,7 +3908,7 @@ static uint64_t frz_hold_until, frz_backoff, frz_held_passes, frz_slow;   // gen
 
 static void freeze_pass(void) {
     if (freeze_budget_ns == ~0ull) {
-        long long us = cfg_int("NX2NAVI_FREEZE_BUDGET_US");
+        long long us = cfg_int("OOTPC_FREEZE_BUDGET_US");
         freeze_budget_ns = us > 0 ? (uint64_t)us * 1000 : 0;
     }
     uint64_t start = qpc();
@@ -3942,7 +3944,7 @@ static void freeze_pass(void) {
     }
 }
 
-// NX2NAVI_MIRROR_HOT (percent, 0 off): a mirrored pool whose copies each frame (CPU pages up, GPU writes back) reach this
+// OOTPC_MIRROR_HOT (percent, 0 off): a mirrored pool whose copies each frame (CPU pages up, GPU writes back) reach this
 // share of its size goes back to being read and written by the GPU in system memory. On an RX 580 in Kokiri Forest a
 // handful of 6-16 MiB pools the CPU refills every frame and compute shaders write took 66 MiB of uploads and 76 MiB of
 // write-backs a frame through the mirrors, the GPU idle 7.8 ms a frame with those copies queued; read in place, only
@@ -3964,10 +3966,10 @@ static uint64_t hot_frame0, n_demoted;
 
 static void hot_check(void) {
     if (mirror_hot < 0) {
-        const char *v = cfg_value("NX2NAVI_MIRROR_HOT");   // the settings row's default (0, off) when unset
+        const char *v = cfg_value("OOTPC_MIRROR_HOT");   // the settings row's default (0, off) when unset
         int p = v && *v ? atoi(v) : 0;
         mirror_hot = p < 0 ? 0 : p > 1000 ? 1000 : p;
-        if (mirror_hot) rt_log("mem: pools copied %d%% of their size a frame stay in system memory (NX2NAVI_MIRROR_HOT)", mirror_hot);
+        if (mirror_hot) rt_log("mem: pools copied %d%% of their size a frame stay in system memory (OOTPC_MIRROR_HOT)", mirror_hot);
     }
     if (!mirror_hot) return;
     uint64_t fr = mirror_frame;
@@ -4071,7 +4073,7 @@ void vk_mem_mirror_begin(void) {
 
 int vk_mem_mirror_pending(void) { return npend || snl_copied < nsnl || n_gpa_flip; }
 
-// NX2NAVI_MIRROR_CAPTURE_KB: the pages the CPU wrote since a VRAM mirror's last sync are copied out of guest memory by
+// OOTPC_MIRROR_CAPTURE_KB: the pages the CPU wrote since a VRAM mirror's last sync are copied out of guest memory by
 // the CPU when the part that needs them is handed to the queue, up to this many KiB a part, into a host buffer the
 // submission owns (a chunk of the snapshot pool, given back at its fence); the prologue copies them from there into
 // the mirror. Without it the prologue copies them from guest memory when the GPU runs it, a frame or more after the
@@ -4081,7 +4083,7 @@ int vk_mem_mirror_pending(void) { return npend || snl_copied < nsnl || n_gpa_fli
 // and when its device address table writes reach guest memory as well (a twin: what they write is not recorded); so
 // does a range with a page that cannot be read without a fault (mem_copy_readable: a lazily armed range). The
 // whole-pool copy of a mirror's first use is larger than the limit and stays with the GPU.
-// Unset or 0 with NX2NAVI_MIRROR_STAGE=1 (what low_end_gpu = 1 sets): CAPTURE_STAGE_KB. A submission whose prologue copied
+// Unset or 0 with OOTPC_MIRROR_STAGE=1 (what low_end_gpu = 1 sets): CAPTURE_STAGE_KB. A submission whose prologue copied
 // everything this way reads nothing of guest memory late, so its submit wait ends once the replay has submitted it
 // (vk_sync_recorded_wait); one with a range left to the GPU-time copy, or a draw that reads a pool without a mirror,
 // is noted (vk_mem_note_live) and its submit wait is the GPU's. The first form of this (0.8.0) copied while the replay
@@ -4098,12 +4100,12 @@ static int stage_on(void) {
 static uint64_t capture_cap(void) {
     static int64_t cap = -1;
     if (cap < 0) {
-        int kb = cfg_int("NX2NAVI_MIRROR_CAPTURE_KB");
+        int kb = cfg_int("OOTPC_MIRROR_CAPTURE_KB");
         if (kb <= 0 && stage_on()) kb = CAPTURE_STAGE_KB;
         cap = kb > 0 ? (int64_t)kb << 10 : 0;
         if (cap)
             rt_log("mem: mirror pages the CPU wrote are copied out of guest memory when their part is handed over, up to "
-                   "%d KiB a part (NX2NAVI_MIRROR_CAPTURE_KB, NX2NAVI_MIRROR_STAGE)", kb);
+                   "%d KiB a part (OOTPC_MIRROR_CAPTURE_KB, OOTPC_MIRROR_STAGE)", kb);
     }
     return (uint64_t)cap;
 }
@@ -4366,7 +4368,7 @@ int vk_mem_mirror_end(VkCommandBuffer cb, uint64_t fence) {
     return rec;
 }
 
-// NX2NAVI_TRACE=perf, every 600 frames: the mirrored pools that moved the most bytes since the last list, per frame: what
+// OOTPC_TRACE=perf, every 600 frames: the mirrored pools that moved the most bytes since the last list, per frame: what
 // their CPU writes and flushes copied up, how often a submission synced them, and what the GPU's writes sent back
 // (merged or copied). A pool whose upload is close to its size every frame is rewritten whole each frame.
 #define POOL_LOG_TOP 12
@@ -4406,7 +4408,7 @@ static void mirror_pool_log(uint64_t frame) {
     plat_mutex_unlock_shared(&pool_lock);
 }
 
-// One summary line: with NX2NAVI_TRACE=perf every 60 frames, else at frames 600 and 1800.
+// One summary line: with OOTPC_TRACE=perf every 60 frames, else at frames 600 and 1800.
 static void mirror_log(uint64_t frame) {
     static uint64_t last, ww_last;
     plat_mutex_lock(&gen_lock);
@@ -4422,10 +4424,10 @@ static void mirror_log(uint64_t frame) {
     mem_probe_report(frame);
     mem_lazy_report(frame, lz_skipped);
     lz_skipped = 0;
-    // NX2NAVI_WB_LAZY_TOUCH=<n> (test, 0 off): at each of these lines this thread reads a byte of n armed ranges, as
+    // OOTPC_WB_LAZY_TOUCH=<n> (test, 0 off): at each of these lines this thread reads a byte of n armed ranges, as
     // the game's CPU might, so the fault, the fetch and the hold run without waiting for the game to do it.
     static int touch = -1;
-    if (touch < 0) touch = cfg_int("NX2NAVI_WB_LAZY_TOUCH");
+    if (touch < 0) touch = cfg_int("OOTPC_WB_LAZY_TOUCH");
     if (touch > 0) {
         uint64_t at[16];
         int k = mem_lazy_pick(at, touch > 16 ? 16 : touch);
@@ -4484,7 +4486,7 @@ static void mirror_log(uint64_t frame) {
            a.flush_bytes / f / M, a.flush_calls / f, a.flush_sum / f / M, a.flush_skipped / f / M, capl);
     if (n_gpa_late)
         rt_log("mem: mirror frame %llu: the device address table took up %llu mirrors in queue order, after their first "
-               "copy, so far (NX2NAVI_GPA_LATE)", (unsigned long long)frame, (unsigned long long)n_gpa_late);
+               "copy, so far (OOTPC_GPA_LATE)", (unsigned long long)frame, (unsigned long long)n_gpa_late);
 }
 
 // After vram_log: every heap's usage as the driver reports it (VK_EXT_memory_budget) beside VMA's share of it, VMA by
@@ -4563,9 +4565,9 @@ static void heap_log(VkCtx *c, uint64_t frame, const VmaBudget *vb) {
     rt_log("%s", line);
     // The address-space walk of the census (plat_mem_census, 100-240 ms of VirtualQuery) runs on its own thread, but
     // it holds the process's address-space lock, which the game's threads take at every page fault and every
-    // VirtualAlloc: the present after each walk arrived 65-120 ms late. NX2NAVI_MEM_CENSUS=1 asks for it.
+    // VirtualAlloc: the present after each walk arrived 65-120 ms late. OOTPC_MEM_CENSUS=1 asks for it.
     static int census_on = -1;
-    if (census_on < 0) census_on = cfg_bool("NX2NAVI_MEM_CENSUS");
+    if (census_on < 0) census_on = cfg_bool("OOTPC_MEM_CENSUS");
     if (!census_on || plat_xchg32(&census_busy, 1)) return;
     CensusJob *j = malloc(sizeof *j);
     if (j) *j = (CensusJob){c, frame};
@@ -4654,7 +4656,7 @@ static VkBlockRow *mirror_rows(VkCtx *c, int *n) {
     return rows;
 }
 
-// NX2NAVI_TEX_COMPACT, when vk_texture_compact_due says the holes are due a look: the texture cache gets the mirrors'
+// OOTPC_TEX_COMPACT, when vk_texture_compact_due says the holes are due a look: the texture cache gets the mirrors'
 // rows, taken here because the pool lock is not to be taken under the texture lock, and plans a pass or not
 // (vk_texture.c vk_texture_compact_plan).
 static void compact_look(void) {
@@ -4666,7 +4668,7 @@ static void compact_look(void) {
     free(rows);
 }
 
-// Every HOLES_PERIOD frames (600 with NX2NAVI_TRACE=perf), in every run: how much of VMA's device-local blocks is
+// Every HOLES_PERIOD frames (600 with OOTPC_TRACE=perf), in every run: how much of VMA's device-local blocks is
 // holes, and how much of that a compaction of the textures could give back. The first two figures are VMA's own
 // (blocks and allocations, memory of its own counted in both). The rest is of the memory type the textures use most,
 // from the block table (vk_texture.c compact_table): the blocks that hold a texture, with the textures and VRAM
@@ -4704,7 +4706,7 @@ static void holes_log(uint64_t frame) {
            h.emptiable_drop / M);
 }
 
-// With NX2NAVI_TRACE=perf every 60 frames: a line when the device-local memory VMA did not allocate (vram_use_log's
+// With OOTPC_TRACE=perf every 60 frames: a line when the device-local memory VMA did not allocate (vram_use_log's
 // "outside VMA") moved by OUTSIDE_STEP or more since the last line, so the log places it beside what did it. In one
 // session it grew from 0.6 to 2.6 GiB at the title screen, in two steps of about 1 GiB while the boot's compute
 // pipelines were being built (vk_pipeline.c, stage library prebuild), and DLSS and frame generation add theirs when
@@ -4803,7 +4805,7 @@ void vk_mem_stage_log(const char *stage) {
            stage, dev, proc, (double)ws, used, limit);
 }
 
-// With NX2NAVI_TRACE=perf every 600 frames: what holds device-local memory, to see what grows over a long session.
+// With OOTPC_TRACE=perf every 600 frames: what holds device-local memory, to see what grows over a long session.
 // VMA's blocks and allocations on the device-local heaps, texture entries with their own memory, the VRAM mirrors and
 // the objects waiting for their last submission to retire.
 static void vram_log(uint64_t frame) {
@@ -4901,7 +4903,7 @@ static Batch *inflight;
 static int ninflight, cap_inflight;
 static Batch *spare;                  // completed batches whose command buffer and fence are reused
 
-// ---- upload GPU time (NX2NAVI_TRACE=perf): a timestamp at the start and the end of each upload batch, read when it
+// ---- upload GPU time (OOTPC_TRACE=perf): a timestamp at the start and the end of each upload batch, read when it
 // retires. The replay's GPU time (vk_sync.c) times only its own parts; upload batches go to the queue as submissions of
 // their own, with the ASTC decoder's dispatches in them, so their time showed only as GPU idle "with it queued".
 // cmd_lock held throughout.
@@ -4988,7 +4990,7 @@ static VkDeviceSize stg_cache_bytes;
 // chunk (vk_staging_at) instead of a buffer of its own. The chunks belong to the open batch while it records and go
 // back to the free list when its fence signals, so a frame's few hundred small texture uploads cost a pointer bump
 // each instead of a vmaCreateBuffer and vmaDestroyBuffer under the allocator's lock. ARENA_KEEP free chunks stay; the
-// rest are destroyed. 256-byte alignment covers every bufferOffset rule of a buffer-to-image copy. NX2NAVI_STG_ARENA=0
+// rest are destroyed. 256-byte alignment covers every bufferOffset rule of a buffer-to-image copy. OOTPC_STG_ARENA=0
 // gives every upload its own buffer again.
 #define ARENA_CHUNK (8ull << 20)
 #define ARENA_MAX (ARENA_CHUNK / 4)
@@ -5017,7 +5019,7 @@ static void free_staging(VkCtx *c, Batch *b) {
 }
 
 // An upload batch holding this much staging (its buffers and arena chunks) is submitted at the outermost vk_upload_end,
-// whatever NX2NAVI_UPLOAD_BATCH_MB says (the staging pool's comment, below).
+// whatever OOTPC_UPLOAD_BATCH_MB says (the staging pool's comment, below).
 #define STG_FLUSH (64ull << 20)
 
 // cmd_lock held: the staging bytes of batch b (its buffers and arena chunks).
@@ -5080,7 +5082,7 @@ static void destroy_dead(VkCtx *c, const Dead *d) {
 // submissions issued so far (the game's work, the mirror copies and write-backs in it) and returns. The pool's buffer
 // and memory, which images cut from it (vk_texture_range_gone) and the upload batches open or in flight may still
 // name, go later: once those batches and the submission being recorded are through (pool_wait_collect, from the
-// upload collector). NX2NAVI_POOL_FINI_IDLE=1 waits for the idle queue as before.
+// upload collector). OOTPC_POOL_FINI_IDLE=1 waits for the idle queue as before.
 typedef struct { PoolRec *r; uint64_t seq, tl; } PoolWait;
 static PoolWait *pwait;   // retire_lock
 static int npwait, cpwait;
@@ -5090,7 +5092,7 @@ static int pool_fini_idle(void) {
     static int on = -1;
     if (on < 0) {
         on = rt_knob("POOL_FINI_IDLE", "0") == 1;
-        rt_log("vk: a pool's finalize waits for %s (NX2NAVI_POOL_FINI_IDLE=%d)",
+        rt_log("vk: a pool's finalize waits for %s (OOTPC_POOL_FINI_IDLE=%d)",
                on ? "the idle queue, the upload batches included" : "the submissions issued so far", on);
     }
     return on;
@@ -5196,7 +5198,7 @@ VkCommandBuffer vk_upload_begin(void) {
     return open_b.cb;
 }
 
-// NX2NAVI_UPLOAD_BATCH_MB (256 with low_end_gpu = 1; 0, the default, = no limit of its own): once the open batch's
+// OOTPC_UPLOAD_BATCH_MB (256 with low_end_gpu = 1; 0, the default, = no limit of its own): once the open batch's
 // staging buffers hold that much, the outermost vk_upload_end submits it. It does so too once the batch's staging
 // reaches STG_FLUSH, so that an area load's staging stays inside the staging pool's blocks (the staging pool's
 // comment): 0 therefore means STG_FLUSH (64 MiB), not "never", and a value above STG_FLUSH changes nothing, the
@@ -5209,12 +5211,12 @@ static uint64_t n_early;
 
 void vk_upload_end(void) {
     if (upload_cap == UINT64_MAX - 1) {
-        const char *e = cfg_get("NX2NAVI_UPLOAD_BATCH_MB");
+        const char *e = cfg_get("OOTPC_UPLOAD_BATCH_MB");
         long mb = e && *e ? atol(e) : 0;
         upload_cap = mb > 0 ? (uint64_t)mb << 20 : UINT64_MAX;
-        if (mb > 0) rt_log("vk: upload batches submitted early above %ld MiB of staging (NX2NAVI_UPLOAD_BATCH_MB)", mb);
+        if (mb > 0) rt_log("vk: upload batches submitted early above %ld MiB of staging (OOTPC_UPLOAD_BATCH_MB)", mb);
         else rt_log("vk: upload batches submitted early above %llu MiB of staging only, the staging pool's limit "
-                    "(NX2NAVI_UPLOAD_BATCH_MB=0)", (unsigned long long)(STG_FLUSH >> 20));
+                    "(OOTPC_UPLOAD_BATCH_MB=0)", (unsigned long long)(STG_FLUSH >> 20));
     }
     if (open_active && cmd_lock.depth == 1 && (open_b.bytes >= upload_cap || batch_staging(&open_b) >= STG_FLUSH)) {
         n_early++;
@@ -5597,7 +5599,7 @@ static void beyond_log(VkCtx *c, uint64_t frame, const VkPhysicalDeviceMemoryBud
     growth_take(frame, v);
 }
 
-// ---- The memory report: every HOLES_PERIOD presents (600 with NX2NAVI_TRACE=perf), after the holes line, in every run.
+// ---- The memory report: every HOLES_PERIOD presents (600 with OOTPC_TRACE=perf), after the holes line, in every run.
 // The device-local memory the driver counts for the game split by what holds it: VMA's allocations by owner
 // (vk_vma_budget.c, "owners"), with the textures split further by the texture cache's census (vk_texture_census) and
 // the pools into VRAM mirrors and physical pools; the free space inside VMA's blocks; and what VMA never allocated
@@ -5682,11 +5684,11 @@ static void owner_log(uint64_t frame) {
     vk_texture_reuse_log(frame);
 }
 
-// NX2NAVI_STAGING_FAIL_AT=n (test): the n-th staging buffer the driver makes is taken as refused for memory once, so
+// OOTPC_STAGING_FAIL_AT=n (test): the n-th staging buffer the driver makes is taken as refused for memory once, so
 // the give-back runs (vk_mem_give_back).
 static int staging_fail_now(void) {
     static int64_t at = -1, n;
-    if (at < 0) at = cfg_int("NX2NAVI_STAGING_FAIL_AT");
+    if (at < 0) at = cfg_int("OOTPC_STAGING_FAIL_AT");
     return at > 0 && plat_inc64(&n) == at;
 }
 
@@ -5763,12 +5765,12 @@ void *vk_staging(VkDeviceSize size, VkBuffer *buf, VmaAllocation *alloc) {
 
 // A range of the staging arena for an upload of the open batch (between vk_upload_begin and vk_upload_end): *buf and
 // *off name it, and the batch owns it until its fence signals. Larger requests, and every request with
-// NX2NAVI_STG_ARENA=0, get a buffer of their own at offset 0 (vk_staging).
+// OOTPC_STG_ARENA=0, get a buffer of their own at offset 0 (vk_staging).
 void *vk_staging_at(VkDeviceSize size, VkBuffer *buf, VkDeviceSize *off) {
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_STG_ARENA");
-        if (!on) rt_log("vk: staging arena off (NX2NAVI_STG_ARENA=0): every upload stages in a buffer of its own");
+        on = cfg_bool("OOTPC_STG_ARENA");
+        if (!on) rt_log("vk: staging arena off (OOTPC_STG_ARENA=0): every upload stages in a buffer of its own");
     }
     *off = 0;
     if (!on || !open_active || size > ARENA_MAX) return vk_staging(size, buf, NULL);
@@ -5889,7 +5891,7 @@ static void defer(int kind, uint64_t handle, VmaAllocation alloc) {
     // the same submission. Stamped with the last submitted value, the object went as soon as the GPU reached it,
     // before the submission that names it ran, and with the recorder thread (vk_rec.c) behind, before the recorder
     // made the call that names it. So every deferral is stamped with the submission being
-    // recorded. NX2NAVI_DEFER_STAMP=0 brings back the old stamp.
+    // recorded. OOTPC_DEFER_STAMP=0 brings back the old stamp.
     static int stamp = -1;
     if (stamp < 0) stamp = rt_knob("DEFER_STAMP", "1") != 0;
     uint64_t tl = tl_noted, rf = stamp ? vk_exec_recording_fence() : 0;
@@ -6017,7 +6019,7 @@ void vk_mem_shutdown(void) {
     plat_mutex_unlock(&gen_lock);
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): pool records, VRAM mirrors, the deferred destruction list, upload batches,
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): pool records, VRAM mirrors, the deferred destruction list, upload batches,
 // the staging cache and arena, the write-back merge snapshot pool and the shadow storage's base copies. Counters only:
 // cmd_lock is taken by every upload and release, so nothing is walked under it.
 void vk_mem_sizes(PerfSizes *s) {

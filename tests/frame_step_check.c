@@ -1,7 +1,7 @@
 // runtime/frame_rate.c: the step Ocarina is given (ocarina_step), driven through frame_step_cap_ns and
 // frame_step_present with made-up display times and the rest of the runtime stubbed. Built and run by
 // tests/frame_step_check.py; prints each failed check and exits 1 on any. With the argument "mean" it runs with
-// NX2NAVI_STEP_STEADY=0 and checks the mean of the last five intervals.
+// OOTPC_STEP_STEADY=0 and checks the mean of the last five intervals.
 #include "frame_rate.c"
 
 static int fails;
@@ -15,9 +15,9 @@ const int rt_game_version = 111;
 unsigned rt_trace;
 uint64_t rt_guest_start_ns;
 const char *cfg_get(const char *key) {
-    if (!strcmp(key, "NX2NAVI_FPS_LIMIT")) return limit;
-    if (!strcmp(key, "NX2NAVI_STEP_STEADY")) return steady;
-    if (!strcmp(key, "NX2NAVI_RTSS")) return "0";
+    if (!strcmp(key, "OOTPC_FPS_LIMIT")) return limit;
+    if (!strcmp(key, "OOTPC_STEP_STEADY")) return steady;
+    if (!strcmp(key, "OOTPC_RTSS")) return "0";
     return NULL;
 }
 unsigned cfg_version(void) { return version; }

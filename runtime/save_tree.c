@@ -27,7 +27,7 @@
 #define QUIET_MS 1500          // changes are saved once none came for this long
 #define MAX_WAIT_MS 6000       // or this long after the first, while they keep coming
 #define MIN_GAP_MS 4000        // between two saves the tree asks for
-#define RETRY_MS 8000          // a save asked for that did not come: asked again after this
+#define ANSWER_MS 5000         // a save asked for that did not come in this long: the tree makes it itself (built_node)
 #define NOISY_HITS 8           // a flag is left out from then on when its last NOISY_FAST changes came within
 #define NOISY_FAST 4           // NOISY_FAST_MS (a timer), or its last NOISY_HITS within NOISY_SLOW_MS (a clock)
 #define NOISY_FAST_MS 30000
@@ -100,7 +100,7 @@ static int slot_files(const char *dir, Event *e) {
 // 2 a save for every flag the game changes, background, unnamed and fast-changing ones too.
 enum { MODE_OFF, MODE_CHOICES, MODE_ALL };
 static int tree_mode(void) {
-    const char *v = cfg_get("NX2NAVI_DEBUG_SAVE_TREE");
+    const char *v = cfg_get("OOTPC_DEBUG_SAVE_TREE");
     if (!v || !*v) return MODE_CHOICES;
     int m = atoi(v);
     return m <= 0 ? MODE_OFF : m >= 2 ? MODE_ALL : MODE_CHOICES;
@@ -679,6 +679,9 @@ static uint8_t *cur_prog;          // the whole progress.sav of the current node
 static size_t cur_prog_n;
 static int cur_slot = -1;          // the slot the game plays
 static uint64_t asked_ms;          // when the tree last asked for a save, 0 when no answer is due
+// The area where the game last took a save request and wrote nothing (no_save_area_watch): there the tree makes its
+// saves itself without asking first. Empty once the game writes a save or the player is in another area.
+static char no_save_area[64];
 
 static void set_current(int id, uint8_t *prog, size_t n) {
     free(cur_prog);
@@ -762,6 +765,7 @@ static void on_event(Event *e) {
     cur_slot = e->slot;
     const char *kind = asked_ms ? "flag" : *e->save_kind ? e->save_kind : "autosave";
     asked_ms = 0;
+    no_save_area[0] = 0;   // the game writes saves again
     // A save made when nothing that starts a branch changed (the game's own autosave while people walk about) is the
     // node the game is on still. A manual save is a point the player chose: it is a node.
     int cur = atomic_load(&cur_node);
@@ -1154,11 +1158,23 @@ static void tree_thread(void *arg) {
         }
         if (any) rebase = 0;
         temp_watch(ms);
-        if (asked_ms && ms - asked_ms > RETRY_MS) asked_ms = 0;   // the save asked for did not come
+        char area[64];
+        if (no_save_area[0] && (!dbg_current_area(area) || strcmp(area, no_save_area))) no_save_area[0] = 0;
+        if (asked_ms && ms - asked_ms > ANSWER_MS && !fs_save_busy()) {
+            // The game took the request and wrote nothing: some areas and events never save (seen in HyruleField_Child
+            // after the Ocarina of Time scene, with System_IsSaveTemporaryStorage off). A late save of the game finds
+            // nothing pending and makes no second node (on_event).
+            asked_ms = 0;
+            if (playing && npend) built_node();
+            if (dbg_current_area(area)) {
+                snprintf(no_save_area, sizeof no_save_area, "%s", area);
+                rt_log("save tree: the game does not save in %s; the tree makes its saves there itself", area);
+            }
+        }
         if (playing && npend && !asked_ms && !fs_save_busy() && (ms - last_ms >= QUIET_MS || ms - first_ms >= MAX_WAIT_MS)) {
             static uint64_t last_ask;
             if (ms - last_ask < MIN_GAP_MS) {
-            } else if (temp_saves()) {   // the game would not save: the tree makes the save itself
+            } else if (temp_saves() || no_save_area[0]) {   // the game would not save: the tree makes the save itself
                 if (built_node()) last_ask = ms;
             } else if (dbg_game_save_request(cur_slot)) {
                 asked_ms = last_ask = ms;

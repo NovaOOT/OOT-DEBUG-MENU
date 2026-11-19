@@ -1,9 +1,9 @@
 // Sharing a save (save_share.h). The zip, as the launcher's launcher/saves.py export_save writes it:
 //
-//   manifest.json   {"format": "nx2navi-save", "format_version": 1, "game", "title_id", "game_version", "nx2navi",
+//   manifest.json   {"format": "ootpc-save", "format_version": 1, "game", "title_id", "game_version", "ootpc",
 //                    "exported" (UTC), "exported_by", "files", "bug_report"}
 //   save/...        the save's files as the game keeps them (account.sav, option.sav, slot_00/progress.sav, ...)
-//   bug-report/...  with a bug report: this run's log and nx2navi.ini; an import leaves them out
+//   bug-report/...  with a bug report: this run's log and OOT-PC.ini; an import leaves them out
 //
 // An import accepts a zip whose manifest has this format, a version up to FORMAT_VERSION and the game's title id, whose
 // save/ paths stay inside the save, with no links, at most MAX_FILES files and MAX_BYTES, among them a file of this
@@ -21,16 +21,19 @@
 #include "save_share.h"
 #include "save_zip.h"
 
-#define FORMAT "nx2navi-save"
+#define FORMAT "ootpc-save"
+// The format and version key of a save exported before the project was renamed to OOT-PC; an import still takes it.
+#define LEGACY_FORMAT "nx2navi-save"
+#define LEGACY_VERSION_KEY "nx2navi"
 #define FORMAT_VERSION 1
-#define TITLE_ID "0400486024dec000"   // the game's title id (fs_host.c NX2NAVI_APPLICATION_ID)
+#define TITLE_ID "0400486024dec000"   // the game's title id (fs_host.c OOTPC_APPLICATION_ID)
 #define GAME "The Legend of Zelda: Ocarina of Time"
 #define MAX_FILES 4000
 #define MAX_BYTES (256ull << 20)
 #define MAX_ZIP (512ll << 20)
 #define MANIFEST_MAX 65536
 
-// The executable's folder, where nx2navi.ini, logs and saves are (cfg.c find_ini, main.c log_open). 0 when unknown.
+// The executable's folder, where OOT-PC.ini, logs and saves are (cfg.c find_ini, main.c log_open). 0 when unknown.
 static int exe_dir(char *out, size_t cap) {
     if (!plat_exe_path(out, cap)) return 0;
     char *cut = plat_last_sep(out), *slash = strrchr(out, '/');
@@ -119,7 +122,7 @@ static void add_file(Export *e, const char *name, const char *path) {
     free(data);
 }
 
-// nx2navi.ini for a bug report: as it is, except that the values of the private settings (cfg_private.h) read
+// OOT-PC.ini for a bug report: as it is, except that the values of the private settings (cfg_private.h) read
 // "(set, not shown)". A report goes to people the player does not know.
 static void add_settings_file(Export *e, const char *name, const char *path) {
     uint64_t n = 0;
@@ -148,10 +151,10 @@ static SaveShareResult export_zip(const char *dir, const char *exact, int bug_re
     }
     char base[PLAT_PATH_MAX], file[PLAT_PATH_MAX + 32];
     if (bug_report) {
-        add_file(&e, "bug-report/nx2navi.log", rt_log_path());
+        add_file(&e, "bug-report/ootpc.log", rt_log_path());
         if (exe_dir(base, sizeof base)) {
-            snprintf(file, sizeof file, "%s/nx2navi.ini", base);
-            add_settings_file(&e, "bug-report/nx2navi.ini", file);
+            snprintf(file, sizeof file, "%s/OOT-PC.ini", base);
+            add_settings_file(&e, "bug-report/OOT-PC.ini", file);
         }
     }
     struct tm u;
@@ -160,7 +163,7 @@ static SaveShareResult export_zip(const char *dir, const char *exact, int bug_re
     sz_json_escape(rt_port_version, ver, sizeof ver);
     int mn = snprintf(manifest, sizeof manifest,
                       "{\n \"format\": \"" FORMAT "\",\n \"format_version\": %d,\n \"game\": \"" GAME "\",\n"
-                      " \"title_id\": \"" TITLE_ID "\",\n \"game_version\": \"%d.%d.%d\",\n \"nx2navi\": \"%s\",\n"
+                      " \"title_id\": \"" TITLE_ID "\",\n \"game_version\": \"%d.%d.%d\",\n \"ootpc\": \"%s\",\n"
                       " \"exported\": \"%04d-%02d-%02dT%02d:%02d:%02dZ\",\n \"exported_by\": \"game\",\n"
                       " \"files\": %d,\n \"bug_report\": %s\n}\n",
                       FORMAT_VERSION, rt_game_version / 100, rt_game_version / 10 % 10, rt_game_version % 10, ver,
@@ -187,7 +190,7 @@ static SaveShareResult export_zip(const char *dir, const char *exact, int bug_re
     }
     plat_file_mkdir_p(dir);
     char stem[64];
-    snprintf(stem, sizeof stem, "OOT-DEBUG-MENU-save-%04d-%02d-%02d_%02d-%02d-%02d%s", t.tm_year + 1900, t.tm_mon + 1,
+    snprintf(stem, sizeof stem, "OOT-PC-save-%04d-%02d-%02d_%02d-%02d-%02d%s", t.tm_year + 1900, t.tm_mon + 1,
              t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, bug_report ? "-bug-report" : "");
     int ok = 0;
     for (int k = 1; k < 100 && !ok; k++) {   // two exports in one second: "(2)" as the launcher names them
@@ -233,7 +236,7 @@ static const SzEntry *find_member(const SzEntry *e, int count, const char *name)
     return NULL;
 }
 
-// The manifest's verdict on the zip; detail gets its OOT-DEBUG-MENU version and export date.
+// The manifest's verdict on the zip; detail gets its OOT-PC version and export date.
 static SaveShareResult check_manifest(const uint8_t *zip, size_t n, const SzEntry *e, int count, char *detail,
                                       size_t cap) {
     const SzEntry *m = find_member(e, count, "manifest.json");
@@ -244,14 +247,14 @@ static SaveShareResult check_manifest(const uint8_t *zip, size_t n, const SzEntr
     char format[32] = "", title[32] = "", ver[64] = "?", when[32] = "?";
     long long version = 0;
     SaveShareResult r = SAVE_SHARE_OK;
-    if (!sz_json_str(json, "format", format, sizeof format) || strcmp(format, FORMAT) ||
+    if (!sz_json_str(json, "format", format, sizeof format) || (strcmp(format, FORMAT) && strcmp(format, LEGACY_FORMAT)) ||
         !sz_json_int(json, "format_version", &version) || version < 1)
         r = SAVE_SHARE_NOT_A_SAVE;
     else if (version > FORMAT_VERSION)
         r = SAVE_SHARE_NEWER;
     else if (!sz_json_str(json, "title_id", title, sizeof title) || !same_text(title, TITLE_ID))
         r = SAVE_SHARE_OTHER_GAME;
-    sz_json_str(json, "nx2navi", ver, sizeof ver);
+    if (!sz_json_str(json, "ootpc", ver, sizeof ver)) sz_json_str(json, LEGACY_VERSION_KEY, ver, sizeof ver);
     sz_json_str(json, "exported", when, sizeof when);
     snprintf(detail, cap, "%s, %.10s", *ver ? ver : "?", when);
     free(json);
@@ -311,9 +314,9 @@ SaveShareResult save_share_import(const char *zip_path, char *detail, size_t cap
     for (int i = 0; i < k; i++) free(data[i]);
     free(rels), free(data), free(sizes), free(e), free(zip);
     static const char *const why[] = {"waits for the next start", "", "the zip cannot be read", "its save cannot be put in place",
-                                      "not a zip of an OOT-DEBUG-MENU save", "a save of another game",
-                                      "made by a newer OOT-DEBUG-MENU", "damaged", "paths outside the save, links or too large"};
-    rt_log("save share: import of %s (OOT-DEBUG-MENU %s): %s", zip_path, *detail ? detail : "?", why[r]);
+                                      "not a zip of an OOT-PC save", "a save of another game",
+                                      "made by a newer OOT-PC", "damaged", "paths outside the save, links or too large"};
+    rt_log("save share: import of %s (OOT-PC %s): %s", zip_path, *detail ? detail : "?", why[r]);
     return r;
 }
 

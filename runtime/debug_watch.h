@@ -1,8 +1,10 @@
 // Change monitor of the Debug tab (debug_watch.c): while it is on, every flag of the game's flag stores (bool, int,
-// float, string, vector and enum) and the list of loaded actors are compared with what they were, and each change is
+// float, string, vector and enum), the list of loaded actors and the game's events (dbg_watch_event) are followed, and
+// each change is
 // logged with the time since the monitor started: "12.40 int PouchData.Item_Bomb.StockNum 20 -> 19",
-// "13.02 actor +1 Enemy_Skulltula (now 2)". For glitch hunting: do one thing in game and see what it touched. The
-// lines are also written to debug_changes.txt next to the game.
+// "13.02 actor +1 Enemy_Skulltula (now 2)". For glitch hunting: do one thing in game and see what it touched. Each start
+// also writes its lines to a file of its own, flag_captures/changes-YYYYMMDD-HHMMSS.txt next to the game (a flag capture;
+// the "Flag capture" hotkey of debug_binds.c starts and stops one), with a Markdown report beside it (dbg_watch_report).
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
@@ -26,6 +28,17 @@ int dbg_watch_names(void);                          // flag names known (debug_f
 const char *dbg_flag_name(uint32_t key);            // a flag's name from that file (read at the first call), else NULL
 const char *dbg_flag_where(uint32_t key);           // the game file that sets it ("built": the game's own), else NULL
 const char *dbg_watch_state(void);                  // what it is doing, for the menu
+const char *dbg_watch_file(void);                   // the capture file of the last start ("flag_captures/..."), "" before one
+// Its report, the same name ending in .md: a Markdown table of every flag that changed (type, changes, values seen, the
+// description from flag_descriptions.json next to the game), rewritten every few seconds and finished when it stops.
+const char *dbg_watch_report(void);
+int dbg_watch_changes(void);                        // flag changes logged since the last start
+// Events in a capture, as "event" lines beside the flag changes: the event files the game loads (its event flows, event
+// settings and movies: what a talk, a chest, a door or a cutscene runs), area changes, the screen its interface is on
+// (pause menu pages, the ocarina, loading, game over), and what the debug tools did (their messages). Nothing while
+// no capture runs. dbg_watch_rom_open: fs_host.c, each game file opened (any thread). dbg_watch_event: any thread.
+void dbg_watch_rom_open(const char *path);
+void dbg_watch_event(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 #ifdef __cplusplus
 }

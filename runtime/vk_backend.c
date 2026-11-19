@@ -13,7 +13,7 @@
 // the frames where they start (vk_lowlat.c), the pacer's display time is the time of the game's present, and the host
 // present goes out as soon as the blit is submitted.
 //
-// Asynchronous replay (NX2NAVI_REPLAY_ASYNC, default 0; 1 turns it on): nvnQueueSubmitCommands
+// Asynchronous replay (OOTPC_REPLAY_ASYNC, default 0; 1 turns it on): nvnQueueSubmitCommands
 // and nvnQueuePresentTexture only queue. Each item gets its timeline value at enqueue (vk_sync_reserve), in queue
 // order; the replay thread runs the synchronous submit and present bodies in that order, so every value is signalled
 // by the submission it was handed out for. The game runs at most one frame ahead: queueing present N waits until the
@@ -34,18 +34,21 @@
 #include "vk_exec.h"
 #include "platform/platform.h"
 #include "vk_dlaa.h"
+#include "vk_n64.h"
 #include "vk_dlssg.h"
 #include "vk_fg.h"
 #include "vk_lowlat.h"
 
 #define WEAK __attribute__((weak))
 
-typedef struct { VkImage image; VkFormat format; int w, h, has_crop, crop[4]; uint64_t frame, at, queued, value; } PresentJob;
+typedef struct { VkImage image; VkFormat format; int w, h, has_crop, crop[4]; uint64_t frame, at, queued, value; int again; } PresentJob;
 
 static PlatMutex pl = PLAT_MUTEX_INIT;
 static PlatCond pcv = PLAT_COND_INIT;   // job queued, job taken, job submitted
 static PresentJob job;
 static int pending, busy, present_thread;
+static PresentJob shown_job;   // the last picture the present thread showed (vk_present_again), under pl
+static int shown_have;
 
 // Sleeps on a high-resolution timer to 1 ms before at, then yields until at: the timer alone wakes up to ~0.5 ms late.
 static void wait_until(uint64_t at) {
@@ -54,7 +57,7 @@ static void wait_until(uint64_t at) {
     while (kern_now_ns() < at) plat_yield();
 }
 
-// NX2NAVI_PACE_SMOOTH (default 1; 0 = off): a picture goes out no sooner than seven eighths of the recent interval
+// OOTPC_PACE_SMOOTH (default 1; 0 = off): a picture goes out no sooner than seven eighths of the recent interval
 // after the one before it. The game's frames reach the present thread in uneven steps although each costs about the
 // same: with the replay on the submitting thread, work held for an event is replayed with the next frame, so pictures
 // came 13 to 31 ms apart around a mean of 22 ms in a village (5th to 95th percentile), which shows as judder at a
@@ -65,7 +68,7 @@ static uint64_t pace_avg_ns;   // the present thread's
 
 static uint64_t pace_smooth(uint64_t at, uint64_t last, uint64_t now) {
     static int on = -1;
-    if (on < 0) on = cfg_bool("NX2NAVI_PACE_SMOOTH");
+    if (on < 0) on = cfg_bool("OOTPC_PACE_SMOOTH");
     if (!on || !last || !pace_avg_ns || vk_fg_active() || vk_dlssg_active()) return at;
     uint64_t floor = last + pace_avg_ns / 8 * 7;
     return floor > at && floor < now + 50000000ull ? floor : at;
@@ -87,9 +90,11 @@ static void present_main(void *arg) {
         busy = 1;
         plat_cond_broadcast(&pcv);
         plat_mutex_unlock(&pl);
-        if (flight_on || vk_dump_white) vk_thumbs_frame(j.frame);   // NX2NAVI_DUMP_WHITE reads them too
-        vk_dlssg_present_frame(j.frame);
-        vk_lowlat_present_frame(j.frame);   // the frame's number for the blit's submit and the present's markers
+        if (!j.again) {   // a picture shown again is no new frame for these
+            if (flight_on || vk_dump_white) vk_thumbs_frame(j.frame);   // OOTPC_DUMP_WHITE reads them too
+            vk_dlssg_present_frame(j.frame);
+            vk_lowlat_present_frame(j.frame);   // the frame's number for the blit's submit and the present's markers
+        }
         vk_present_blit(j.image, VK_IMAGE_LAYOUT_GENERAL, j.format, j.w, j.h, j.has_crop ? j.crop : NULL);
         uint64_t f = vk_sync_submit(NULL, 0);   // a timeline value after the blit: deferred destruction waits for the blit too
         if (j.value && f != j.value)
@@ -99,13 +104,21 @@ static void present_main(void *arg) {
         busy = 0;
         plat_cond_broadcast(&pcv);
         plat_mutex_unlock(&pl);
+        if (j.again) {   // the same picture again (vk_present_again): out at once, not part of the game's pacing
+            vk_present_flip();
+            plat_mutex_lock(&pl);
+            continue;
+        }
+        plat_mutex_lock(&pl);
+        shown_job = j, shown_have = 1;
+        plat_mutex_unlock(&pl);
         uint64_t t0 = kern_now_ns();
         wait_until(pace_smooth(j.at, last, t0));
         uint64_t t1 = kern_now_ns();
         if (last) pace_shown(t1 - last);
         vk_present_flip();
         perfmon_shown(t1);   // the overlay's frame times: the pictures as shown
-        // NX2NAVI_TRACE=present: one line per present: the host present's interval, the interval of the game's present
+        // OOTPC_TRACE=present: one line per present: the host present's interval, the interval of the game's present
         // calls (when the host present went out before back-edge pacing), the wait and how far past its target it went
         if (rt_trace & RT_TRACE_PRESENT)
             rt_log("present: frame %llu interval %.3f ms, game %.3f ms, waited %.3f ms, %.3f ms past target",
@@ -120,6 +133,20 @@ static void present_main(void *arg) {
     return;
 }
 
+int vk_present_again(void) {
+    if (vk_fg_active()) return 0;   // AMD's frame generation is handed every present as a new frame
+    plat_mutex_lock(&pl);
+    int ok = present_thread && shown_have && !pending && !busy;
+    if (ok) {
+        job = shown_job;
+        job.value = 0, job.again = 1, job.queued = kern_now_ns();
+        pending = 1;
+        plat_cond_broadcast(&pcv);
+    }
+    plat_mutex_unlock(&pl);
+    return ok;
+}
+
 void vk_present_drain(void) {
     uint64_t p0 = perf_begin();
     plat_mutex_lock(&pl);
@@ -128,7 +155,7 @@ void vk_present_drain(void) {
     perf_end(PERF_DRAIN, p0);
 }
 
-// NX2NAVI_FRAME_HOLD_MS (default 120; 0 = off): a frame whose draws were skipped because a shader or pipeline was
+// OOTPC_FRAME_HOLD_MS (default 120; 0 = off): a frame whose draws were skipped because a shader or pipeline was
 // still building (vk_exec_draw.c pending_draws) is not shown: the previous picture stays on screen until a frame is
 // complete again. Such a frame lacks what was skipped, which showed for a frame or two as a black or unlit picture with
 // the interface intact (a lighting pass), a light going out, or ground and walls missing and then back. The game runs
@@ -155,12 +182,12 @@ static struct {
 
 static void frame_hold_refill(uint64_t now) {
     if (FH.limit_ns < 0) {
-        long long ms = cfg_int("NX2NAVI_FRAME_HOLD_MS");
+        long long ms = cfg_int("OOTPC_FRAME_HOLD_MS");
         FH.limit_ns = (int64_t)(ms < 0 ? 0 : ms > 500 ? 500 : ms) * 1000000;
         FH.left_ns = FH.limit_ns, FH.last_ns = now;
         if (FH.limit_ns)
             rt_log("vk: a frame with draws skipped for a pipeline is not shown, the previous picture stays up to %lld ms "
-                   "(NX2NAVI_FRAME_HOLD_MS)", (long long)(FH.limit_ns / 1000000));
+                   "(OOTPC_FRAME_HOLD_MS)", (long long)(FH.limit_ns / 1000000));
     }
     if (!FH.holding) FH.left_ns += (int64_t)(now - FH.last_ns) / 8;
     else FH.left_ns -= (int64_t)(now - FH.last_ns);
@@ -226,7 +253,8 @@ static void present_image(const tex_t *t, const int crop[4], uint64_t at_ns, uin
     dynres_frame();   // before vk_dlaa_frame reads the DLSS mode it may override
     vk_exec_barrier_log(frame);
     vk_dlaa_frame();
-    vk_sampler_aniso_live();   // NX2NAVI_ANISO changed in the menu: the surface textures' samplers take the new level
+    vk_n64_frame();
+    vk_sampler_aniso_live();   // OOTPC_ANISO or OOTPC_TEXTURE_LOD_BIAS changed in the menu: the surface textures' samplers follow
     vk_mvsurvey_frame();
     vk_mvprev_frame();
     vk_mem_census(frame);
@@ -247,7 +275,7 @@ static void present_image(const tex_t *t, const int crop[4], uint64_t at_ns, uin
     }
     PresentJob j = {.image = img->image, .format = img->format, .w = (int)img->width, .h = (int)img->height, .frame = frame,
                     .at = at_ns, .queued = queued, .value = value};
-    vk_hdr_present_source(img, &j.image, &j.format);   // NX2NAVI_HDR: the float picture the game copied into it, same size
+    vk_hdr_present_source(img, &j.image, &j.format);   // OOTPC_HDR: the float picture the game copied into it, same size
     if (crop) {
         j.has_crop = 1;
         for (int i = 0; i < 4; i++) j.crop[i] = crop[i];
@@ -281,7 +309,7 @@ static void present_image(const tex_t *t, const int crop[4], uint64_t at_ns, uin
 //    (regs_queue_locked), so the replay applies it where the game made it among its submits, as it does a release.
 // A texture finalized while its own registration waits is released at once as before, and once more behind that
 // registration (RG_RELEASE): vk_texture_release marks the slots the texture object registered, which the first call
-// could not see. NX2NAVI_REG_ORDER=0: every registration at once, as before.
+// could not see. OOTPC_REG_ORDER=0: every registration at once, as before.
 enum { RG_TEX, RG_SAMP, RG_RELEASE };
 typedef struct {
     int kind, id, has_view;
@@ -299,7 +327,7 @@ static int reg_order_on(void) {
     static int on = -1;
     if (on < 0) {
         on = rt_knob("REG_ORDER", "1") != 0;
-        rt_log("vk: texture and sampler registrations take effect %s (NX2NAVI_REG_ORDER=%d)",
+        rt_log("vk: texture and sampler registrations take effect %s (OOTPC_REG_ORDER=%d)",
                on ? "between submissions, in the order the game made them" : "at once", on);
     }
     return on;
@@ -379,7 +407,7 @@ static int rq_head, rq_n, r_busy, r_started;
 static uint64_t r_presents_queued, r_presents_done, r_submit_done, game_frames;
 // Under rl: calls, calls that waited and the time waited per cause, since the last replay_log line and over the run.
 static uint64_t dr_calls[DR_N], dr_waits[DR_N], dr_ns[DR_N], dr_tcalls[DR_N], dr_twaits[DR_N], dr_tns[DR_N];
-// NX2NAVI_REPLAY_CHECK: ReadTexels compared with a read after a full drain (under rl): checked, differing, differing
+// OOTPC_REPLAY_CHECK: ReadTexels compared with a read after a full drain (under rl): checked, differing, differing
 // although no submission recorded a write to the texture in between, differing with the queue idle at the first read.
 static uint64_t ck_reads, ck_diff, ck_diff_unexplained, ck_diff_idle;
 
@@ -390,8 +418,8 @@ int vk_replay_async(void) {
         // one scene went from 450-686 frames over 50 ms a minute to 10-13, issue #88), the only place a gain was
         // measured. While it was the default, a GTX 1660 Ti at the 60 fps cap with the GPU at 26 % reported uneven
         // motion that 0.3.4 did not have (#659). It adds up to a frame of latency.
-        on = cfg_bool("NX2NAVI_REPLAY_ASYNC");
-        rt_log("vk: replay %s (NX2NAVI_REPLAY_ASYNC=%d)",
+        on = cfg_bool("OOTPC_REPLAY_ASYNC");
+        rt_log("vk: replay %s (OOTPC_REPLAY_ASYNC=%d)",
                on ? "on its own thread, at most one frame behind the game" : "on the submitting thread", on);
     }
     return on;
@@ -401,7 +429,7 @@ int vk_replay_async(void) {
 static int vk_be_gpu_wait(uint64_t value, uint64_t timeout_ns) {
     return vk_replay_async() ? vk_sync_fence_wait(value, timeout_ns) : vk_sync_exec_wait(value, timeout_ns);
 }
-// The submit wait (nvn_api_core.c NX2NAVI_SUBMIT_FINISH): the GPU's only where the submission reads guest memory on the
+// The submit wait (nvn_api_core.c OOTPC_SUBMIT_FINISH): the GPU's only where the submission reads guest memory on the
 // GPU (vk_sync_recorded_wait).
 static int vk_be_exec_wait(uint64_t value, uint64_t timeout_ns) {
     return vk_sync_recorded_wait(value, timeout_ns, vk_be_gpu_wait);
@@ -434,7 +462,7 @@ uint64_t gfx_replayed_submits(void) {
 // thread's empty submission, next to the following frame. So with work held at a present, what can go on now goes
 // first, in a submission of its own (held_resume); if work is still held, the present waits and goes out right after
 // the submission that replays the last of it, at the next present, or after PH_MAX submissions at the latest. Only with
-// the replay on the submitting thread, as the event order. NX2NAVI_PRESENT_HELD=0: every present goes out at once.
+// the replay on the submitting thread, as the event order. OOTPC_PRESENT_HELD=0: every present goes out at once.
 #define PH_MAX 8
 static struct {
     int on;                      // a present waits
@@ -792,9 +820,9 @@ static void vk_be_finish(void) { vk_sync_start(); replay_drain(DR_FINISH); vk_pr
 static int replay_check(void) {
     static int on = -1;
     if (on < 0) {
-        const char *e = cfg_get("NX2NAVI_REPLAY_CHECK");
+        const char *e = cfg_get("OOTPC_REPLAY_CHECK");
         on = e && strcmp(e, "0");
-        if (on) rt_log("vk: NX2NAVI_REPLAY_CHECK: every ReadTexels is read again after a full replay drain and compared");
+        if (on) rt_log("vk: OOTPC_REPLAY_CHECK: every ReadTexels is read again after a full replay drain and compared");
     }
     return on;
 }
@@ -803,7 +831,7 @@ static int replay_check(void) {
 // completed), not for the whole queue. The readback copy goes through the upload batch on the same queue, after every
 // submission the replay has submitted. Submissions still queued or being recorded run after the copy, as on hardware
 // when the GPU has not reached them yet: the game only sees their texels after waiting on a sync, and every sync
-// value covers replay and GPU, so a read the game synchronised sees them. NX2NAVI_REPLAY_CHECK compares with a full drain.
+// value covers replay and GPU, so a read the game synchronised sees them. OOTPC_REPLAY_CHECK compares with a full drain.
 static void vk_be_read_texels(const tex_t *t, const view_t *v, const NVNcopyRegion *r, uint8_t *dst, uint64_t row,
                               uint64_t img) {
     vk_sync_start();

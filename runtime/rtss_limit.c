@@ -24,7 +24,7 @@
 // changed it: the old limit, or no profile of its own when there was none. A crash before that leaves the game's
 // limit in the profile until the next run changes it.
 //
-// NX2NAVI_RTSS=0 keeps RTSS out of it. Frame generation keeps it out too: RTSS counts every presented frame, the
+// OOTPC_RTSS=0 keeps RTSS out of it. Frame generation keeps it out too: RTSS counts every presented frame, the
 // generated ones included, and would halve the limit.
 #include <stdatomic.h>
 #include <stdint.h>
@@ -127,7 +127,7 @@ static int load_hooks(void) {
 // (a comma-separated list of names) but crashes this process: it walks Profiles\*.cfg with _findfirst and _findnext and
 // keeps the find handle in 32 bits. The handle points into the process heap, which here lies above 4 GB (the guest
 // address space takes the low part, memory.c mem_init), so _findnext gets a cut pointer and faults in ntdll writing to
-// it. NX2NAVI_RTSS_ENUM=1 calls EnumProfiles anyway, to test an RTSS that keeps the whole handle.
+// it. OOTPC_RTSS_ENUM=1 calls EnumProfiles anyway, to test an RTSS that keeps the whole handle.
 static int profile_exists(void) {
     if (!rt_knob("RTSS_ENUM", "0")) {
         char path[MAX_PATH * 2];
@@ -260,7 +260,7 @@ static void worker(void *arg) {
         }
         if (w < 0) {
             if (dll) put_back();
-            set_active(0, "RivaTuner Statistics Server kept out: NX2NAVI_RTSS=0 or frame generation");
+            set_active(0, "RivaTuner Statistics Server kept out: OOTPC_RTSS=0 or frame generation");
         } else if (f) {
             set_active(0, fail_reason(f));
         } else if (!run) {

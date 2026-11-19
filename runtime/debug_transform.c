@@ -23,6 +23,8 @@
 
 #include "host.h"
 #include "motion_owner.h"
+#include "n64pose.h"
+#include "vk_n64.h"
 #include "save_tree.h"
 #include "debug_tools.h"
 #include "platform/platform.h"
@@ -131,6 +133,52 @@ static void spawn_run(Cpu *c) {
     atomic_store(&spawn_state, spawn_handle ? SPAWN_SENT : SPAWN_FAILED);
 }
 
+// Save states (debug_state.c): the same creation at a pose of the caller's. *name_ptr points to the name and both stay
+// valid until the creation ends; *handle is the creation's handle (0 when the manager refused). 1 when sent.
+int dbg_frame_create(Cpu *c, const uint64_t *name_ptr, const float pos[3], const float ax[9], uint64_t *handle) {
+    static _Alignas(16) CreateArg arg;
+    static uint32_t error;
+    uint64_t mgr_ptr = 0, mgr = 0, scale = 0;
+    *handle = 0;
+    if (!plat_mem_read(MANAGER_GLOBAL, &mgr_ptr, 8) || !mgr_ptr || !plat_mem_read(mgr_ptr, &mgr, 8) || !mgr ||
+        !plat_mem_read(DEFAULT_SCALE, &scale, 8) || !scale)
+        return 0;
+    memset(&arg, 0, sizeof arg);
+    memcpy(arg.pos, pos, sizeof arg.pos);
+    memcpy(arg.rot, ax, sizeof arg.rot);
+    if (!plat_mem_read(scale, arg.scale, sizeof arg.scale)) arg.scale[0] = arg.scale[1] = arg.scale[2] = 1;
+    arg.instance = (uint64_t)(uintptr_t)kNoInstance;
+    arg.kind = 3;
+    uint64_t sp0 = c->sp, sp = (sp0 - 0x40) & ~15ull;
+    memset((void *)(uintptr_t)sp, 0, 0x40);
+    error = 0;
+    *(uint64_t *)(uintptr_t)(sp + 8) = (uint64_t)(uintptr_t)&error;
+    c->sp = sp;
+    const uint64_t a[8] = {mgr, (uint64_t)(uintptr_t)name_ptr, (uint64_t)(uintptr_t)&arg, (uint64_t)(uintptr_t)handle,
+                           1, 0, 0, 0};
+    dbg_frame_call(c, ACTOR_CREATE, a);
+    c->sp = sp0;
+    return *handle != 0;
+}
+
+// 1 made (*actor now in the world), 0 still loading, -1 failed (the handle released).
+int dbg_frame_create_poll(Cpu *c, uint64_t *handle, uint64_t *actor, int give_up) {
+    uint16_t s = 0;
+    *actor = 0;
+    if (!*handle || !plat_mem_read(*handle, &s, sizeof s)) return -1;
+    if (s == HANDLE_MADE) {
+        const uint64_t a[8] = {(uint64_t)(uintptr_t)handle, 1, 0};
+        *actor = dbg_frame_call(c, ACTOR_TAKE, a);
+        return *actor ? 1 : -1;
+    }
+    if (s == HANDLE_FAILED || give_up) {
+        const uint64_t a[8] = {(uint64_t)(uintptr_t)handle};
+        dbg_frame_call(c, HANDLE_RELEASE, a);
+        return -1;
+    }
+    return 0;
+}
+
 // Takes the actor once the manager has made it (a few frames: its files load first).
 static void spawn_poll(Cpu *c) {
     uint64_t st = 0;
@@ -155,21 +203,105 @@ static void spawn_poll(Cpu *c) {
 
 // The pause menu's player preview, for motion_owner (motion_owner_set_preview). The game keeps it from the first time
 // the menu opens; a heap scan finds it (a second or so, so a helper thread), again when it is gone, at most every
-// PREVIEW_RETRY_FRAMES while a transformation is worn.
+// PREVIEW_RETRY_FRAMES while a transformation is worn or N64 Graphics is on (n64pose.c poses an N64 Link for it).
+// The same scan lists the actors that may be the preview's equipment (motion_owner_set_preview_gear keeps those hung
+// from it); with N64 Graphics on it runs again every PREVIEW_GEAR_FRAMES while the menu shows the preview, as the
+// equipment changes with the player's choices there.
+// Each age has a preview actor of its own, and the game keeps both once each has been shown: N64 Graphics takes the
+// one of the player's age (dbg_is_child) and scans again when the age changes; a transformation, the child's alone.
 #define PREVIEW_NAME "PouchPlayer_Child"
+#define PREVIEW_NAME_ADULT "PouchPlayer_Adult"
 #define PREVIEW_RETRY_FRAMES 600
+#define PREVIEW_MENU_RETRY_FRAMES 60
+#define PREVIEW_GEAR_FRAMES 120
+// The scan meets every such actor of the world (the player's own, items lying about), more than the preview carries:
+// it keeps this many and then those that hang from the preview.
+#define PREVIEW_CANDIDATES 1024
 static atomic_int preview_busy;
+struct preview_scan {
+    uint64_t preview, adult, gear[PREVIEW_CANDIDATES], items[MOTION_OWNER_PLAYER_ITEMS];
+    int ngear, nitems;
+};
+static int preview_each(uint64_t actor, const char *name, void *ctx) {
+    struct preview_scan *p = ctx;
+    if (!strcmp(name, PREVIEW_NAME)) {
+        if (!p->preview) p->preview = actor;
+    } else if (!strcmp(name, PREVIEW_NAME_ADULT)) {
+        if (!p->adult) p->adult = actor;
+    } else if ((!strncmp(name, "Weapon_", 7) || !strncmp(name, "Armor_", 6) || !strncmp(name, "Item_", 5))) {
+        if (p->ngear < PREVIEW_CANDIDATES) p->gear[p->ngear++] = actor;
+        if ((!strncmp(name, "Item_Hammer", 11) || !strncmp(name, "Item_Boomerang", 14) ||
+             !strncmp(name, "Item_Bottle", 11)) && p->nitems < MOTION_OWNER_PLAYER_ITEMS)
+            p->items[p->nitems++] = actor;
+    }
+    return 1;
+}
 static void preview_find(void *arg) {
     (void)arg;
-    uint64_t found = 0;
-    motion_owner_set_preview(dbg_find_actors(PREVIEW_NAME, &found, 1) > 0 ? found : 0);
+    static struct preview_scan p;   // one scan at a time (preview_busy)
+    memset(&p, 0, sizeof p);
+    uint64_t player = dbg_player_actor();
+    dbg_each_actor(preview_each, &p);
+    motion_owner_set_player_items(player, p.items, p.nitems);
+    if (n64pose_wanted() && (dbg_is_child() == 0 || !p.preview) && p.adult) p.preview = p.adult;
+    motion_owner_set_preview(p.preview);
+    int n = 0;
+    for (int i = 0; i < p.ngear && n < MOTION_OWNER_PREVIEW_GEAR; i++)
+        if (motion_owner_hangs_from(p.gear[i], p.preview)) p.gear[n++] = p.gear[i];
+    motion_owner_set_preview_gear(p.gear, n);
     atomic_store(&preview_busy, 0);
 }
+// The preview found is the one to keep: the child's, or with N64 Graphics on the one of the player's age.
+static int preview_current(void) {
+    uint64_t p = motion_owner_preview();
+    if (!p || !n64pose_wanted()) return p != 0;
+    char name[18] = {0};
+    uint64_t at = 0;
+    int child = dbg_is_child();
+    return child < 0 || (plat_mem_read(p + 0x20, &at, 8) && at && plat_mem_read(at, name, sizeof name - 1) &&
+                         (strstr(name, "_Child") != NULL) == child);
+}
+// N64 Graphics draws the hammer, boomerang and bottles in his hands itself (n64pose.c): the game keeps those as
+// actors of its own, found by the same scan, again when the player actor changes (a new area), when the scene comes
+// back after a menu (a new choice), and every ITEMS_RESCAN_FRAMES.
+#define ITEMS_RESCAN_FRAMES 1800
+static int items_frame(void) {
+    static uint64_t player;
+    static int ready;
+    static unsigned since;
+    if (!n64pose_wanted()) return 0;
+    uint64_t now = dbg_player_actor();
+    int r = vk_n64_ready(), due = now && (now != player || (r && !ready) || ++since >= ITEMS_RESCAN_FRAMES);
+    ready = r;
+    if (!due) return 0;
+    int idle = 0;
+    if (!atomic_compare_exchange_strong(&preview_busy, &idle, 1)) return 0;   // a scan runs: try the next frame
+    if (!plat_thread_spawn(preview_find, NULL, "debug-preview", 0)) {
+        atomic_store(&preview_busy, 0);
+        return 0;
+    }
+    player = now, since = 0;
+    return 1;
+}
 static void preview_frame(void) {
-    static unsigned wait;
-    if (!motion_owner_transformed() || motion_owner_preview()) return;
+    static unsigned wait, gear_wait;
+    if (items_frame()) return;
+    // N64 Graphics: the preview's equipment, again while the menu shows the preview (n64pose_preview_active)
+    if (n64pose_wanted() && motion_owner_preview() && n64pose_preview_active()) {
+        if (gear_wait) {
+            gear_wait--;
+            return;
+        }
+        gear_wait = PREVIEW_GEAR_FRAMES;
+        int idle = 0;
+        if (atomic_compare_exchange_strong(&preview_busy, &idle, 1) && !plat_thread_spawn(preview_find, NULL, "debug-preview", 0))
+            atomic_store(&preview_busy, 0);
+        return;
+    }
+    if ((!motion_owner_transformed() && !n64pose_wanted()) || preview_current()) return;
     if (wait) { wait--; return; }
-    wait = PREVIEW_RETRY_FRAMES;
+    // N64 Graphics: while the scene is not drawn (a menu is up, n64pose.c vk_n64_ready) the preview may just have come into being
+    wait = n64pose_wanted() && !vk_n64_ready() ? PREVIEW_MENU_RETRY_FRAMES : PREVIEW_RETRY_FRAMES;
     int idle = 0;
     if (atomic_compare_exchange_strong(&preview_busy, &idle, 1) && !plat_thread_spawn(preview_find, NULL, "debug-preview", 0))
         atomic_store(&preview_busy, 0);
@@ -313,6 +445,7 @@ void dbg_transform_frame(Cpu *c) {
     gload_run(c);
     save_tree_tick();
     preview_frame();
+    dbg_summon_frame(c);
     int st = atomic_load(&spawn_state);
     if (st == SPAWN_QUEUED) spawn_run(c);
     else if (st == SPAWN_SENT) spawn_poll(c);

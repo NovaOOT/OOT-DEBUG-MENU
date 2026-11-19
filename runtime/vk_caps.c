@@ -1,16 +1,16 @@
 // What the runtime branches on, logged once at device creation, and the fallbacks for GPUs other than the RX 9070.
 //
 // Fallbacks (each also forced on any GPU by an environment switch, to test it where the GPU does not need it):
-//   - no shaderFloat64 (NX2NAVI_VK_NO_FLOAT64=1 clears the feature before vkCreateDevice): the translator lowers FP64 to
+//   - no shaderFloat64 (OOTPC_VK_NO_FLOAT64=1 clears the feature before vkCreateDevice): the translator lowers FP64 to
 //     FP32 ("softfloat64"), so no shader declares Float64.
-//   - minStorageBufferOffsetAlignment above 4 (NX2NAVI_VK_SSBO_ALIGN=<power of two> raises it): the translator computes
+//   - minStorageBufferOffsetAlignment above 4 (OOTPC_VK_SSBO_ALIGN=<power of two> raises it): the translator computes
 //     storage offsets from the guest address rounded down to that alignment (the translator's unaligned storage path), and
 //     vk_exec_draw.c ssbo_info binds the rounded-down address, so shader writes reach guest memory instead of a copy.
-//   - no graphics pipeline library with fast linking (NX2NAVI_GPL=0 forces it; it also defaults off on AMD's Windows
+//   - no graphics pipeline library with fast linking (OOTPC_GPL=0 forces it; it also defaults off on AMD's Windows
 //     driver for RDNA 2 and older, see vk_caps_gpl): vk_caps.gpl = 0, the extension stays disabled, and pipelines are built whole.
-//   - no 32-lane pin (no subgroupSizeControl, 32 outside min..max, or NX2NAVI_VK_SUBGROUP_PIN=0): stages run at the
+//   - no 32-lane pin (no subgroupSizeControl, 32 outside min..max, or OOTPC_VK_SUBGROUP_PIN=0): stages run at the
 //     device's subgroupSize (SPIR-V 1.3 without a required size) and the translator is told that size.
-//     NX2NAVI_VK_SUBGROUP=<n> pins n instead of 32 where the driver allows it.
+//     OOTPC_VK_SUBGROUP=<n> pins n instead of 32 where the driver allows it.
 // The defaults (Float64, no storage rounding, 32 everywhere) leave the shader cache keys as they were (gfx_shader.c).
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +37,7 @@ static uint32_t env_u32(const char *name, uint32_t def) {
 
 void vk_caps_features(VkPhysicalDeviceFeatures *f) {
     f64_supported = f->shaderFloat64;
-    if (env_u32("NX2NAVI_VK_NO_FLOAT64", 0)) f->shaderFloat64 = VK_FALSE;
+    if (env_u32("OOTPC_VK_NO_FLOAT64", 0)) f->shaderFloat64 = VK_FALSE;
     vk_caps.float64 = f->shaderFloat64;
 }
 
@@ -62,7 +62,7 @@ void vk_caps_driver(VkPhysicalDevice p) {
                    drv.driverID == VK_DRIVER_ID_MESA_NVK;
 }
 
-// NX2NAVI_GPL=0 turns graphics pipeline libraries off and 1 turns them on; unset, they are on wherever the driver has
+// OOTPC_GPL=0 turns graphics pipeline libraries off and 1 turns them on; unset, they are on wherever the driver has
 // fast linking, except on AMD's Windows driver for RDNA 2 and older (vk_caps.amd_sc: RX 400 to RX 6000). On an
 // RX 6700 XT the game ended with code 71 at every enemy killed, from 0.5 on, and no longer with gpl = 0; an RX 5700 XT
 // showed the same ending (issue #418). Where in the driver it faults is not established: a kill draws its effects
@@ -77,13 +77,13 @@ int vk_caps_gpl(const VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *f,
                 const VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT *p) {
     gpl_lib = f->graphicsPipelineLibrary;
     gpl_fast = p->graphicsPipelineLibraryFastLinking;
-    const char *e = cfg_get("NX2NAVI_GPL");
+    const char *e = cfg_get("OOTPC_GPL");
     int want = !e || !*e ? !vk_caps.amd_sc : strcmp(e, "0") != 0;
     vk_caps.gpl = gpl_lib && gpl_fast && want;
     gpl_off = vk_caps.gpl ? NULL
              : !gpl_lib || !gpl_fast ? "the driver has no fast linking"
-             : e && *e ? "NX2NAVI_GPL=0"
-                       : "default on AMD's driver for RDNA 2 and older (NX2NAVI_GPL=1 turns it on)";
+             : e && *e ? "OOTPC_GPL=0"
+                       : "default on AMD's driver for RDNA 2 and older (OOTPC_GPL=1 turns it on)";
     return vk_caps.gpl;
 }
 
@@ -124,12 +124,12 @@ void vk_caps_init(VkCtx *c) {
     VkExtensionProperties *ep = calloc(ne ? ne : 1, sizeof *ep);
     vkEnumerateDeviceExtensionProperties(c->phys, NULL, &ne, ep);
 
-    uint32_t real_align = (uint32_t)l->minStorageBufferOffsetAlignment, a = env_u32("NX2NAVI_VK_SSBO_ALIGN", 0);
+    uint32_t real_align = (uint32_t)l->minStorageBufferOffsetAlignment, a = env_u32("OOTPC_VK_SSBO_ALIGN", 0);
     if (a && !(a & (a - 1)) && a > real_align) l->minStorageBufferOffsetAlignment = a;
     vk_caps.sbuf_align = l->minStorageBufferOffsetAlignment > 4 ? (uint32_t)l->minStorageBufferOffsetAlignment : 0;
 
-    uint32_t want = env_u32("NX2NAVI_VK_SUBGROUP", 32);
-    int pin = f13.subgroupSizeControl && cfg_bool("NX2NAVI_VK_SUBGROUP_PIN") && p13.minSubgroupSize <= want &&
+    uint32_t want = env_u32("OOTPC_VK_SUBGROUP", 32);
+    int pin = f13.subgroupSizeControl && cfg_bool("OOTPC_VK_SUBGROUP_PIN") && p13.minSubgroupSize <= want &&
               want <= p13.maxSubgroupSize;
     vk_caps.sg_size = want;
     vk_caps.sg_pin_stages = pin ? p13.requiredSubgroupSizeStages : 0;
@@ -139,19 +139,19 @@ void vk_caps_init(VkCtx *c) {
     // Gathers (TLD4) pick their four texels with Maxwell's rounding; AMD and Intel round a coordinate that sits between
     // two texels the other way, which draws dark lines along object edges in shadow-map filtering (docs/maxwell.md 2.10;
     // seen on AMD). The translator biases gather coordinates by the host's sub-texel precision; NVIDIA rounds
-    // as Maxwell does. NX2NAVI_GATHER_BIAS=<bits> forces it (0: off).
-    uint32_t gather = env_u32("NX2NAVI_GATHER_BIAS", c->props.vendorID == 0x10de ? 0 : l->subTexelPrecisionBits);
+    // as Maxwell does. OOTPC_GATHER_BIAS=<bits> forces it (0: off).
+    uint32_t gather = env_u32("OOTPC_GATHER_BIAS", c->props.vendorID == 0x10de ? 0 : l->subTexelPrecisionBits);
     // A register read before any write is an undefined load in SPIR-V, so function-local variables start at 0
     // (docs/maxwell.md 3.12). Mesa folds undefined values freely; NVIDIA's compiler gives such a read a value of another
     // lane of the warp: Ocarina's clustered-light loop reads registers that only some paths write, and on an RTX 5090
     // the Great Fairy Fountain floor took an extra light term in 4x8-pixel tiles (one 32-lane warp each) and Link went
     // dark with green speckles. On with every setting: vk_dlaa.c knows the game's FXAA by its zeroed SPIR-V hash too,
     // and the shader cache keys (which include this) stay the same whether DLSS is on or off, so shaders prepared
-    // with one setting serve the other. NX2NAVI_ZERO_LOCALS=0 turns it off.
-    uint32_t zero_locals = env_u32("NX2NAVI_ZERO_LOCALS", 1);
+    // with one setting serve the other. OOTPC_ZERO_LOCALS=0 turns it off.
+    uint32_t zero_locals = env_u32("OOTPC_ZERO_LOCALS", 1);
     // bda: global accesses the translator finds no storage buffer for go through the device address table (vk_gpa.c)
     gfx_shader_set_host(vk_caps.float64, vk_caps.sbuf_align, told, gather, zero_locals != 0, vk_gpa_wanted_ctx(c));
-    if (gather) rt_log("vk caps: gather coordinates biased for %u sub-texel bits (NX2NAVI_GATHER_BIAS)", gather);
+    if (gather) rt_log("vk caps: gather coordinates biased for %u sub-texel bits (OOTPC_GATHER_BIAS)", gather);
 
     char dv[32];
     driver_version(dv, sizeof dv, c->props.vendorID, c->props.driverVersion);

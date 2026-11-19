@@ -8,7 +8,7 @@
 // vkEndCommandBuffer included; submitting and the command pool stay on the submitting thread.
 //
 // Every vkCmd* the runtime calls through vk.h goes through the rc_* wrappers below (the macros at the end); the
-// extension commands called through function pointers have rec_* wrappers of their own. NX2NAVI_VK_RECORDER=0 makes every
+// extension commands called through function pointers have rec_* wrappers of their own. OOTPC_VK_RECORDER=0 makes every
 // call at once (the same calls in the same order), =ab switches it with the A/B blocks (rt_ab), per submission part.
 //
 // A recorder thread makes the Vulkan calls: the driver's work behind the commands depends on nothing the replay decides next.
@@ -21,8 +21,8 @@ void rec_end(void);                   // waits for the recorder; no-op when rec_
 int rec_end_cb(VkCommandBuffer cb, int crumb, uint64_t n);
 void rec_drain(void);                 // waits until the recorder made every call queued so far
 void rec_wait_totals(uint64_t *full_ns, uint64_t *drain_ns);   // producer time spent on a full ring and in drains
-void rec_stats_log(void);             // NX2NAVI_TRACE=perf: packets, bytes, drains and waits since the last call
-// NX2NAVI_REC_CHECK=1 (debug, recorder on): vk_memory.c reports each object it defers (destroy 0, stamped tl) or destroys
+void rec_stats_log(void);             // OOTPC_TRACE=perf: packets, bytes, drains and waits since the last call
+// OOTPC_REC_CHECK=1 (debug, recorder on): vk_memory.c reports each object it defers (destroy 0, stamped tl) or destroys
 // (destroy 1) with the value the GPU reached (gpu); a packet of the part being recorded that still names it is logged
 // as a hazard when the object can go before the part ran. rec_check_log: the counts by kind and packet, at exit.
 enum { REC_IMAGE, REC_VIEW, REC_BUFFER, REC_KINDS };

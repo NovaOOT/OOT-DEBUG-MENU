@@ -27,8 +27,8 @@ void main() {
     uvec4 r = rng[lo];
     uint k = i - r.w;
     uint v = post[r.x + k];
-    if (v != pre[r.y + k]) {
+    if (v != pre[r.y + k] && (pc.track & 2u) == 0u) {   // bit 1: a timing probe that writes nothing (OOTPC_WB_MERGE_PROBE)
         dst[r.x + k] = v;
-        if (pc.track != 0u) pages[(pc.page0 + (r.x + k) * 4u) >> 12] = 1u;
+        if ((pc.track & 1u) != 0u) pages[(pc.page0 + (r.x + k) * 4u) >> 12] = 1u;
     }
 }

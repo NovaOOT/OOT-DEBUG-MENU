@@ -1,8 +1,8 @@
-"""What OOT-DEBUG-MENU.exe runs: python\\pythonw.exe app\\<version>\\launcher\\start.pyw [arguments].
+"""What OOT-PC.exe runs: python\\pythonw.exe app\\<version>\\launcher\\start.pyw [arguments].
 
 The embeddable Python puts only its ._pth entries on sys.path, so the release folder (the parent of launcher/) goes
 first here. A failure before the window is up is written to data/logs/crash.log and ends the process with exit code
-86, which tells the stub to go back to the previous version (launcher/native/nx2navi.c wWinMain). The stub waits
+86, which tells the stub to go back to the previous version (launcher/native/ootpc.c wWinMain). The stub waits
 six seconds for that code (QUICK_MS), so the failure is shown in a message box only when the stub has no version to
 go back to or no longer waits (quiet_exit): a box holds the exit code back until the player closes it, and a new
 version that could not start then stayed the current one.
@@ -13,17 +13,19 @@ import traceback
 
 APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STARTUP_FAILED = 86
-# The stub's wait for this process's exit code is QUICK_MS, 6 s (launcher/native/nx2navi.c start_release). An exit
+# The stub's wait for this process's exit code is QUICK_MS, 6 s (launcher/native/ootpc.c start_release). An exit
 # this long after the process was made still reaches it, with a second to spare for the exit itself.
 STUB_WAITS = 5.0
 
 
 def launcher_root():
-    return os.environ.get('NX2NAVI_LAUNCHER_ROOT') or os.path.dirname(os.path.dirname(APP))
+    # NX2NAVI_LAUNCHER_ROOT: what a stub from before the rename to OOT-PC sets
+    return (os.environ.get('OOTPC_LAUNCHER_ROOT') or os.environ.get('NX2NAVI_LAUNCHER_ROOT')
+            or os.path.dirname(os.path.dirname(APP)))
 
 
 def rollback_target(root):
-    """The version the stub goes back to when this one ends with STARTUP_FAILED (launcher/native/nx2navi.c
+    """The version the stub goes back to when this one ends with STARTUP_FAILED (launcher/native/ootpc.c
     wWinMain): the one app/previous.txt names, when it is another than this one and its folder holds a launcher.
     '' when there is none."""
     try:
@@ -76,7 +78,7 @@ def crash(text, box=True):
         return
     try:
         import ctypes
-        ctypes.windll.user32.MessageBoxW(None, 'OOT-DEBUG-MENU could not start.\n\n' + text[-1500:], 'OOT-DEBUG-MENU', 0x10)
+        ctypes.windll.user32.MessageBoxW(None, 'OOT-PC could not start.\n\n' + text[-1500:], 'OOT-PC', 0x10)
     except Exception:
         print(text, file=sys.stderr)
 

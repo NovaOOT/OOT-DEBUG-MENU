@@ -47,7 +47,7 @@ int dbg_player_facing(float face[3]);
 
 // Once per presented frame (the overlay path): follows the position to estimate the speed.
 void dbg_tick(uint64_t now_ns);
-// A Debug tab setting kept from one start to the next: key (NX2NAVI_DEBUG_...) set to value and nx2navi.ini written
+// A Debug tab setting kept from one start to the next: key (OOTPC_DEBUG_...) set to value and OOT-PC.ini written
 // soon, when it changed.
 void dbg_keep(const char *key, const char *value);
 // Writes a 32-bit value of the game's heap at at: 0 when its page is not committed read-write.
@@ -63,21 +63,25 @@ int dbg_slot_save(int slot);       // 1 when the player was found and the positi
 int dbg_slot_load(int slot);       // 1 when written
 int dbg_slot_used(int slot, float pos[3]);
 
-// Save states (debug_state.c): the area, the entrance last come in by, the player's position and facing, health, magic
-// and every flag the game's save file keeps, taken now and put back later (warping to the area first when the player is
-// elsewhere; dbg_state_tick finishes such a load once the area is there). Kept in debug_state_<n>.bin in the game's
-// folder, so they last from one start to the next. dbg_state_note says how the last save or load went.
+// Save states (debug_state.c): the area, the entrance last come in by, the player's position and facing, health, magic,
+// the value of every flag of the game's flag stores, and the actors of the area (name, place, rotation, life), taken
+// now and put back later (warping to the area first when the player is elsewhere; dbg_state_tick finishes such a load
+// once the area is there). A save and the actor part of a load run on a helper thread with the game paused for about a
+// second; dbg_state_frame does their game-thread part. Kept in debug_state_<n>.bin in the game's folder, so they last
+// from one start to the next. dbg_state_note says how the last save or load went.
 enum { DBG_STATES = 4 };
-int dbg_state_save(int slot);
+int dbg_state_save(int slot);                                   // 1 when started
 int dbg_state_load(int slot);                                   // 1 when done or started
 int dbg_state_info(int slot, char banc[64], int64_t *saved_at);  // 1 when the slot holds a state
 int dbg_state_loading(void);
 const char *dbg_state_note(void);
 void dbg_state_tick(uint64_t now_ns);
+struct Cpu;
+void dbg_state_frame(struct Cpu *c);   // the frame hook, game thread
 
 // Game speed: a factor applied to the step the game is given each frame (frame_rate.c ocarina_step_write). 1 is normal.
 // The step is kept within what the game's physics survives, so the lowest effective factor depends on the frame rate
-// (about 1/8 at 60 fps) and the highest about 4. Needs the free-running step of the Ocarina build (NX2NAVI_OCARINA_STEP
+// (about 1/8 at 60 fps) and the highest about 4. Needs the free-running step of the Ocarina build (OOTPC_OCARINA_STEP
 // not 0).
 float dbg_time_scale(void);
 // Pause and frame advance: while paused the game thread waits at the start of its frame (dbg_pause_wait, called by the
@@ -101,7 +105,7 @@ int dbg_timer_laps(uint64_t ns[DBG_LAPS]);   // the number of laps, their times 
 
 // Speedrun timer (debug_igt.c): in-game time without the loading screens, real time, splits by hand or on every area
 // change, each compared with the best run (kept in debug_splits.txt). Shown on screen while the setting
-// NX2NAVI_DEBUG_IGT is on; NX2NAVI_DEBUG_IGT_AUTOSPLIT and NX2NAVI_DEBUG_IGT_AUTOSTART (start when a save's player first
+// OOTPC_DEBUG_IGT is on; OOTPC_DEBUG_IGT_AUTOSPLIT and OOTPC_DEBUG_IGT_AUTOSTART (start when a save's player first
 // appears) are settings too. Hotkeys F2 start and stop, F3 split, F4 reset.
 enum { DBG_SPLITS = 64 };
 int dbg_igt_enabled(void);
@@ -155,6 +159,9 @@ void dbg_bind_set(int i, const uint8_t keys[DBG_BIND_KEYS], uint8_t pad);   // w
 uint32_t dbg_bind_pads(void);
 uint64_t dbg_bind_poll(uint32_t pads, uint8_t *keys, int menu_open);
 void dbg_bind_run(uint64_t actions);
+// The same while the game waits paused (dbg_pause_wait, from input.c input_poll_paused): only the actions that work
+// there (pause, frame advance, resume); the others pressed meanwhile are dropped.
+void dbg_bind_run_paused(uint64_t actions);
 int dbg_bind_uses_key(int key);   // 1 when an action is bound to that key (KEY_ id): a fixed F key steps aside
 // The game's pause menu (the item, map, quest and equipment pages) is open: the menu button and the bound buttons are
 // the game's then.
@@ -196,11 +203,25 @@ int dbg_flags_locating(void);
 // all (the int store first, then the run of each other type nearest to it). Strings are the 64-byte kind; an enum's value
 // is the hash of its value's name.
 enum { DBG_FLAG_BOOL, DBG_FLAG_INT, DBG_FLAG_FLOAT, DBG_FLAG_STRING, DBG_FLAG_VEC3, DBG_FLAG_ENUM, DBG_FLAG_TYPES };
+// The game's other kinds of flag, found by the same search and read by the change monitor only: DBG_FLAG_TYPES above
+// stays the kinds the getters, setters, save states (debug_state.c) and the Save Tree (save_tree.c) handle, since a
+// BoolArray's or a Binary's value lies behind a pointer and cannot be written back as bytes of its entry.
+enum {
+    DBG_FLAG_UINT = DBG_FLAG_TYPES, DBG_FLAG_UINT64, DBG_FLAG_STRING16, DBG_FLAG_STRING32, DBG_FLAG_BOOLARRAY, DBG_FLAG_BINARY,
+    DBG_FLAG_ALL
+};
 uint64_t dbg_flag_addr(int type, uint32_t key);   // the value's address, 0 when unknown (or still being looked for)
 int dbg_flag_type(uint32_t key);                  // the store that has this key, -1 if none
-// A whole store, for the change monitor (debug_watch.c): its first entry, entry count, entry size and value offset; 0
-// while it is not found. dbg_flag_store_keys fills key_of[i] with entry i's key (0 when the table has none).
+// A whole store, for the change monitor (debug_watch.c), any type below DBG_FLAG_ALL: its first entry, entry count, entry
+// size and value offset; 0 while it is not found. dbg_flag_store_keys fills key_of[i] with entry i's key (0 when the
+// table has none).
 int dbg_flag_store(int type, uint64_t *base, int *count, uint32_t *size, uint32_t *value_off);
+// How a type's entry keeps its value. Inline: `width` bytes at the value offset, and the copy the save files get `copy`
+// bytes after it. Behind a pointer (BoolArray, Binary: indirect 1): at the value offset a 32-bit length (bits for a
+// BoolArray, bytes for a Binary) and at `ptr` (from the value offset) the data's address; the save copy's length and
+// address are `copy` bytes after those.
+typedef struct { uint32_t width, copy, indirect, ptr; } DbgFlagLayout;
+int dbg_flag_layout(int type, DbgFlagLayout *out);
 void dbg_flag_store_keys(int type, uint32_t *key_of, int count);
 int dbg_flag_get_bool(uint32_t key);              // 0 or 1, -1 when unknown
 int dbg_flag_set_bool(uint32_t key, int on);
@@ -321,15 +342,24 @@ int dbg_find_actors(const char *name, uint64_t *out, int max);
 int dbg_find_named(const char *name, uint64_t *out, int max);
 int dbg_find_near(const float at[3], float r, uint64_t *out, int max);   // by actor position, any class
 int dbg_actor_named(uint64_t actor, const char *name);
+// Game thread only (debug_warp.c): the game's warp of any actor to pos with rotation ax (3x3, columns the actor's axes,
+// as at +0x2f8), and its delete request for an actor. dbg_frame_seen_ns: when the frame hook last ran (it stops while
+// paused).
+void dbg_frame_warp_actor(struct Cpu *c, uint64_t actor, const float pos[3], const float ax[9]);
+void dbg_frame_delete_actor(struct Cpu *c, uint64_t actor);
+uint64_t dbg_frame_seen_ns(void);
 // Every actor of that class with its name; fn returns 0 to stop. Helper threads only (a heap scan).
 int dbg_each_actor(int (*fn)(uint64_t actor, const char *name, void *ctx), void *ctx);
+// The same over the heap chunks where the last full pass found actors (a full pass when none has yet): much less to
+// read, for a rescan that repeats, which misses an actor only where none was before.
+int dbg_each_actor_marked(int (*fn)(uint64_t actor, const char *name, void *ctx), void *ctx);
 // 1 when an Area trigger is a loading zone (its link leads to the area's entrance actor).
 int dbg_area_is_loading_zone(uint64_t area);
 // The actor an Area trigger acts on (its link's target: an entrance, an event, another Area, a chest...), 0: none.
 uint64_t dbg_area_target(uint64_t area);
 
 // Foliage draw distance (draw_distance.c): multiplies the game's default grass, bush, flower and low tree distances by
-// NX2NAVI_DEBUG_DRAW_DISTANCE before the guest starts (boot.c rt_boot); a change applies at the next start.
+// OOTPC_DEBUG_DRAW_DISTANCE before the guest starts (boot.c rt_boot); a change applies at the next start.
 void dbg_draw_distance_init(void);
 
 // Volume overlay (debug_view.c): the placed volumes and objects the game does not draw, for the menu's overlay
@@ -339,9 +369,9 @@ enum {
     DBG_VOL_LOAD = 2,      // loading zones: Area triggers that lead to an entrance
     DBG_VOL_TRIGGER = 4,   // every other Area trigger and *Area* volume (events, camera, music, spawning, horse jumps)
     DBG_VOL_HIDDEN = 8,    // hidden things: grotto covers, Gold Skulltulas, heart pieces, chests, hidden-hole markers
-    DBG_VOL_DEATH = 16,    // death barriers and hazards: the kill volume under the world, void-out zones, lava surfaces,
-                           // pits, quicksand
-    DBG_VOL_KINDS = 5,
+    DBG_VOL_DEATH = 16,    // death barriers and hazards: the kill volume under the world, lava surfaces, pits, quicksand
+    DBG_VOL_VOID = 256,    // void-out zones: the placed volumes whose touch sends the player back (DbgPlacement void_kind)
+    DBG_VOL_KINDS = 6,
     // not a volume, so not among the DBG_VOL_KINDS colours: enemies (Enemy_*, *Boss*) and breakable rocks and walls
     // (*BrokenRock*, *CrackWall*, *CrackFloor*, *BrokenRubble*), drawn as their health (dbg_view_health)
     DBG_VOL_ENEMY = 32,
@@ -356,14 +386,30 @@ typedef struct {
     int shape;         // DBG_SHAPE_
     char name[48];
     char target[48];   // an Area trigger: the name of the actor it acts on (its link), else empty
+    int cells;         // 1: a box of void-out cells of the volume statistics (debug_voidcells.c), pos its bottom middle
 } DbgVolume;
+// Void-out cells (debug_voidcells.c): the cells of the area's volume statistics where the player's fall check sends
+// them back, merged into boxes. dbg_void_cells_area reads area's tiles (once per area, on the caller's thread);
+// dbg_void_cells_update works out the cells round the player at me (again once they have moved a few metres, on the
+// same thread); dbg_void_cells copies the boxes {lo xyz, hi xyz} within range metres of me (all of them with me NULL),
+// at most max.
+void dbg_void_cells_area(const char *area);
+void dbg_void_cells_update(const float me[3]);
+// The box area's volume statistics cover, from its VolumeStatsAABB file (debug_place.c); 0 when it has none.
+int dbg_volume_stats_box(const char *area, float lo[3], float hi[3]);
+int dbg_void_cells(float (*out)[6], int max, const float me[3], float range);
 // One placed actor of a stage file (debug_place.c): its name (valid during the callback only), position, rotation as three
-// unit columns, and placement scale. void_out: 1 when the file's logic makes touching it a void-out (an Area the
-// fall-down logic watches: the player is put back at the last safe spot with a heart less).
+// unit columns, and placement scale. void_kind: a DBG_VOID_ kind when the stage's AI logic sends the player back to the
+// last safe spot (a heart less) on touching it, else 0. shape_type: the placement's Dynamic.RigidBodyShapeType, -1 when
+// it has none. An Area's shape: 0 a sphere, 1 (the Area pack's default) a box, 3 an upright cylinder, as the placements'
+// scales bear out (type 0 always has three equal ones, type 3 equal x and z, such as 0.85 x 2 x 0.85); 2 is on three
+// Areas only. The overlay draws a cylinder as it draws a box: its placement scale in metres, from the position up.
+enum { DBG_VOID = 1, DBG_VOID_CONDITION = 2, DBG_VOID_SAND = 3 };
+enum { DBG_AREA_SPHERE = 0, DBG_AREA_BOX = 1, DBG_AREA_CYLINDER = 3 };
 typedef struct {
     const char *name;
     float pos[3], axes[9], scale[3];
-    int void_out;
+    int void_kind, shape_type;
 } DbgPlacement;
 // Calls fn for each actor placed in the stage files of banc (e.g. "DeathMountainCrater_Child"), Static then Dynamic, until
 // fn returns 0. The count seen, -1 when the area has no stage files.
@@ -385,6 +431,9 @@ int dbg_view_volumes(DbgVolume *out, int max, float range);
 // The kinds the settings switch on (debug_view_walls, _loading, _triggers, _hidden, _death, _health); keeps
 // dbg_view_want in step.
 int dbg_view_kinds(void);
+// The Discord presence's fight line (discord_rpc.c) wants the enemy list while on: the helper thread scans for enemies
+// then whatever the overlay's own settings say.
+void dbg_view_foes(int on);
 // Enemy health (debug_view_health): an actor's life component is *(*(actor+0x270)+0x2b8), of class main+0x4b4c460;
 // its current life is the 32-bit value at *(component+0x1c10)+8 and the maximum at *(component+0x1c18)+8 (the game's
 // own life query, QueryLifeGetLifeByActor, reads them so). Units are the game's: 2 for a Skulltula, 18 for a Gerudo
@@ -396,6 +445,8 @@ typedef struct {
 } DbgHealth;
 // The enemies within range metres of the player that have a life component, read now; at most max.
 int dbg_view_health(DbgHealth *out, int max, float range);
+// An actor's life and maximum through its life component (as above); *at (NULL: not wanted) the current value's address.
+int dbg_actor_life(uint64_t actor, int *life, int *max, uint64_t *at);
 // One-hit kills (debug_one_hit, kept from one start to the next): while on, every enemy, boss and breakable of the
 // health overlay's list whose life is above 1 has it lowered to 1 (its maximum left alone), so the next hit that does
 // any damage kills it through the game's own death handling, as a hit of 999 would. An attack the enemy takes no
@@ -417,6 +468,7 @@ typedef struct {
     int n;             // 3 to 8
     int target;        // 1: part of a target object, 0: a surface of the level
     int wall;          // DBG_POLY_: a hookshot polygon, an invisible wall one or a collision one
+    int air;           // its material is AirWall (in any list)
 } DbgHookPoly;
 typedef struct {
     float pos[3];      // the middle of the parts the hookshot sticks to
@@ -455,6 +507,12 @@ int dbg_hover_boots_on(void);
 // debug_game.c debug_abyss_hits reads it (recomp/patches-v111.txt, set dbgframe).
 void dbg_no_void_out(int on);
 int dbg_no_void_out_on(void);
+// The last thing that sent the player back or would have, had No void-out not held it (debug_move.c): the abyss type
+// of the player's own check (a non-zero number the game picks the fall reaction by), or DBG_ABYSS_ZONE for a void-out
+// zone's touch; where the player stood and how long ago. 0 when none has been seen this run.
+#define DBG_ABYSS_ZONE 0x10000u
+void dbg_abyss_note(uint32_t cause);
+int dbg_abyss_last(uint32_t *cause, float pos[3], uint64_t *age_ns);
 // Bunny Hood (debug_move.c mask_frame): while it is worn, the player's animations play bunny_speed times faster as the
 // player moves along the ground (running is the animation's own motion) and jumps go that much further (1 to 3, 1.5 at
 // first). Kept as debug_bunny and debug_bunny_speed. Mask abilities: the Zora Mask swims and dives fast, the Goron Mask
@@ -478,16 +536,27 @@ int dbg_mask_powers_on(void);
 // mask on that layer at all times, and puts the game's mask back when the option goes off.
 void dbg_bomb_bug(int on);
 int dbg_bomb_bug_on(void);
-// Ragdoll (debug_move.c): the game's own ragdoll of the player, the one the Wallmaster's drop starts. dbg_ragdoll
+// Ragdoll (debug_move.c): the game's own ragdoll of the player, the one a bomb's blast starts (Rolling_Medium, thrown
+// forwards, the way the player faces, as by a blast behind him). dbg_ragdoll
 // asks for it (1), for its end (0) or for the other of the two (-1) on the next game frame, and returns 0 without a
 // player. One it starts ends by itself a second after the player lies still. dbg_ragdoll_on: the player's ragdoll
 // runs, whoever started it.
 int dbg_ragdoll(int how);
 int dbg_ragdoll_on(void);
+// The reaction dbg_ragdoll starts: the player's ten ragdoll reactions (Player's ControllerSetParam RagdollReaction
+// list). The first four are the rolling strengths in the game's own order. dbg_ragdoll_kind sets it (out of range:
+// leaves it) and returns it; dbg_ragdoll_state: the controller's state for the player (0 none, 1 rolling, 2 DownLand,
+// 3 ImmediateDown, 4 AirDead, 5 DeadStand, 6 DeadDown, 7 Pressed), 0 before a ragdoll was first asked for.
+enum {
+    RD_ROLLING_WEAK, RD_ROLLING_MEDIUM, RD_ROLLING_STRONG, RD_ROLLING_RESTRAINT_THROWN,
+    RD_DOWN_LAND, RD_IMMEDIATE_DOWN, RD_AIR_DEAD, RD_DEAD_STAND, RD_DEAD_DOWN, RD_PRESSED, RD_KINDS
+};
+int dbg_ragdoll_kind(int kind);
+uint32_t dbg_ragdoll_state(void);
 void dbg_bomb_layers(struct Cpu *c, uint64_t list);
 void dbg_move_frame(struct Cpu *c);
 
-// Bomb paths (debug_bombs.c; NX2NAVI_DEBUG_VIEW_BOMBS): while on, each bomb or Bombchu thrown, dropped or set down
+// Bomb paths (debug_bombs.c; OOTPC_DEBUG_VIEW_BOMBS): while on, each bomb or Bombchu thrown, dropped or set down
 // leaves its path, from the player's hands to where it lay still (where it went off), with the points where it hit
 // something while falling. The newest DBG_BOMB_PATHS are kept. dbg_bombs_frame runs on the game thread (the frame hook);
 // dbg_bomb_paths copies them out, newest first.
@@ -509,6 +578,22 @@ int dbg_bomb_paths(DbgBombPath *out, int max);
 enum { DBG_SPAWN_IDLE, DBG_SPAWN_QUEUED, DBG_SPAWN_SENT, DBG_SPAWN_DONE, DBG_SPAWN_FAILED };
 int dbg_spawn_request(const char *name, float dx, float dz);
 int dbg_spawn_status(uint64_t *actor, uint32_t *error);
+// Game thread only: the same creation at a pose (name_ptr points to the name; both and *handle stay valid until it ends),
+// 1 when sent; then dbg_frame_create_poll every frame: 1 made (*actor in the world), 0 loading, -1 failed or given up.
+int dbg_frame_create(struct Cpu *c, const uint64_t *name_ptr, const float pos[3], const float ax[9], uint64_t *handle);
+int dbg_frame_create_poll(struct Cpu *c, uint64_t *handle, uint64_t *actor, int give_up);
+// Summoning (debug_summon.c): count actors of one name (as dbg_spawn_request takes it) around the player, with no
+// limit on the count; a new request replaces the one running once its creations in flight end. dbg_summon_stop drops
+// what is still to send. dbg_summon_status fills *s and is 1 while a summon runs. dbg_summon_frame: the frame hook.
+typedef struct {
+    char name[64];
+    int64_t total, made, failed, left;
+    int loading;
+} DbgSummon;
+int dbg_summon_request(const char *name, int64_t count);
+void dbg_summon_stop(void);
+int dbg_summon_status(DbgSummon *s);
+void dbg_summon_frame(struct Cpu *c);
 void dbg_transform_frame(struct Cpu *c);
 // The game writes a real save of the running game to save slot 0..5, as its System page does (the frame hook
 // calls it next frame). DBG_GAME_SAVE_AUTO: an autosave instead, to the slot the game plays, as when it enters an

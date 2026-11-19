@@ -74,7 +74,7 @@ static void fatal_end(int code, const char *fmt, va_list ap) {
     rt_fatal_notes();
     kern_free_cores_note();
     fs_save_crash_wait();   // a save the game already reported as done finishes first (bounded)
-    prof_sampler_write();   // NX2NAVI_PROFILE: what was sampled until now, else a crash loses the whole profile
+    prof_sampler_write();   // OOTPC_PROFILE: what was sampled until now, else a crash loses the whole profile
     // RivaTuner Statistics Server's profile as it was: left with the game's limit in it, the next run would take that
     // limit for the player's own (rtss_limit.c; it gives up after a second if the failing thread holds its lock)
     rtss_limit_restore();

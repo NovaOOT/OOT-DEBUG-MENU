@@ -1,4 +1,4 @@
-// The game's zstd decoder on the host's libzstd. Most RomFS files of NX2navi 1.4.3 are zstd frames, many with a
+// The game's zstd decoder on the host's libzstd. Most RomFS files of OOT-PC 1.4.3 are zstd frames, many with a
 // dictionary from Pack/ZsDic.pack.zs; the decoder is BSD zstd linked into main. The patch set "zstd"
 // (recomp/patches-v143.txt) sends every call of ZSTD_decompressMultiFrame (main+0x3a1f0) and of ZSTD_decompress_usingDDict
 // (main+0x3a1e0) to the two host functions below, on the patch page. Lifted, the decoder ran its literal and match
@@ -9,7 +9,7 @@
 // - A guest ZSTD_DDict (zstd's struct: dictBuffer, dictContent, dictSize first) becomes a host ZSTD_DDict made from a
 //   copy of its content, cached by guest address, content address, size and a fingerprint of the content.
 // - Inputs of at least AWAY_BYTES give the virtual core up while they decode (other guest threads run on it).
-// NX2NAVI_ZSTD_NATIVE=0 keeps the guest decoder (the patch set switch); NX2NAVI_ZSTD_CHECK=1 decodes each call both ways,
+// OOTPC_ZSTD_NATIVE=0 keeps the guest decoder (the patch set switch); OOTPC_ZSTD_CHECK=1 decodes each call both ways,
 // keeps the guest's result and logs every call where the two differ.
 //
 // Ocarina of Time 1.1.1 has the same decoder at other addresses (recomp/patches-v111.txt: three calls of
@@ -29,6 +29,7 @@
 
 #include "cfg.h"
 #include "host.h"
+#include "invisible_walls.h"
 
 #if __has_include("patches.h")
 #include "patches.h"
@@ -62,7 +63,7 @@ static struct {
 
 static int check_mode(void) {
     static int v = -1;
-    if (v < 0) v = cfg_bool("NX2NAVI_ZSTD_CHECK");
+    if (v < 0) v = cfg_bool("OOTPC_ZSTD_CHECK");
     return v;
 }
 
@@ -194,11 +195,17 @@ static void count(uint64_t in, uint64_t out, uint64_t ns) {
 static int trusted(void) {
     static int v = -1;
     if (v < 0) {
-        const char *e = cfg_get("NX2NAVI_ZSTD_NATIVE");
+        const char *e = cfg_get("OOTPC_ZSTD_NATIVE");
         v = !(e && !strcmp(e, "0")) || check_mode();
         if (!v) rt_log("zstd: the game's own decoder (zstd_native = 0; zstd_check = 1 compares the two)");
     }
     return v;
+}
+
+// What the guest decoder returned for an output at dst with room for cap: the size of a whole decoded file, or a zstd
+// error code. A whole file goes to walls_decoded as the host's own decodes do.
+static void guest_decoded(uint64_t dst, uint64_t cap, uint64_t r) {
+    if (!ZSTD_isError((size_t)r) && r && r <= cap && dst + r <= RT_ADDRESS_LIMIT) walls_decoded(gp(dst), (size_t)r);
 }
 
 // x0 dctx, x1 dst, x2 capacity, x3 src, x4 size, then (dict, dict size, ddict) as the entry has them. guest: the
@@ -208,7 +215,7 @@ static void decode(Cpu *c, uint64_t dict, uint64_t dict_size, uint64_t ddict, ui
     memcpy(a, c->x, sizeof a);
     uint64_t dst = a[1], cap = a[2], src = a[3], size = a[4];
     if (!trusted()) {
-        rt_call(c, guest, n, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+        guest_decoded(dst, cap, rt_call(c, guest, n, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]));
         return;
     }
     // In place (the input inside the output buffer): the result depends on how the decoder's writes overtake its
@@ -216,7 +223,7 @@ static void decode(Cpu *c, uint64_t dict, uint64_t dict_size, uint64_t ddict, ui
     // would leave the guest decoder a damaged input. Such calls stay in the guest.
     if (cap && src < dst + cap && dst < src + size) {
         __atomic_add_fetch(&S.inplace, 1, __ATOMIC_RELAXED);
-        rt_call(c, guest, n, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+        guest_decoded(dst, cap, rt_call(c, guest, n, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]));
         return;
     }
     if (check_mode()) {
@@ -270,9 +277,10 @@ static void decode(Cpu *c, uint64_t dict, uint64_t dict_size, uint64_t ddict, ui
             rt_log("zstd: %llu bytes at %#llx go to the guest decoder: %s", (unsigned long long)size,
                    (unsigned long long)src, !ok ? "inputs not taken" : ZSTD_getErrorName(r));
         }
-        rt_call(c, guest, n, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+        guest_decoded(dst, cap, rt_call(c, guest, n, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]));
         return;
     }
+    walls_decoded(gp(dst), r);
     c->x[0] = r;
     count(size, r, kern_now_ns() - t0);
 }
@@ -300,7 +308,7 @@ static void decode(Cpu *c, uint64_t dict, uint64_t dict_size, uint64_t ddict, ui
 // The game's job stops feeding at a result of 0, which a frame gives once its content is out even when its last bytes
 // (the checksum) are still to come: such a stream keeps its slot for those bytes but is marked spent, and a new stream
 // takes a spent slot when no free one is left.
-// With NX2NAVI_ZSTD_CHECK=1 the game's feed decodes every stream as before, the host decodes the same chunks into a
+// With OOTPC_ZSTD_CHECK=1 the game's feed decodes every stream as before, the host decodes the same chunks into a
 // buffer of its own, and the two outputs are compared when the game ends the stream or has all its content out
 // ("zstd check: stream ..."). The check also reports a game output that did not advance through one buffer.
 // --probe-zstd (probe_zstd, at the end) runs host streams on frames it makes itself.
@@ -317,6 +325,7 @@ typedef struct {
     uint64_t in;                   // compressed bytes fed
     int spent;                     // all the content is out: the game feeds no more, and the slot may be taken
     int done, bad, moved;          // check mode: the host reached the frame's end / failed; the game's output moved
+    int whole;                     // all the content was out and walls_decoded has seen it
 } Stream;
 static Stream streams[NSTREAM];
 static PlatMutex stream_lock = PLAT_MUTEX_INIT;
@@ -453,7 +462,7 @@ static Stream *stream_begin(uint64_t s, uint64_t src, int32_t size, uint64_t ddi
     if (!st) return NULL;
     free(st->shadow);
     st->shadow = NULL, st->content = h.frameContentSize, st->pos = 0, st->dst0 = dst, st->cap0 = (uint64_t)cap;
-    st->in = 0, st->done = st->bad = st->moved = 0;
+    st->in = 0, st->done = st->bad = st->moved = st->whole = 0;
     if ((!st->dctx && !(st->dctx = stream_dctx())) ||
         ZSTD_isError(ZSTD_DCtx_reset(st->dctx, ZSTD_reset_session_only)) ||
         ZSTD_isError(ZSTD_DCtx_refDDict(st->dctx, dd)) ||
@@ -521,6 +530,10 @@ static void stream_feed(Cpu *c, Stream *st, uint64_t s, uint64_t src, int32_t si
         if (!ret) stream_spent(st);
     }
     c->x[0] = ret;
+    if (!ZSTD_isError(r) && st->pos == st->content && !st->whole) {   // the file is whole in the game's memory
+        st->whole = 1;
+        walls_decoded(gp(st->dst0), (size_t)st->content);
+    }
     if (end) {
         stream_count(st, st->pos);
         stream_drop(st);
@@ -580,6 +593,35 @@ static void stream_check(Cpu *c, Stream *st, uint64_t s, uint64_t src, int32_t s
     }
 }
 
+// Streams the game's own feed decodes (in place, or a begin the host does not take): where each began and the content
+// its begin found, so that a stream the game finishes goes to walls_decoded like the host's.
+static struct {
+    uint64_t s, dst;
+    uint32_t content;
+} GS[64];
+
+static void guest_stream(Cpu *c, uint64_t s, uint64_t src, uint64_t size, uint64_t ddict) {
+    if (!s || s >= RT_ADDRESS_LIMIT - 0x38) {
+        rt_call(c, GUEST_STREAM, 4, s, src, size, ddict);
+        return;
+    }
+    uint8_t ph = *(const uint8_t *)gp(s);
+    uint64_t dst = ph == 1 ? ld64(s + 8) : 0;
+    rt_call(c, GUEST_STREAM, 4, s, src, size, ddict);
+    unsigned h = (unsigned)(s >> 4) & 63;
+    uint8_t now = *(const uint8_t *)gp(s);
+    if (ph == 1) {   // begun: the content left is the whole content
+        GS[h].s = now == 2 || now == 4 ? s : 0, GS[h].dst = dst, GS[h].content = ld32(s + 0x14);
+        if (now == 2 && (uint32_t)c->x[0] == 0) now = 4;
+    }
+    if (GS[h].s != s || (now != 4 && !(now == 2 && ld32(s + 0x14) == 0))) {
+        if (GS[h].s == s && now == 3) GS[h].s = 0;
+        return;
+    }
+    GS[h].s = 0;
+    if (GS[h].content && GS[h].dst + GS[h].content <= RT_ADDRESS_LIMIT) walls_decoded(gp(GS[h].dst), GS[h].content);
+}
+
 static void host_stream(Cpu *c) {
     uint64_t s = c->x[0], src = c->x[1], ddict = c->x[3];
     int32_t size = (int32_t)c->x[2];
@@ -594,7 +636,7 @@ static void host_stream(Cpu *c) {
             st = stream_find(s);
         }
     }
-    if (!st) rt_call(c, GUEST_STREAM, 4, s, src, c->x[2], ddict);
+    if (!st) guest_stream(c, s, src, c->x[2], ddict);
     else if (check_mode()) stream_check(c, st, s, src, size, ddict);
     else stream_feed(c, st, s, src, size);
 }
@@ -767,7 +809,7 @@ int probe_zstd(void) {
 
 #endif
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): host dictionaries (never freed) and stream slots taken.
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): host dictionaries (never freed) and stream slots taken.
 void zstd_sizes(PerfSizes *s) {
     uint64_t d, st = 0;
     plat_mutex_lock(&dict_lock);

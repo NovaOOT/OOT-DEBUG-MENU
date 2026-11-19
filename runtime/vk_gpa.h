@@ -6,7 +6,7 @@
 
 #define VK_GPA_CB_SLOT 0x40   // res.json cb_slot of the table (translator ResourceManager.DeviceAddressTableCbSlot)
 
-int vk_gpa_wanted(void);                   // the device has buffer device addresses and NX2NAVI_GPA is not 0
+int vk_gpa_wanted(void);                   // the device has buffer device addresses and OOTPC_GPA is not 0
 int vk_gpa_wanted_ctx(const VkCtx *c);     // the same during device creation, before vk_ctx() returns it
 int vk_gpa_on(void);                       // the table exists (created on first use)
 uint64_t vk_gpa_device_address(VkBuffer b);

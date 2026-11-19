@@ -7,7 +7,7 @@ the translator answers it was translated for. This tool reads the shaders from t
 (tools/shader_census.py inventory), keeps the list's variants whose shader is in this game version, adds each shader's
 default variant (every texture slot a 2D texture, float vertex inputs and colour outputs: the
 default bind state), and writes them next to the
-build's nx2navi.exe in the record layouts of runtime/gfx_shader.c ("answers met in play"):
+build's ocarina.exe in the record layouts of runtime/gfx_shader.c ("answers met in play"):
 
     seed-programs.bin  "NX2NSPRG": stage, length, c1 length, runtime code hash, control section, code, c1
     seed-answers.bin   "NX2NSANS": stage, code hash, input id (zero: the runtime computes it), answers, priority
@@ -16,7 +16,7 @@ Priority (the pad byte): 0 shaders the list's warm rows flag as title/menu (t), 
 rest; a default variant takes its shader's priority and sets DEFAULT_FLAG (bit 7). The runtime reads a flagged
 record's first translation and translates it again with better answers where it reads other ones
 (runtime/gfx_shader_guess.c): integer vertex inputs, and the texture and image types a compute shader's translation
-declares, for which a compute default variant goes without texture answers. Then it runs `nx2navi.exe --prepare-shaders`, which translates every record into the build's shader cache, writes
+declares, for which a compute default variant goes without texture answers. Then it runs `ocarina.exe --prepare-shaders`, which translates every record into the build's shader cache, writes
 shader-prepared.bin (one record per variant, in priority order) and builds every variant's stage library or compute
 pipeline once, so the GPU driver's own disk cache holds them (vk_pipeline.c "stage library prebuild"). The seed files
 can be deleted afterwards.
@@ -26,11 +26,11 @@ is read beside the shader list when there is one: tools/data/pipeline_list.bin, 
 folder, or --pipeline-list. Its variants of shaders this game version has join the seed, and its key records are
 written as seed-pipeline-keys.bin, which --prepare-shaders builds into the pipeline caches once the seed is translated
 (vk_pipeline.c "the shared pipeline list"; mesh pipelines by default). That file stays in the build directory:
-`nx2navi.exe --warm-shaders` and `--prepare-pipelines` build from it again after an update or a new driver.
+`ocarina.exe --warm-shaders` and `--prepare-pipelines` build from it again after an update or a new driver.
 
 A driver whose shader compiler crashes on a variant crashes on it in every run (NVIDIA 615.78.08 on an RTX 5080, issue
 #30). The translations and shader-prepared.bin are written by then, and the journal the run leaves names the variants
-the driver was building (vk_pipeline.c skip_init), so only the driver step runs again (`nx2navi.exe --warm-shaders`), up to
+the driver was building (vk_pipeline.c skip_init), so only the driver step runs again (`ocarina.exe --warm-shaders`), up to
 RETRIES times, and skips them.
 
 Game-derived output stays in the build directory (ignored). The list is read at preparation time from tools/data/shader_list.tsv when that file exists (the installer archive
@@ -221,7 +221,7 @@ def code_hash(stage, control, code, length, c1):
 
 
 def driver_crashed(out):
-    """nx2navi died while the graphics driver built variants: the journal it left names at least one."""
+    """ocarina died while the graphics driver built variants: the journal it left names at least one."""
     p = out / JOURNAL
     data = p.read_bytes() if p.is_file() else b''
     return any(any(data[i:i + 32]) for i in range(0, len(data), 64))
@@ -229,7 +229,7 @@ def driver_crashed(out):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('build', type=Path, help='build directory holding nx2navi.exe (build\\v121)')
+    ap.add_argument('build', type=Path, help='build directory holding ocarina.exe (build\\v121)')
     ap.add_argument('--version', default='v121', help='build/extracted/<version>')
     ap.add_argument('--romfs', type=Path, help='RomFS directory (default build/extracted/<version>/romfs)')
     ap.add_argument('--exefs', type=Path, help='ExeFS directory (default build/extracted/<version>/exefs)')
@@ -240,7 +240,7 @@ def main():
     ap.add_argument('--no-pipeline-list', action='store_true', help='no shared pipeline list, also when one is bundled')
     ap.add_argument('--all-shaders', action='store_true',
                     help='also the default variants SLOW_UNUSED leaves out (an hour more of GPU driver builds)')
-    ap.add_argument('--exe', default='nx2navi.exe' if os.name == 'nt' else 'nx2navi',
+    ap.add_argument('--exe', default='ocarina.exe' if os.name == 'nt' else 'ocarina',
                     help='the game executable in the build directory that runs --prepare-shaders')
     a = ap.parse_args()
     t0 = time.monotonic()
@@ -316,7 +316,7 @@ def main():
         if not r.returncode or not driver_crashed(out):
             break
         print(f'prepare_shaders: the graphics driver crashed while building shaders (rc={r.returncode}); building them '
-              'again without the variants it was building (nx2navi.exe --warm-shaders)', flush=True)
+              'again without the variants it was building (ocarina.exe --warm-shaders)', flush=True)
         r = subprocess.run([str(exe), '--warm-shaders'], cwd=str(out))
     print(f'{a.exe} --prepare-shaders: rc={r.returncode}; total {time.monotonic() - t0:.1f} s')
     return r.returncode

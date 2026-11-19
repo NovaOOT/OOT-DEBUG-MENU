@@ -2,7 +2,7 @@
 // Frame rate: the frame limit and the real-time frame step, the host half of the patch sets fps60, realtime and cloth
 // (build tables patches-v121.txt, patches-v143.txt).
 //
-// NX2navi's adaptive present-interval controller (main+0x8f26c8) turns the main thread's measured work into a number of
+// OOT-PC's adaptive present-interval controller (main+0x8f26c8) turns the main thread's measured work into a number of
 // 60 Hz ticks clamped to [minimum, maximum]; shipping data sets the minimum to 2 (30 fps), the set fps60 lowers it to
 // 1. The controller still raises the interval when a frame does not fit. Shipping code then steps the game by whole
 // vsyncs (VFR step main+0x7ede6c: ratio = interval * 0.5, seconds = interval / 60; global ratio at main+0x8f2394), so
@@ -10,7 +10,7 @@
 // instead: +0 ratio = seconds * 30, +4 seconds (1.4.3: +8 interval = seconds * 60, the producer's nominal interval
 // before its half-step coefficient), the moving average of the last 5 display intervals, at most 1/15 s
 // (slower frames slow the game down, as on the console) and at least 1/240 s, so a higher frame-rate cap only changes
-// the pacer (frame_step_cap_ns, NX2NAVI_FPS_LIMIT). The set cloth gives hair and cloth the same clock and needs realtime.
+// the pacer (frame_step_cap_ns, OOTPC_FPS_LIMIT). The set cloth gives hair and cloth the same clock and needs realtime.
 //
 // The floor: with a shorter step (ratio below 0.125) 1.4.3 aborts within seconds of some save loads (issue #241, a
 // 280 Hz monitor): Havok's hkDefaultMemoryImpl reports "Out of memory" for the buffer the physics pre-solve (profiler
@@ -37,8 +37,8 @@
 // first save load. Recorded and scripted input (input.c) runs on it, so a replay presses at the same game time at any
 // frame rate and after a first load of any length; a later load (fast travel) still shifts what follows by its length.
 //
-// NX2NAVI_TRACE=perf adds a line per 120 presents: fps, the game seconds stepped against wall seconds, and with
-// NX2NAVI_SPEED_PROBE=1 the player's position and ground speed (an independent check: Link runs at the same speed at
+// OOTPC_TRACE=perf adds a line per 120 presents: fps, the game seconds stepped against wall seconds, and with
+// OOTPC_SPEED_PROBE=1 the player's position and ground speed (an independent check: Link runs at the same speed at
 // any frame rate when game time follows wall time).
 #include <math.h>
 #include <stdatomic.h>
@@ -123,7 +123,7 @@ void frame_step_init(void) {
     // update. The two sets patch the same words; this start keeps one of them on.
     int solver = rt_patch_set("osolver"), solver_full = rt_patch_set("osolverfull");
     if (solver_full >= 0) {
-        const char *e = cfg_get("NX2NAVI_PHYSICS_STEPS");
+        const char *e = cfg_get("OOTPC_PHYSICS_STEPS");
         int full = (e && !strcmp(e, "2")) || rt_patch_enabled(solver_full);
         rt_patch_switch(solver_full, full);
         if (full && solver >= 0) rt_patch_disable(solver);
@@ -138,23 +138,23 @@ void frame_step_init(void) {
     }
     if (!rt_patch_enabled(realtime) && rt_patch_enabled(cloth)) {
         rt_patch_disable(cloth);
-        rt_log("frame rate: cloth clock off, it needs the real-time step (NX2NAVI_REALTIME=0)");
+        rt_log("frame rate: cloth clock off, it needs the real-time step (OOTPC_REALTIME=0)");
     }
     if (rt_patch_enabled(realtime)) {
         step_word = (_Atomic uint64_t *)rt_patch_page();
         step_interval = (_Atomic uint32_t *)((uint8_t *)rt_patch_page() + 8);
         step_store((float)STEP_FIRST_S);
     }
-    frame_limit_live();   // NX2NAVI_FPS_LIMIT decides the set fps60 from the start
+    frame_limit_live();   // OOTPC_FPS_LIMIT decides the set fps60 from the start
     rt_log("frame rate: present interval %s, %s", rt_patch_enabled(fps60) ? "1..3 (above 30 fps)" : "2..3 (shipping 30 fps)",
            step_word ? "real-time step (5-frame average of display intervals, at most 1/15 s)" : "whole-vsync steps");
 }
 
 int frame_step_realtime(void) { return step_word != NULL; }
 
-// The frame limit (menu, NX2NAVI_FPS_LIMIT, live): 30, 60, 90, 120, 144, any whole rate from 30 to 240, or display (the
+// The frame limit (menu, OOTPC_FPS_LIMIT, live): 30, 60, 90, 120, 144, any whole rate from 30 to 240, or display (the
 // refresh rate of the window's monitor, at most 240). A higher number gives 240, the rate of the shortest step the
-// game survives (STEP_MIN_S). Unset, the older NX2NAVI_FPS60=0 still means 30. A limit of 30 switches the set
+// game survives (STEP_MIN_S). Unset, the older OOTPC_FPS60=0 still means 30. A limit of 30 switches the set
 // fps60 off (the shipping minimum interval 2), every other limit switches it on; the controller reads its minimum
 // interval from the patched sites each frame. With the real-time step the pacer holds frames to the limit; above 60
 // only the pacer changes, as the step's floor is the limit's ceiling. Without it the game steps whole 60 Hz vsyncs and the pacer
@@ -184,25 +184,25 @@ static int limit_read;
 static int limit_hz = -1;   // 0: display; -2: unlimited (free-running builds); -1 before the first read
 
 static int limit_parse(void) {
-    const char *e = cfg_get("NX2NAVI_FPS_LIMIT"), *old = cfg_get("NX2NAVI_FPS60");
+    const char *e = cfg_get("OOTPC_FPS_LIMIT"), *old = cfg_get("OOTPC_FPS60");
     if (!e || !*e) return old && !strcmp(old, "0") ? 30 : 60;
     if (!strcmp(e, "display")) return 0;
     int free_run = frame_free_running();
     if (!strcmp(e, "unlimited")) {
         if (free_run) return -2;
-        rt_log("frame rate: NX2NAVI_FPS_LIMIT=unlimited needs a game that steps by the clock; %d", LIMIT_MAX_HZ);
+        rt_log("frame rate: OOTPC_FPS_LIMIT=unlimited needs a game that steps by the clock; %d", LIMIT_MAX_HZ);
         return LIMIT_MAX_HZ;
     }
     char *end;
     long n = strtol(e, &end, 10);
     if (!*end && free_run && n >= LIMIT_MIN_HZ) return n > LIMIT_FREE_MAX_HZ ? LIMIT_FREE_MAX_HZ : (int)n;
     if (!*end && n > LIMIT_MAX_HZ) {
-        rt_log("frame rate: NX2NAVI_FPS_LIMIT=%s is above %d, where the game's physics runs out of memory; %d", e,
+        rt_log("frame rate: OOTPC_FPS_LIMIT=%s is above %d, where the game's physics runs out of memory; %d", e,
                LIMIT_MAX_HZ, LIMIT_MAX_HZ);
         return LIMIT_MAX_HZ;
     }
     if (!*end && n >= LIMIT_MIN_HZ) return (int)n;
-    rt_log("frame rate: NX2NAVI_FPS_LIMIT=%s is not %d..%d, display or unlimited; 60", e, LIMIT_MIN_HZ, LIMIT_MAX_HZ);
+    rt_log("frame rate: OOTPC_FPS_LIMIT=%s is not %d..%d, display or unlimited; 60", e, LIMIT_MIN_HZ, LIMIT_MAX_HZ);
     return 60;
 }
 
@@ -224,26 +224,26 @@ static void frame_limit_live(void) {
     if (fps60_set == -2) fps60_set = rt_patch_set("fps60");
     if (fps60_set >= 0) rt_patch_switch(fps60_set, hz != 30);
     if ((hz > 60 || hz == 0) && !step_word)
-        rt_log("frame rate: limits above 60 need the real-time step (NX2NAVI_REALTIME=1); 60 fps");
+        rt_log("frame rate: limits above 60 need the real-time step (OOTPC_REALTIME=1); 60 fps");
     else if (hz) rt_log("frame rate: limit %d fps", hz);
     else if (gfx_window_refresh_hz() > 0) rt_log("frame rate: limit at the monitor's refresh rate (%.3f Hz now)", gfx_window_refresh_hz());
     else rt_log("frame rate: limit at the monitor's refresh rate (60 until the window measures it)");
 }
 
-// NX2NAVI_MOVIE_FPS (default 60; 0 = off): the game's frame rate while a movie plays (ov_movie2.c ov_movie_live). A
+// OOTPC_MOVIE_FPS (default 60; 0 = off): the game's frame rate while a movie plays (ov_movie2.c ov_movie_live). A
 // movie's event counts the game's updates as 60 Hz frames whatever the step: at 144 fps the intro's narration lines
 // started 2.4 times too early, each over the one before, and its closing fade to black came at 65 s of the movie's
 // 154, hiding the whole dream. The movies are 60 fps, so the cap shows the same pictures. It is the rate in both
 // directions: under a lower limit (40 fps, or 60 shown with frame generation, which is 30 of the game's) the movie ran
 // at that fraction of its speed and ended many seconds behind its sound, so the game is paced at the movie's rate
 // while one plays, above the limit too.
-// With set omovie of recomp/patches-v111.txt (NX2NAVI_MOVIE_PTS, on by default) the event count follows the shown
+// With set omovie of recomp/patches-v111.txt (OOTPC_MOVIE_PTS, on by default) the event count follows the shown
 // picture's timestamp instead of the redraws, so with the cap off the cues no longer run ahead; the cap stays for the
 // pacing in both directions and for builds without those sites.
 static int movie_cap_hz(void) {
     static int hz = -1;
     if (hz < 0) {
-        const char *e = cfg_get("NX2NAVI_MOVIE_FPS");
+        const char *e = cfg_get("OOTPC_MOVIE_FPS");
         hz = e && *e ? atoi(e) : 60;
         if (hz && hz < LIMIT_MIN_HZ) hz = 60;
     }
@@ -258,10 +258,15 @@ static int generated_factor(void) { return vk_fg_generating() ? 2 : vk_dlssg_mul
 // drawn and 240 shown. Counted on the screen instead, the game was paced at the limit over the factor, so each step up
 // of the multiplier took drawn frames away (60 at 4x drew 15) and the generated ones had less to work from and more
 // delay. Only "display" is a rate on the screen, the monitor's: there the game draws that rate over the factor, since a
-// frame past the monitor's refresh is never seen. The result is game frames a second, before the ceiling of the step.
+// frame past the monitor's refresh is never seen. With frame generation, a frame generation target below the monitor's
+// rate (OOTPC_FRAMEGEN_TARGET, the Dynamic multiplier's aim in vk_dlssg.c) is the rate on the screen instead, so a
+// fixed multiplier gives that rate evenly: 120 at 2x on a 240 Hz monitor draws 60. The result is game frames a second,
+// before the ceiling of the step.
 static double limit_game_hz(int limit, int gen) {
     if (limit) return shown_hz(limit);
-    double hz = shown_hz(gfx_window_refresh_hz());
+    double screen = gfx_window_refresh_hz(), target = gen > 1 ? atof(cfg_value("OOTPC_FRAMEGEN_TARGET")) : 0;
+    if (target >= 30 && (screen <= 0 || target < screen)) screen = target;
+    double hz = shown_hz(screen);
     return gen > 1 ? hz / gen : hz;
 }
 
@@ -274,7 +279,7 @@ double frame_step_game_hz(void) {
 }
 
 // RivaTuner Statistics Server (rtss_limit.c) gets the same limit; while it limits this process the pacer holds no
-// frames, so the two never stack. NX2NAVI_RTSS=0 and frame generation (RTSS would count the generated frames) keep it
+// frames, so the two never stack. OOTPC_RTSS=0 and frame generation (RTSS would count the generated frames) keep it
 // out, and so does a driver's low latency while it is in effect (vk_lowlat.c): the driver holds the limit where the
 // frame starts, and RTSS would hold the finished picture, the wait that mode is there to remove.
 static double paced_hz;   // the game frames a second the newest frame_step_cap_ns paces at (ocarina_step); 0: none
@@ -284,15 +289,15 @@ uint64_t frame_step_cap_ns(void) {
     frame_limit_live();
     static int rtss_allowed = -1;
     if (rtss_allowed < 0) {
-        const char *e = cfg_get("NX2NAVI_RTSS");
+        const char *e = cfg_get("OOTPC_RTSS");
         rtss_allowed = !(e && !strcmp(e, "0"));
     }
     int rtss = rtss_allowed && !vk_fg_wanted() && !vk_dlssg_active() && !vk_lowlat_on();
     int gen = generated_factor();
     int movie_hz = movie_cap_hz();
-    static int movie_clock = -1;   // NX2NAVI_MOVIE_CLOCK=0: the steady step and the usual pacing through a movie too
+    static int movie_clock = -1;   // OOTPC_MOVIE_CLOCK=0: the steady step and the usual pacing through a movie too
     if (movie_clock < 0) {
-        const char *e = cfg_get("NX2NAVI_MOVIE_CLOCK");
+        const char *e = cfg_get("OOTPC_MOVIE_CLOCK");
         movie_clock = !(e && !strcmp(e, "0"));
     }
     movie_paced = movie_clock ? movie_hz : 0;
@@ -300,7 +305,7 @@ uint64_t frame_step_cap_ns(void) {
     if (!!movie_hz != movie_was) {
         movie_was = !!movie_hz;
         if (movie_logs++ < 40) {   // the first 20 movies
-            if (movie_hz) rt_log("frame rate: a movie plays: %d fps until it ends (NX2NAVI_MOVIE_FPS)", movie_hz);
+            if (movie_hz) rt_log("frame rate: a movie plays: %d fps until it ends (OOTPC_MOVIE_FPS)", movie_hz);
             else rt_log("frame rate: the movie ended: the frame limit again");
         }
     }
@@ -343,14 +348,23 @@ double frame_step_limit_hz(void) {
     return !step_word && r > 60 ? 60 : r > LIMIT_MAX_HZ ? LIMIT_MAX_HZ : r;
 }
 
-// ---- NX2NAVI_TRACE=perf speed lines
+// The game frames a second the limit asks for now, frame generation's factor taken out (dynres.c: one drawn frame's
+// time is its target, so 120 on screen at 2x gives a drawn frame 16.7 ms, not 8.3); 0 unlimited or not read yet.
+double frame_limit_draw_hz(void) {
+    frame_limit_live();
+    int limit = limit_hz;
+    if (limit < 0) return 0;
+    return limit_game_hz(limit, generated_factor());
+}
+
+// ---- OOTPC_TRACE=perf speed lines
 static uint64_t win_t0, win_frames, win_hist[4];   // win_hist: frames by present interval 1, 2, 3+ ([0] unused)
 static double win_game;
 static int probe = -1;
 static float last_pos[3];
 static uint64_t last_pos_ns;
 
-// plat_mem_read copies through the kernel, which fails on a heap page NX2NAVI_HEAP_LAZY has not committed yet
+// plat_mem_read copies through the kernel, which fails on a heap page OOTPC_HEAP_LAZY has not committed yet
 static int read_guest(uint64_t a, void *out, size_t n) {
     if (!a) return 0;
     mem_kernel_access(a, n);
@@ -424,7 +438,7 @@ void frame_step_flight(float *page, float *game, uint64_t *presents) {
 // Free-running builds (Ocarina): the game's step follows the display interval (ocarina_step, in 60 Hz frames), written
 // at each present: frames per update on the patch page with the set ostep, else the time manager's base step. The
 // game left it at one 60 Hz frame whatever the frame rate, so at 144 fps it ran 2.4 times too fast.
-// NX2NAVI_OCARINA_STEP=0 leaves it. Counts how often the game itself had changed the value since the last write
+// OOTPC_OCARINA_STEP=0 leaves it. Counts how often the game itself had changed the value since the last write
 // (diagnosis).
 static uint64_t ostep_writes, ostep_changed;
 static float ostep_last = -1;
@@ -446,7 +460,7 @@ static float ostep_last = -1;
 //     the clock and a hitch is paid back over the next second rather than in five frames. More than STEP_RESET_S owed
 //     is dropped: the game runs slower than the clock, as it does for a frame longer than STEP_MAX_S.
 // The step is at least OSTEP_MIN_S: the solver step count of the set osolver reaches 0 under a 16th of a frame.
-// NX2NAVI_STEP_STEADY=0 gives the mean of the last 5 intervals again (comparison runs).
+// OOTPC_STEP_STEADY=0 gives the mean of the last 5 intervals again (comparison runs).
 #define OSTEP_WINDOW 12
 #define OSTEP_SNAP 0.03
 #define OSTEP_REPAY_MAX 0.10
@@ -461,7 +475,7 @@ static void ocarina_step_reset(void) {
 }
 
 // While a movie plays (frame_step_cap_ns paces the game at the movie's rate) the step is exactly one movie frame, whatever
-// the display intervals; NX2NAVI_MOVIE_CLOCK=0 leaves movies to the steady step (comparison runs). The game's movie
+// the display intervals; OOTPC_MOVIE_CLOCK=0 leaves movies to the steady step (comparison runs). The game's movie
 // player (main+0x3b5ca60) adds the time manager's seconds times 60 to an accumulator at each update and advances the
 // movie by its whole pictures, at most the player's limit per update (+0x20, set at main+0x3b5d094: 1, or 2 in one of
 // its modes), keeping the rest. The Triforce movie showed one picture per update (600 pictures in 600 updates at 59.6
@@ -474,7 +488,7 @@ static void ocarina_step_reset(void) {
 static double ocarina_step(double dt) {
     static int steady = -1, movie_was;
     if (steady < 0) {
-        const char *e = cfg_get("NX2NAVI_STEP_STEADY");
+        const char *e = cfg_get("OOTPC_STEP_STEADY");
         steady = !(e && !strcmp(e, "0"));
     }
     if (movie_paced != movie_was) {
@@ -568,7 +582,7 @@ static uint32_t whole_frames(uint64_t at, float amount) { return whole_take(whol
 
 // The time of day (main+0x3cdf70, patches-v111.txt): s0 holds twice the step, the game seconds of this frame; w8 gets
 // the whole ones, the counter being the seconds of the day at +0x3c of the object in x19.
-// NX2NAVI_TRACE=perf: every 10 s, the game seconds the day was given beside those the cut alone would have given.
+// OOTPC_TRACE=perf: every 10 s, the game seconds the day was given beside those the cut alone would have given.
 void frame_rate_day_host(Cpu *c) {
     uint32_t bits = (uint32_t)c->v[0];
     float secs;
@@ -594,7 +608,7 @@ void frame_rate_day_host(Cpu *c) {
 // which the renderer multiplies by the water's substeps. The remainder is kept for the water object in x21, in a table
 // of the waters' own: every water surface of a place asks once a frame, and with fewer slots than surfaces each would
 // take another's slot in turn, start without a remainder every frame and stand still as it did with the cut.
-// NX2NAVI_TRACE=perf: every 10 s, the steps the waters were given beside those the cut alone would have given.
+// OOTPC_TRACE=perf: every 10 s, the steps the waters were given beside those the cut alone would have given.
 void frame_rate_water_host(Cpu *c) {
     uint32_t bits = (uint32_t)c->v[0];
     float step;
@@ -624,7 +638,7 @@ void frame_rate_water_host(Cpu *c) {
 // float the cut keeps exactly, and only s0 changes (its upper lanes stay zero, as the division left them). A quotient
 // that is not positive, or too large for a count, stays for the cut. The remainders are in a table of their own: an
 // object that shares slots with the counters above would lose its fraction to them.
-// NX2NAVI_TRACE=perf: every 10 s, the steps the objects were given beside those the cut alone would have given.
+// OOTPC_TRACE=perf: every 10 s, the steps the objects were given beside those the cut alone would have given.
 // Every interactive floor of a place (the Deku Tree's ground webs are such floors) and both water managers ask once an
 // update, each for its own object, so the table holds as many as the waters' does: with fewer slots than objects each
 // would take another's slot in turn, start without a remainder every update and stand still again above 60 fps.
@@ -700,7 +714,7 @@ static float sound_job_step(void) {
     return step;
 }
 
-// NX2NAVI_TRACE=perf: every 10 s, how often phase 0 ran of the times it was asked.
+// OOTPC_TRACE=perf: every 10 s, how often phase 0 ran of the times it was asked.
 void frame_rate_sound_gate_host(Cpu *c) {
     uint32_t phase = (uint32_t)c->x[2];
     float step = phase == 0 ? sound_job_step() : 1.0f;
@@ -741,7 +755,7 @@ float frame_step_frames(void) {
 static void ocarina_step_write(double dt) {
     static int on = -1;
     if (on < 0) {
-        const char *e = cfg_get("NX2NAVI_OCARINA_STEP");
+        const char *e = cfg_get("OOTPC_OCARINA_STEP");
         on = !(e && !strcmp(e, "0"));
     }
     if (!on || dt <= 0) return;
@@ -781,10 +795,10 @@ static void ocarina_step_write(double dt) {
                v, dt * 1000, (unsigned long long)ostep_changed), ostep_changed = 0;
 }
 
-// NX2NAVI_TIME_DUMP=1: the time manager's first 0x280 bytes once, 30 s into the run (diagnosis)
+// OOTPC_TIME_DUMP=1: the time manager's first 0x280 bytes once, 30 s into the run (diagnosis)
 static void time_dump(void) {
     static int done;
-    const char *e = cfg_get("NX2NAVI_TIME_DUMP");
+    const char *e = cfg_get("OOTPC_TIME_DUMP");
     if (done || !e || strcmp(e, "1") || !rt_guest_start_ns || kern_now_ns() - rt_guest_start_ns < 30000000000ull) return;
     done = 1;
     uint64_t slot = read_ptr(MOD_MAIN_BASE + OOT_TIME_MANAGER), mgr = slot ? read_ptr(slot) : 0;
@@ -812,7 +826,7 @@ static void speed_report(uint64_t now, double step, int interval) {
     win_hist[interval < 1 ? 1 : interval > 3 ? 3 : interval]++;
     if (win_frames < 120) return;
     if (probe < 0) {
-        const char *e = cfg_get("NX2NAVI_SPEED_PROBE");
+        const char *e = cfg_get("OOTPC_SPEED_PROBE");
         probe = e && !strcmp(e, "1");
     }
     double wall = (double)(now - win_t0) * 1e-9;
@@ -874,7 +888,7 @@ static void world_clock(double dt, double step) {
     atomic_store_explicit(&world_us, w + (int64_t)(step * 1e6 + 0.5), memory_order_relaxed);
 }
 
-// ---- NX2NAVI_FLOOR_PROBE (floor_probe in nx2navi.ini, 0 by default): Link on a moving floor, one line per update
+// ---- OOTPC_FLOOR_PROBE (floor_probe in OOT-PC.ini, 0 by default): Link on a moving floor, one line per update
 // (diagnosis, 1.1.1). Above 60 fps Link stands still on the Deku Tree's floating platform while it moves under him, and
 // the code that carries him has not been found; these lines give what a run needs to find it. The moving floors are
 // the engine's ground groups: their manager is [[[main+0x4c7df00]] +0xc0] +0x130 (the ground control moves write it,
@@ -913,7 +927,7 @@ static uint64_t direct_ptr(uint64_t a) {
 
 static void floor_probe(void) {
     if (floor_probe_left < 0) {
-        const char *e = cfg_get("NX2NAVI_FLOOR_PROBE");
+        const char *e = cfg_get("OOTPC_FLOOR_PROBE");
         int n = e && *e ? atoi(e) : 0;
         floor_probe_left = !RT_V111 || n <= 0 ? 0 : n == 1 ? 4000 : n;
         if (floor_probe_left) rt_log("floor probe: on for %d lines", floor_probe_left);
@@ -1022,7 +1036,7 @@ static void floor_probe(void) {
     floor_link_ok = link_ok;
 }
 
-// ---- NX2NAVI_FLOOR_SCAN (floor_scan in nx2navi.ini, 0 by default): finds the moving floor under Link in guest memory
+// ---- OOTPC_FLOOR_SCAN (floor_scan in OOT-PC.ini, 0 by default): finds the moving floor under Link in guest memory
 // (diagnosis, 1.1.1). The Deku Tree's floating platform is not one of the engine's ground groups (floor_probe), and
 // where its position lives is not known. The scan arms while Link drifts at the 60 fps rate: a step of one frame, the
 // gamepad's left stick under 20%, and for FLOOR_SCAN_ARM presents in a row a horizontal move of 2 to 30 mm a present,
@@ -1036,14 +1050,14 @@ static void floor_probe(void) {
 // keeps none arms the scan again, three times at most. From then on, once a second, it logs Link's position and move
 // over that second and one line per survivor (FLOOR_SCAN_SHOW at most) with its address, position and move over the
 // same second, so a stretch at a higher frame rate shows each one's own speed. The value is the number of lines to
-// write (1 means 20000); off it costs one test per present. NX2NAVI_FLOOR_WATCH switches the scan on too and gets its
+// write (1 means 20000); off it costs one test per present. OOTPC_FLOOR_WATCH switches the scan on too and gets its
 // survivors when the logging starts, with those that lie in the platform's rigid body controller unit marked
 // (floor_watch.c).
 #define FLOOR_SCAN_ARM 30
 #define FLOOR_SCAN_MAX 2000000   // candidate triplets a snapshot keeps
 #define FLOOR_SCAN_SHOW 64       // survivors logged each second
 static int floor_scan_left = -1;   // lines still to write; -1 before the setting was read
-static int floor_watching;         // floor_watch.c has the survivors and is not done (NX2NAVI_FLOOR_WATCH)
+static int floor_watching;         // floor_watch.c has the survivors and is not done (OOTPC_FLOOR_WATCH)
 static struct {
     int state, run, tries;         // state 0: waiting for a drift, 1: filtering, 2: logging
     float link0[3], last[3], start[3], path, sec_link[3];
@@ -1213,7 +1227,7 @@ static void floor_scan_dump(uint64_t a) {
 
 static void floor_scan(const float link[3], int link_ok) {
     if (floor_scan_left < 0) {
-        const char *e = cfg_get("NX2NAVI_FLOOR_SCAN");
+        const char *e = cfg_get("OOTPC_FLOOR_SCAN");
         int n = e && *e ? atoi(e) : 0;
         if (n <= 0 && floor_watch_wanted()) n = 1;   // the watch takes its addresses from the scan
         floor_scan_left = !RT_V111 || n <= 0 ? 0 : n == 1 ? 20000 : n;

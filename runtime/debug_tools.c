@@ -1,5 +1,6 @@
-// Debug tools of the in-game menu (debug_tools.h). Game build 1.1.1 only: the player actor is found the way
-// frame_rate.c finds it ([[main+0x4e371d0] + 0x480], name "Player" at +0x20, position floats at +0x31c).
+// Debug tools of the in-game menu (debug_tools.h). Game builds 1.1.1 and 1.0.0: the player actor is found the way
+// frame_rate.c finds it ([[main+0x4e371d0] + 0x480], main+0x4dc7210 on 1.0.0; name "Player" at +0x20, position
+// floats at +0x31c).
 #include <math.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -10,12 +11,15 @@
 #include "cfg.h"
 #include "debug_remote.h"
 #include "debug_tools.h"
+#include "debug_watch.h"
 #include "host.h"
+#include "input.h"
 #include "input_map.h"
 #include "layout.h"
 #include "motion_owner.h"
 #include "platform/platform.h"
 #include "ui/menu.h"
+#include "vk.h"
 
 #define PLAYER_MANAGER_SLOT RT_OOT_ADDR(0x4e371d0, 0x4dc7210)   // main+: pointer to the object that holds the player actor
 #define PLAYER_ACTOR_FIELD 0x480        // in that object
@@ -221,7 +225,7 @@ int dbg_health_set_max(int max) {
     return 1;
 }
 
-// The Debug tab's settings stay as set from one start to the next: each is also a setting of nx2navi.ini [debug],
+// The Debug tab's settings stay as set from one start to the next: each is also a setting of OOT-PC.ini [debug],
 // read on first use and written when it changes. Here: invulnerable, infinite magic and items, Lank (debug_god,
 // debug_inf_magic, debug_inf_items, debug_lank), the health hold (debug_health_lock), the game speed (debug_speed), the
 // on-screen readout (debug_readout) and the keyboard hotkeys (debug_hotkeys). Fly and hover are not kept: a start in
@@ -241,11 +245,11 @@ static _Atomic int lock_val;
 static void kept_load(void) {
     static _Atomic int done;
     if (atomic_load_explicit(&done, memory_order_acquire) || atomic_exchange(&done, 1)) return;
-    atomic_store(&god_on, cfg_bool("NX2NAVI_DEBUG_GOD") != 0);
-    atomic_store(&magic_hold, cfg_bool("NX2NAVI_DEBUG_INF_MAGIC") != 0);
-    atomic_store(&items_hold, cfg_bool("NX2NAVI_DEBUG_INF_ITEMS") != 0);
-    atomic_store(&lank_on, cfg_bool("NX2NAVI_DEBUG_LANK") != 0);
-    int lock = cfg_int("NX2NAVI_DEBUG_HEALTH_LOCK");
+    atomic_store(&god_on, cfg_bool("OOTPC_DEBUG_GOD") != 0);
+    atomic_store(&magic_hold, cfg_bool("OOTPC_DEBUG_INF_MAGIC") != 0);
+    atomic_store(&items_hold, cfg_bool("OOTPC_DEBUG_INF_ITEMS") != 0);
+    atomic_store(&lank_on, cfg_bool("OOTPC_DEBUG_LANK") != 0);
+    int lock = cfg_int("OOTPC_DEBUG_HEALTH_LOCK");
     atomic_store(&lock_val, lock < 0 ? 0 : lock > 80 ? 80 : lock);
     kept_load_rest();
 }
@@ -259,7 +263,7 @@ static void kept_set(_Atomic int *v, const char *key, int on) {
     }
 }
 
-void dbg_invulnerable(int on) { kept_set(&god_on, "NX2NAVI_DEBUG_GOD", on); }
+void dbg_invulnerable(int on) { kept_set(&god_on, "OOTPC_DEBUG_GOD", on); }
 int dbg_invulnerable_on(void) { kept_load(); return atomic_load(&god_on); }
 
 void dbg_health_lock(int quarters) {
@@ -268,7 +272,7 @@ void dbg_health_lock(int quarters) {
     atomic_store(&lock_val, quarters);
     char v[16];
     snprintf(v, sizeof v, "%d", quarters);
-    dbg_keep("NX2NAVI_DEBUG_HEALTH_LOCK", v);
+    dbg_keep("OOTPC_DEBUG_HEALTH_LOCK", v);
 }
 int dbg_health_lock_value(void) { kept_load(); return atomic_load(&lock_val); }
 
@@ -296,16 +300,28 @@ static void health_tick(void) {
 // that way showed in play and was off in every save after (seen 2026-11-14: items given from the menu, then a load hid
 // them from the item screen while their counts, written twice, stayed). The setters below write both. The array's {key,
 // index} hash table, about two slots per entry with empty slots zero, ends right where the entries start.
+// The kinds after DBG_FLAG_TYPES were measured in the running game on 1.1.1 (2026-11-17): a UInt as an int; a UInt64 its
+// 8 bytes at 0x20 and again at 0x28; a String16 and a String32 three {pointer, capacity, characters} blocks, the middle
+// one the value, as a String64 has; a BoolArray {bit count, pointer} at 0x20 and the save's copy at 0x30, the bits in a
+// heap block; a Binary {byte size, pointer, length used} at 0x18 and the copy at 0x30. Each of these stores is small (a
+// String16 has a single entry), so one entry with its class counts as a run.
 static const struct StoreInfo {
     uint32_t cls, size, value, copy, min;   // class (main+), entry size, value offset, the second copy's distance from
                                             // the value, fewest entries a real store has
-} store_info[DBG_FLAG_TYPES] = {
-    [DBG_FLAG_BOOL] = {0x4c20658, 0x18, 0x16, 1, 4000},
-    [DBG_FLAG_INT] = {0x4c20718, 0x28, 0x1c, 4, 500},
-    [DBG_FLAG_FLOAT] = {0x4c207d8, 0x28, 0x1c, 4, 40},
-    [DBG_FLAG_STRING] = {0x4c20c58, 0x108, 0x74, 0x50, 30},
-    [DBG_FLAG_VEC3] = {0x4c20a18, 0x40, 0x24, 12, 10},
-    [DBG_FLAG_ENUM] = {0x4c20898, 0x38, 0x1c, 4, 60},
+    uint32_t width, indirect, ptr;          // DbgFlagLayout
+} store_info[DBG_FLAG_ALL] = {
+    [DBG_FLAG_BOOL] = {0x4c20658, 0x18, 0x16, 1, 4000, 1, 0, 0},
+    [DBG_FLAG_INT] = {0x4c20718, 0x28, 0x1c, 4, 500, 4, 0, 0},
+    [DBG_FLAG_FLOAT] = {0x4c207d8, 0x28, 0x1c, 4, 40, 4, 0, 0},
+    [DBG_FLAG_STRING] = {0x4c20c58, 0x108, 0x74, 0x50, 30, 64, 0, 0},
+    [DBG_FLAG_VEC3] = {0x4c20a18, 0x40, 0x24, 12, 10, 12, 0, 0},
+    [DBG_FLAG_ENUM] = {0x4c20898, 0x38, 0x1c, 4, 60, 4, 0, 0},
+    [DBG_FLAG_UINT] = {0x4c20dd8, 0x28, 0x1c, 4, 1, 4, 0, 0},
+    [DBG_FLAG_UINT64] = {0x4c20f58, 0x30, 0x20, 8, 1, 8, 0, 0},
+    [DBG_FLAG_STRING16] = {0x4c20ad8, 0x78, 0x44, 0x20, 1, 16, 0, 0},
+    [DBG_FLAG_STRING32] = {0x4c20b98, 0xa8, 0x54, 0x30, 1, 32, 0, 0},
+    [DBG_FLAG_BOOLARRAY] = {0x4c206b0, 0x40, 0x20, 0x10, 1, 0, 1, 8},
+    [DBG_FLAG_BINARY] = {0x4c20d18, 0x48, 0x18, 0x18, 1, 0, 1, 8},
 };
 // 1.0.0 has the same classes 0x65c08 lower (tools/version_map.py: each referenced directly or between references)
 #define STORE_SHIFT (RT_V100 ? 0x65c08ull : 0)
@@ -320,7 +336,7 @@ static struct Store {
     int count;
     uint32_t *keys;    // a copy of the hash table (pairs), read when the store is found
     size_t npairs;
-} stores[DBG_FLAG_TYPES];
+} stores[DBG_FLAG_ALL];
 static _Atomic uint64_t magic_addr;
 static _Atomic int flags_locating;
 
@@ -382,10 +398,10 @@ static int store_take(int t, uint64_t base, int n) {
 // its value. The other stores are then taken from the runs nearest to the int store: the game allocates them together.
 static void flags_locate_thread(void *arg) {
     (void)arg;
-    enum { CHUNK = 1 << 20, OVER = 2, CAND = 16 };
+    enum { CHUNK = 1 << 20, OVER = 2, CAND = 64 };
     static uint64_t buf[CHUNK / 8 + OVER];
-    static uint64_t cand[DBG_FLAG_TYPES][CAND];
-    int ncand[DBG_FLAG_TYPES] = {0};
+    static uint64_t cand[DBG_FLAG_ALL][CAND];
+    int ncand[DBG_FLAG_ALL] = {0};
     uint64_t addr = HEALTH_SCAN_FROM;
     while (addr < HEALTH_SCAN_TO) {
         uint64_t end = 0;
@@ -398,11 +414,11 @@ static void flags_locate_thread(void *arg) {
                 if (!plat_mem_read(at, buf, rn * 8)) continue;
                 for (uint64_t i = 0; i < n; i++) {
                     uint64_t v = buf[i];
-                    if (v - (MOD_MAIN_BASE + 0x4c20600ull - STORE_SHIFT) < 0x900ull) {
-                        for (int t = 0; t < DBG_FLAG_TYPES; t++) {
+                    if (v - (MOD_MAIN_BASE + 0x4c20600ull - STORE_SHIFT) < 0xa00ull) {
+                        for (int t = 0; t < DBG_FLAG_ALL; t++) {
                             uint64_t cls = MOD_MAIN_BASE + store_info[t].cls - STORE_SHIFT, e = at + i * 8;
                             if (v != cls || ncand[t] >= CAND || guest_ptr(e - store_info[t].size) == cls) continue;
-                            if (guest_ptr(e + store_info[t].size) != cls) continue;
+                            if (store_info[t].min > 1 && guest_ptr(e + store_info[t].size) != cls) continue;
                             cand[t][ncand[t]++] = e;
                         }
                     }
@@ -420,7 +436,7 @@ static void flags_locate_thread(void *arg) {
         int n = store_count(DBG_FLAG_INT, cand[DBG_FLAG_INT][k]);
         if (n >= (int)store_info[DBG_FLAG_INT].min && store_take(DBG_FLAG_INT, cand[DBG_FLAG_INT][k], n)) int_base = cand[DBG_FLAG_INT][k];
     }
-    for (int t = 0; t < DBG_FLAG_TYPES && int_base; t++) {
+    for (int t = 0; t < DBG_FLAG_ALL && int_base; t++) {
         if (t == DBG_FLAG_INT) continue;
         uint64_t best = 0, best_d = STORE_NEAR;
         int best_n = 0;
@@ -448,7 +464,7 @@ static int stores_ready(void) {
     uint64_t base = atomic_load(&stores[DBG_FLAG_INT].base);
     if (base && guest_ptr(base) == MOD_MAIN_BASE + store_info[DBG_FLAG_INT].cls - STORE_SHIFT) return 1;
     if (base)
-        for (int t = 0; t < DBG_FLAG_TYPES; t++) atomic_store(&stores[t].base, 0);
+        for (int t = 0; t < DBG_FLAG_ALL; t++) atomic_store(&stores[t].base, 0);
     flags_locate();
     return 0;
 }
@@ -468,17 +484,24 @@ int dbg_flag_type(uint32_t key) {
 }
 
 int dbg_flag_store(int type, uint64_t *base, int *count, uint32_t *size, uint32_t *value_off) {
-    if (type < 0 || type >= DBG_FLAG_TYPES || !stores_ready()) return 0;
+    if (type < 0 || type >= DBG_FLAG_ALL || !stores_ready()) return 0;
     uint64_t b = atomic_load(&stores[type].base);
     if (!b) return 0;
     *base = b, *count = stores[type].count, *size = store_info[type].size, *value_off = store_info[type].value;
     return 1;
 }
 
+int dbg_flag_layout(int type, DbgFlagLayout *out) {
+    if (type < 0 || type >= DBG_FLAG_ALL) return 0;
+    const struct StoreInfo *i = &store_info[type];
+    *out = (DbgFlagLayout){i->width, i->copy, i->indirect, i->ptr};
+    return 1;
+}
+
 // The pairs are taken in table order, so a later pair wins, as it does in store_index (searched from the end).
 void dbg_flag_store_keys(int type, uint32_t *key_of, int count) {
     memset(key_of, 0, (size_t)count * sizeof *key_of);
-    if (type < 0 || type >= DBG_FLAG_TYPES) return;
+    if (type < 0 || type >= DBG_FLAG_ALL) return;
     const struct Store *s = &stores[type];
     for (size_t i = 0; s->keys && i < s->npairs; i++) {
         uint32_t k = s->keys[i * 2], at = s->keys[i * 2 + 1];
@@ -580,7 +603,7 @@ int dbg_magic_set(int value) {
     return dbg_write32(atomic_load(&magic_addr), (uint32_t)value);
 }
 
-void dbg_magic_infinite(int on) { kept_set(&magic_hold, "NX2NAVI_DEBUG_INF_MAGIC", on); }
+void dbg_magic_infinite(int on) { kept_set(&magic_hold, "OOTPC_DEBUG_INF_MAGIC", on); }
 int dbg_magic_infinite_on(void) { kept_load(); return atomic_load(&magic_hold); }
 
 static void magic_tick(void) {
@@ -658,7 +681,7 @@ int dbg_item_set(int i, int value) {
     return dbg_flag_set(item_key(i), value);
 }
 
-void dbg_items_infinite(int on) { kept_set(&items_hold, "NX2NAVI_DEBUG_INF_ITEMS", on); }
+void dbg_items_infinite(int on) { kept_set(&items_hold, "OOTPC_DEBUG_INF_ITEMS", on); }
 int dbg_items_infinite_on(void) { kept_load(); return atomic_load(&items_hold); }
 
 // Holds the used-up things at their largest count, but only those the save has: a count for something never got does
@@ -971,9 +994,9 @@ static _Atomic float ground_speed, vertical_speed;
 
 void dbg_tick(uint64_t now_ns) {
     static int remote_checked;
-    if (!remote_checked) {   // debug_remote = 1 (nx2navi.ini, kept by the Debug tab, or the environment) starts it
+    if (!remote_checked) {   // debug_remote = 1 (OOT-PC.ini, kept by the Debug tab, or the environment) starts it
         remote_checked = 1;
-        if (cfg_bool("NX2NAVI_DEBUG_REMOTE")) dbg_remote_set(1);
+        if (cfg_bool("OOTPC_DEBUG_REMOTE")) dbg_remote_set(1);
     }
     health_tick();
     dbg_one_hit_tick();
@@ -1050,7 +1073,7 @@ void dbg_set_time_scale(float scale) {
     atomic_store_explicit(&time_scale, scale, memory_order_relaxed);
     char v[24];
     snprintf(v, sizeof v, "%g", scale);
-    dbg_keep("NX2NAVI_DEBUG_SPEED", v);
+    dbg_keep("OOTPC_DEBUG_SPEED", v);
 }
 
 // ---- pause and frame advance: the game thread waits in the frame hook (dbg_pause_wait, from debug_warp.c
@@ -1076,14 +1099,31 @@ void dbg_step(int n) {
 uint64_t dbg_paused_frames(void) { return atomic_load_explicit(&paused_frames, memory_order_relaxed); }
 
 void dbg_pause_wait(void) {
+    uint64_t polled = 0;
+    int waited = 0;
+    input_pause_frame();   // the frame a step let through is over: its paused button press ends
     while (atomic_load_explicit(&paused, memory_order_relaxed)) {
+        waited = 1;
+        uint64_t now = plat_now_ns();
+        if (now - polled >= 8000000) {   // the pause's own hotkeys and the button pressed meanwhile
+            polled = now;
+            dbg_bind_run_paused(input_poll_paused());
+            if (!atomic_load_explicit(&paused, memory_order_relaxed)) break;
+        }
+        static uint64_t shown;
+        if (now - shown >= 16000000) {   // the picture again, so the overlay (the next frame's buttons, the menu) is live
+            shown = now;
+            vk_present_again();
+        }
         int s = atomic_load(&steps);
         if (s > 0 && atomic_compare_exchange_weak(&steps, &s, s - 1)) {
             atomic_fetch_add(&paused_frames, 1);
+            input_pause_release();
             return;
         }
         plat_sleep_ms(2);
     }
+    if (waited) input_pause_release();   // resumed (a hotkey here, Shift+F2 or the console)
 }
 
 // ---- timer
@@ -1138,7 +1178,7 @@ void dbg_overlay_set(int mask) {   // the Debug tab calls it on every frame it l
     if (atomic_exchange_explicit(&overlay_mask, mask, memory_order_relaxed) == mask) return;
     char v[16];
     snprintf(v, sizeof v, "%d", mask);
-    dbg_keep("NX2NAVI_DEBUG_READOUT", v);
+    dbg_keep("OOTPC_DEBUG_READOUT", v);
 }
 
 // ---- hotkeys
@@ -1151,14 +1191,14 @@ int dbg_hotkeys(void) { kept_load(); return atomic_load_explicit(&hotkeys_on, me
 void dbg_hotkeys_set(int on) {
     kept_load();
     atomic_store_explicit(&hotkeys_on, on != 0, memory_order_relaxed);
-    dbg_keep("NX2NAVI_DEBUG_HOTKEYS", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_HOTKEYS", on ? "1" : "0");
 }
 
 static void kept_load_rest(void) {
-    float s = strtof(cfg_value("NX2NAVI_DEBUG_SPEED"), NULL);
+    float s = strtof(cfg_value("OOTPC_DEBUG_SPEED"), NULL);
     atomic_store_explicit(&time_scale, isfinite(s) && s >= 0.05f && s <= 8.0f ? s : 1.0f, memory_order_relaxed);
-    atomic_store_explicit(&overlay_mask, cfg_int("NX2NAVI_DEBUG_READOUT"), memory_order_relaxed);
-    atomic_store_explicit(&hotkeys_on, cfg_bool("NX2NAVI_DEBUG_HOTKEYS") != 0, memory_order_relaxed);
+    atomic_store_explicit(&overlay_mask, cfg_int("OOTPC_DEBUG_READOUT"), memory_order_relaxed);
+    atomic_store_explicit(&hotkeys_on, cfg_bool("OOTPC_DEBUG_HOTKEYS") != 0, memory_order_relaxed);
 }
 
 static void toast(const char *s) {
@@ -1168,7 +1208,10 @@ static void toast(const char *s) {
 }
 
 const char *dbg_toast(uint64_t now_ns) { return now_ns < toast_until ? toast_text : NULL; }
-void dbg_toast_show(const char *text) { toast(text); }
+void dbg_toast_show(const char *text) {   // a debug tool's message: also a line of a running flag capture
+    toast(text);
+    dbg_watch_event("tool    %s", text);
+}
 
 // The game speed one step down (dir -1) or up (1) the list F7 and F8 go through; the new speed.
 float dbg_speed_step(int dir) {
@@ -1307,7 +1350,7 @@ static void lank_prepare(void) {
     if (atomic_compare_exchange_strong(&lank_loaded, &zero, 1) && !plat_thread_spawn(lank_load, NULL, "debug-lank", 0))
         atomic_store(&lank_loaded, -1);
 }
-void dbg_lank(int on) { kept_set(&lank_on, "NX2NAVI_DEBUG_LANK", on); if (on) lank_prepare(); }
+void dbg_lank(int on) { kept_set(&lank_on, "OOTPC_DEBUG_LANK", on); if (on) lank_prepare(); }
 int dbg_lank_on(void) { kept_load(); return atomic_load(&lank_on); }
 
 // The model at the head of the player's model group. Only this model is changed, never other actors or equipment.

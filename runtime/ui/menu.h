@@ -8,9 +8,9 @@
 // cursor is released from the mouse camera. Tabs Display, Game, Mods, Sound, Controls and Menu (ZL / ZR or Q / E switch
 // them) hold option rows (ui/option_rows.h) over the cfg settings and the mods folder (mods.h); the bottom row has
 // "Continue" and "Quit game".
-// Test hooks (ui/menu.cpp): NX2NAVI_MENU_TEST=<frame>[:<frames per page>] opens the menu at that presented frame and saves
-// one swapchain shot per tab into NX2NAVI_MENU_TEST_DIR; NX2NAVI_MENU_TEST_SET=<frame>:<key>=<value>[,...][;...] sets settings
-// at given frames without input (SAVE=1 writes nx2navi.ini, FOCUS=<key> puts the cursor on that setting's row).
+// Test hooks (ui/menu.cpp): OOTPC_MENU_TEST=<frame>[:<frames per page>] opens the menu at that presented frame and saves
+// one swapchain shot per tab into OOTPC_MENU_TEST_DIR; OOTPC_MENU_TEST_SET=<frame>:<key>=<value>[,...][;...] sets settings
+// at given frames without input (SAVE=1 writes OOT-PC.ini, FOCUS=<key> puts the cursor on that setting's row).
 //
 // Threads: the event functions are called by the window thread, menu_toggle by whichever thread polls the pad, the
 // overlay functions by the present path under its lock. ImGui itself runs on the present path only.
@@ -26,7 +26,7 @@ extern "C" {
 int menu_is_open(void);
 void menu_toggle(void);                   // F1 / Esc on the keyboard, Minus+Plus on the pad; not before the game's first frame
 void menu_open_debug(void);               // the menu button (debug_menu_button): opens the menu on its Debug tab, or closes it
-void menu_save_settings_soon(void);       // a setting changed outside the menu (debug_binds.c): nx2navi.ini follows
+void menu_save_settings_soon(void);       // a setting changed outside the menu (debug_binds.c): OOT-PC.ini follows
 void menu_ask_restart(void);              // present path: the Restart confirmation opens (a save waits for it)
 void menu_perf_cycle(void);               // F10: the performance overlay off, fps, full
 
@@ -77,16 +77,16 @@ int menu_font_check(void);
 void menu_text_input_follow(int want);
 
 // ---- what the menu asks of the platform side (gfx_window_win.c, gfx_window_sdl.c)
-void gfx_window_apply_settings(void);     // NX2NAVI_FULLSCREEN or NX2NAVI_WINDOW_SIZE changed: the window follows
+void gfx_window_apply_settings(void);     // OOTPC_FULLSCREEN or OOTPC_WINDOW_SIZE changed: the window follows
 void gfx_window_request_close(void);      // as the window's close button: the process ends
-void gfx_window_request_restart(void);    // the same, then nx2navi.exe starts again with the same command line
+void gfx_window_request_restart(void);    // the same, then ocarina.exe starts again with the same command line
 void gfx_window_text_input(int on);       // a menu text field is active (on) or no longer: the window delivers typed
                                           // characters to menu_event_char meanwhile, and a handheld shows its keyboard
 void gfx_window_paste(void);              // reads the clipboard on the window thread and hands it to menu_event_paste
 int gfx_window_monitor_size(int *w, int *h);   // pixels of the monitor the window is on; 0 when unknown
-double gfx_window_refresh_hz(void);            // its refresh rate (NX2NAVI_FPS_LIMIT=display); 0 when unknown
+double gfx_window_refresh_hz(void);            // its refresh rate (OOTPC_FPS_LIMIT=display); 0 when unknown
 unsigned gfx_window_dpi(void);                 // the window's DPI (96 at 100% display scale); any thread
-// The present mode the swapchain got, as a NX2NAVI_VK_PRESENT value ("fifo" when mailbox is missing); "" before the first
+// The present mode the swapchain got, as a OOTPC_VK_PRESENT value ("fifo" when mailbox is missing); "" before the first
 // swapchain. Any thread.
 const char *gfx_window_present_mode(void);
 double gfx_output_fps(void);   // frames the display gets per second with frame generation (generated ones too); 0 when off

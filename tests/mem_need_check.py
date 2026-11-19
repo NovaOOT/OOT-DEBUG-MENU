@@ -46,7 +46,7 @@ def probe(game):
     """The executable's --probe-memneed under three settings; 0 when each answers as it must."""
     fails = 0
     for need, answer, warns in (('0', 'not checked', False), ('1', 'enough', False), ('1048576', 'short', True)):
-        env = dict(os.environ, NX2NAVI_MEM_NEED_MB=need)
+        env = dict(os.environ, OOTPC_MEM_NEED_MB=need)
         r = subprocess.run([game, '--probe-memneed'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            text=True, errors='replace')
         lines = r.stdout.splitlines()

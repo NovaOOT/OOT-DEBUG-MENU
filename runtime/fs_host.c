@@ -22,6 +22,8 @@
 #include <string.h>
 
 #include "cfg.h"
+#include "coop_game.h"
+#include "debug_watch.h"
 #include "fs.h"
 #include "host.h"
 #include "platform/platform.h"
@@ -29,7 +31,7 @@
 #include "save_share.h"
 #include "save_tree.h"
 
-#define NX2NAVI_APPLICATION_ID 0x0400486024dec000ull   // the game's title id, as svc.c PROGRAM_ID tells it
+#define OOTPC_APPLICATION_ID 0x0400486024dec000ull   // the game's title id, as svc.c PROGRAM_ID tells it
 #define FILE_BASE 0x200000000ull
 #define DIR_BASE 0x300000000ull
 #define NFILES 1024
@@ -94,7 +96,7 @@ static char *join(const char *dir, const char *name) {
 }
 
 // Save in progress: a save-data file open for writing, or save data changed in the last 3 s and not committed yet
-// (NX2navi writes a slot's files back to back and then commits; between the files nothing is open for a moment).
+// (OOT-PC writes a slot's files back to back and then commits; between the files nothing is open for a moment).
 // A writer must not begin between a live import's clean-state check and working-copy swap. Existing
 // writable handles keep save_writers nonzero; this gate covers opening those handles and path mutations.
 // Lock order: save_mutation_gate, then pending-commit waits or tx_lock. Commit workers never take this gate.
@@ -694,7 +696,7 @@ static void live_copy(int record) {
         snprintf(file, sizeof file, "%s/last-save.txt", root);
         plat_file_write_atomic(file, label, strlen(label));
     }
-    const char *keep_s = cfg_get("NX2NAVI_DEBUG_SAVE_HISTORY");
+    const char *keep_s = cfg_get("OOTPC_DEBUG_SAVE_HISTORY");
     int keep = keep_s && *keep_s ? atoi(keep_s) : 100;
     if (keep <= 0 || !*slot) return;   // a settings write alone gets its log line, no history entry
     char hist[PLAT_PATH_MAX + 16], entry[PLAT_PATH_MAX + 96];
@@ -1383,7 +1385,7 @@ static uint32_t mount_save(const char *name, const uint64_t *uid) {
 
 static uint8_t save_exists(uint64_t application, const uint64_t *uid) {
     ready();
-    return application == NX2NAVI_APPLICATION_ID && my_uid(uid);
+    return application == OOTPC_APPLICATION_ID && my_uid(uid);
 }
 
 // Other titles' save data (data-link bonuses) is not present on this host.
@@ -1532,6 +1534,8 @@ static void tree_note_open(const char *p) {
 
 static uint32_t open_file_ungated(uint64_t *out, const char *path, int mode) {
     if (romfs_owns(path)) {
+        coop_game_rom_open(path);   // coop_game.c: the title screen's start
+        dbg_watch_rom_open(path);   // debug_watch.c: an event file in a flag capture
         return romfs_open(out, path, mode);
     }
     fs_trace(mode & FS_OPEN_WRITE ? "write" : "read", path);
@@ -1608,8 +1612,8 @@ static uint32_t write_file(uint64_t h, int64_t offset, const void *buffer, uint6
     if (file->save) save_touched();
     for (uint64_t done = 0; done < size;) {
         uint32_t chunk = size - done > 0x40000000 ? 0x40000000 : (uint32_t)(size - done);
-        // NX2NAVI_WB_PROBE: the kernel reads the buffer, and a probed page would fail the write instead of faulting;
-        // so would a heap page NX2NAVI_HEAP_LAZY has not committed yet
+        // OOTPC_WB_PROBE: the kernel reads the buffer, and a probed page would fail the write instead of faulting;
+        // so would a heap page OOTPC_HEAP_LAZY has not committed yet
         if (mem_probing()) mem_thaw((uintptr_t)buffer + done, chunk);
         mem_kernel_access((uintptr_t)buffer + done, chunk);
         int64_t put = plat_file_pwrite(f, (const uint8_t *)buffer + done, chunk, (uint64_t)offset + done);
@@ -1769,7 +1773,7 @@ static int romfs_listing_add(const char *name, int is_dir, uint64_t size, void *
 
 static uint32_t open_directory(uint64_t *out, const char *path, int mode) {
     Listing l = {0};
-    if (romfs_owns(path)) {   // Switch 2 titles list RomFS folders (content:/Foliage/...); NX2NAVI never did
+    if (romfs_owns(path)) {   // Switch 2 titles list RomFS folders (content:/Foliage/...); OOTPC never did
         if (!out || mode < 1 || mode > 3) return FS_R_INVALID_ARGUMENT;
         uint32_t r = romfs_list(path, romfs_listing_add, &l);
         if (r) {
@@ -2131,7 +2135,7 @@ static uint64_t probe_romfs(void) {
     CHECK(write_open == FS_R_UNSUPPORTED_OPEN && write_existing == FS_R_UNSUPPORTED_OPEN,
           "write open -> %#x/%#x, expected 0x6402", write_open, write_existing);
 
-    // Overlays (NX2NAVI_ROMFS_PATCHES, NX2NAVI_ROMFS_MODS): served in place of the original, added files and their folders
+    // Overlays (OOTPC_ROMFS_PATCHES, OOTPC_ROMFS_MODS): served in place of the original, added files and their folders
     // exist, bytes equal the overlay file.
     size_t nov = romfs_overlay_count(), ovok = 0;
     for (size_t k = 0; k < nov; k++) {
@@ -2347,7 +2351,7 @@ static void probe_save_tx(const uint64_t *uid) {
     committed = pending;
 
     // the read-only mount shows the committed save and refuses changes
-    CHECK(tx_write(a, 99) && RES(S_MOUNT_SAVE_RO, U("ro"), NX2NAVI_APPLICATION_ID, U(uid)) == 0 &&
+    CHECK(tx_write(a, 99) && RES(S_MOUNT_SAVE_RO, U("ro"), OOTPC_APPLICATION_ID, U(uid)) == 0 &&
           tx_read("ro:/tx_a.sav") == committed && RES(S_OPEN_FILE, U(&h), U("ro:/tx_a.sav"), FS_OPEN_WRITE) ==
           FS_R_UNSUPPORTED_OPEN && RES(S_CREATE_FILE, U("ro:/x"), 0) == FS_R_UNSUPPORTED_OPEN &&
           RES(S_RENAME_FILE, U("save:/tx_a.sav"), U("ro:/y")) == FS_R_INVALID_PATH, "MountSaveDataReadOnly");
@@ -2371,7 +2375,7 @@ static void probe_save_tx(const uint64_t *uid) {
 static void probe_storage(void) {
     char tmp[PLAT_PATH_MAX * 3], dir[PLAT_PATH_MAX * 3 + 64];
     need(plat_temp_dir(tmp, sizeof tmp), "temporary directory");
-    snprintf(dir, sizeof dir, "%s/nx2navi-probe-fs-%u", tmp, plat_process_id());
+    snprintf(dir, sizeof dir, "%s/ootpc-probe-fs-%u", tmp, plat_process_id());
     remove_tree(dir);
     fs_host_set_profile(dir);
     uint64_t uid[2], other[2], h = 0, h2 = 0, d = 0, l = 0;
@@ -2387,9 +2391,9 @@ static void probe_storage(void) {
     CHECK(RES(S_MOUNT_SAVE, U("save"), U(other)) == FS_R_TARGET_NOT_FOUND, "MountSaveData for another user");
     CHECK(RES(S_MOUNT_SAVE, U("save"), U(uid)) == 0, "MountSaveData");
     CHECK(RES(S_MOUNT_SAVE, U("save"), U(uid)) == FS_R_ALREADY_EXISTS, "MountSaveData twice");
-    CHECK((CALL(S_SAVE_EXISTS, NX2NAVI_APPLICATION_ID, U(uid)) & 0xff) == 1 &&
-          (CALL(S_SAVE_EXISTS, NX2NAVI_APPLICATION_ID + 0x1000, U(uid)) & 0xff) == 0, "IsSaveDataExisting");
-    CHECK(RES(S_MOUNT_SAVE_RO, U("other"), NX2NAVI_APPLICATION_ID + 0x1000, U(uid)) == FS_R_TARGET_NOT_FOUND,
+    CHECK((CALL(S_SAVE_EXISTS, OOTPC_APPLICATION_ID, U(uid)) & 0xff) == 1 &&
+          (CALL(S_SAVE_EXISTS, OOTPC_APPLICATION_ID + 0x1000, U(uid)) & 0xff) == 0, "IsSaveDataExisting");
+    CHECK(RES(S_MOUNT_SAVE_RO, U("other"), OOTPC_APPLICATION_ID + 0x1000, U(uid)) == FS_R_TARGET_NOT_FOUND,
           "MountSaveDataReadOnly of another title");
     CHECK(!fs_save_busy(), "idle at start");
 
@@ -2553,7 +2557,7 @@ int probe_fs(void) {
     return 0;
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): open save-data files and directory listings against their tables.
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): open save-data files and directory listings against their tables.
 void fs_host_sizes(PerfSizes *s) {
     uint64_t nf = 0, nd = 0;
     plat_mutex_lock_shared(&lock);

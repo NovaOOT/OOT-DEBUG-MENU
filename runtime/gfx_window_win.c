@@ -1,9 +1,9 @@
 // The Win32 back end of the window (gfx_wsys.h): the window and its message loop on a thread of their own, F11
-// fullscreen, the settings NX2NAVI_WINDOW_SIZE, NX2NAVI_FULLSCREEN and NX2NAVI_MONITOR, the monitor's refresh rate, focus, the Vulkan surface.
+// fullscreen, the settings OOTPC_WINDOW_SIZE, OOTPC_FULLSCREEN and OOTPC_MONITOR, the monitor's refresh rate, focus, the Vulkan surface.
 // The swapchain and the present are gfx_present.c's. The in-game menu's keyboard and mouse come from the window
 // procedure (ui/menu_win.cpp), and so do the game's (input_win.c).
 //
-// The process is per-monitor DPI aware (nx2navi.manifest): every size here is physical pixels, NX2NAVI_WINDOW_SIZE included,
+// The process is per-monitor DPI aware (ootpc.manifest): every size here is physical pixels, OOTPC_WINDOW_SIZE included,
 // and the swapchain matches the screen pixel for pixel. A window moved to a monitor at another display scale keeps its
 // client size (WM_GETDPISCALEDSIZE); the menu takes its text size floor from the window's DPI (gfx_window_dpi).
 #include <stdio.h>
@@ -30,8 +30,8 @@
 static HWND g_hwnd;
 static PlatEvent g_wnd_ready;   // manual-reset: the window thread made the window or gave up
 static int g_wnd_failed;
-static int g_background;                   // NX2NAVI_BACKGROUND_WINDOW: the window stays behind the user's windows
-static int g_fs_pending;                   // window thread: NX2NAVI_FULLSCREEN did not apply before the first show; retried at the first activation
+static int g_background;                   // OOTPC_BACKGROUND_WINDOW: the window stays behind the user's windows
+static int g_fs_pending;                   // window thread: OOTPC_FULLSCREEN did not apply before the first show; retried at the first activation
 static volatile int32_t g_dpi = USER_DEFAULT_SCREEN_DPI;   // the window's DPI, set by the window thread
 
 HWND gfx_window_handle(void) { return g_hwnd; }
@@ -150,14 +150,14 @@ static char g_applied_size[32];
 static int g_applied_fs;
 
 static void note_applied(void) {
-    snprintf(g_applied_size, sizeof g_applied_size, "%s", cfg_value("NX2NAVI_WINDOW_SIZE"));
+    snprintf(g_applied_size, sizeof g_applied_size, "%s", cfg_value("OOTPC_WINDOW_SIZE"));
     g_applied_fs = cfg_fullscreen();
 }
 
 // Window thread: the window takes the size and fullscreen state of the settings when they changed. In fullscreen the
 // size goes into the placement restored when fullscreen ends.
 static void apply_settings(HWND h) {
-    int size_changed = strcmp(cfg_value("NX2NAVI_WINDOW_SIZE"), g_applied_size) != 0, fs = cfg_fullscreen(), fs_changed = fs != g_applied_fs;
+    int size_changed = strcmp(cfg_value("OOTPC_WINDOW_SIZE"), g_applied_size) != 0, fs = cfg_fullscreen(), fs_changed = fs != g_applied_fs;
     note_applied();
     if (size_changed) {
         int cw, ch, ow, oh;
@@ -203,7 +203,7 @@ void gfx_window_paste(void) {
     if (g_hwnd) PostMessageW(g_hwnd, WM_APP_PASTE, 0, 0);
 }
 
-// ---- refresh rate of the window's monitor (NX2NAVI_FPS_LIMIT=display), measured when the window opens, lands on another
+// ---- refresh rate of the window's monitor (OOTPC_FPS_LIMIT=display), measured when the window opens, lands on another
 // monitor or the display mode changes (gfx_window_set_refresh keeps it). QueryDisplayConfig gives the exact rational
 // rate (59.94, 143.998); EnumDisplaySettings' whole hertz is the fallback.
 static HMONITOR g_rate_mon;
@@ -244,7 +244,7 @@ static void refresh_rate_update(HWND h, int force) {
     gfx_window_set_refresh(monitor_rate_hz(mon));
 }
 
-// ---- monitor choice (NX2NAVI_MONITOR, --monitor, --list-monitors)
+// ---- monitor choice (OOTPC_MONITOR, --monitor, --list-monitors)
 // The monitors in EnumDisplayMonitors order, which is the index the setting counts in (1-based) and --list-monitors
 // prints. The order follows the display driver's adapter and output order, so it holds while the same monitors stay
 // attached and enabled, but a monitor that appears or goes away (a virtual display) can move the ones after it: the GDI
@@ -363,7 +363,7 @@ static int contains_nocase(const wchar_t *text, const wchar_t *needle_lower) {
     return wcsstr(buf, needle_lower) != NULL;
 }
 
-// Which monitor of the list a NX2NAVI_MONITOR value (not empty, not auto) names, as a 0-based index; -1 when none.
+// Which monitor of the list a OOTPC_MONITOR value (not empty, not auto) names, as a 0-based index; -1 when none.
 // Rules, in this order: "primary"; all digits, a 1-based index; any other text, a case-insensitive substring of a
 // monitor's GDI device name or friendly name (the first monitor in list order when several match). why gets the
 // rule that matched, or the reason nothing did.
@@ -407,12 +407,12 @@ static int resolve_monitor(const MonList *l, const char *want, char *why, size_t
     return first;
 }
 
-// The monitor NX2NAVI_MONITOR picks, copied to *out; 0 when it is unset or auto (the system places the window), or when
+// The monitor OOTPC_MONITOR picks, copied to *out; 0 when it is unset or auto (the system places the window), or when
 // it matches nothing now (the monitors present are logged, and the default placement applies). log: say what was decided
 // and why. The window thread asks with log set; the size query below, which widescreen.c makes before the window
 // exists, stays quiet.
 static int chosen_monitor(MonInfo *out, int log) {
-    const char *want = cfg_get("NX2NAVI_MONITOR");
+    const char *want = cfg_get("OOTPC_MONITOR");
     if (monitor_unset(want)) return 0;
     MonList l;
     char why[256], line[512];
@@ -421,7 +421,7 @@ static int chosen_monitor(MonInfo *out, int log) {
     else snprintf(why, sizeof why, "no monitor was found");
     if (pick < 0) {
         if (log) {
-            rt_log("gfx: NX2NAVI_MONITOR=%s picks no monitor (%s); the window gets the default placement. Monitors present:",
+            rt_log("gfx: OOTPC_MONITOR=%s picks no monitor (%s); the window gets the default placement. Monitors present:",
                    want, why);
             for (int i = 0; i < n; i++) {
                 monitor_line(&l, i, line, sizeof line);
@@ -432,13 +432,13 @@ static int chosen_monitor(MonInfo *out, int log) {
     }
     if (log) {
         monitor_line(&l, pick, line, sizeof line);
-        rt_log("gfx: NX2NAVI_MONITOR=%s picks monitor %s (%s)", want, line, why);
+        rt_log("gfx: OOTPC_MONITOR=%s picks monitor %s (%s)", want, line, why);
     }
     *out = l.m[pick];
     return 1;
 }
 
-// --list-monitors (main.c): one line per monitor, then what the current NX2NAVI_MONITOR would pick. No game files.
+// --list-monitors (main.c): one line per monitor, then what the current OOTPC_MONITOR would pick. No game files.
 int list_monitors(void) {
     MonList l;
     char line[512], why[256];
@@ -452,13 +452,13 @@ int list_monitors(void) {
         monitor_line(&l, i, line, sizeof line);
         printf("%s\n", line);
     }
-    const char *want = cfg_get("NX2NAVI_MONITOR");
+    const char *want = cfg_get("OOTPC_MONITOR");
     if (monitor_unset(want)) {
-        printf("NX2NAVI_MONITOR is not set (auto): the system places the window\n");
+        printf("OOTPC_MONITOR is not set (auto): the system places the window\n");
     } else {
         int pick = resolve_monitor(&l, want, why, sizeof why);
-        if (pick >= 0) printf("NX2NAVI_MONITOR=%s picks monitor %d (%s)\n", want, pick + 1, why);
-        else printf("NX2NAVI_MONITOR=%s picks no monitor (%s)\n", want, why);
+        if (pick >= 0) printf("OOTPC_MONITOR=%s picks monitor %d (%s)\n", want, pick + 1, why);
+        else printf("OOTPC_MONITOR=%s picks no monitor (%s)\n", want, why);
     }
     return 0;
 }
@@ -472,7 +472,7 @@ static void center_in(const RECT *work, int ow, int oh, int *x, int *y) {
 }
 
 // Before the window exists (widescreen.c wide_init at start), the monitor a fullscreen window opens on: the one
-// NX2NAVI_MONITOR picks (window_main places the window there), else the primary monitor.
+// OOTPC_MONITOR picks (window_main places the window there), else the primary monitor.
 int gfx_window_monitor_size(int *w, int *h) {
     MONITORINFO mi = {sizeof mi};
     MonInfo chosen;
@@ -497,7 +497,7 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
             input_cursor_suspend(1);
             toggle_fullscreen(h);
             input_cursor_suspend(0);
-            cfg_set("NX2NAVI_FULLSCREEN", is_fullscreen(h) ? "1" : "0");   // the menu shows it; the next start keeps it
+            cfg_set("OOTPC_FULLSCREEN", is_fullscreen(h) ? "1" : "0");   // the menu shows it; the next start keeps it
             cfg_save();
             note_applied();   // what cfg_get reads now (the environment may still override it)
         }
@@ -669,17 +669,17 @@ static HCURSOR pointer_cursor(void) {
 static void window_main(void *arg) {
     (void)arg;
     HINSTANCE inst = GetModuleHandleW(NULL);
-    // Icon resource 1 of nx2navi.rc (runtime/nx2navi.ico): the title bar, the taskbar button and Alt+Tab.
+    // Icon resource 1 of ootpc.rc (runtime/ootpc.ico): the title bar, the taskbar button and Alt+Tab.
     WNDCLASSEXW wc = {.cbSize = sizeof wc, .lpfnWndProc = wnd_proc, .hInstance = inst,
                       .hIcon = LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
                                           GetSystemMetrics(SM_CYICON), LR_SHARED),
                       .hIconSm = LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
                                             GetSystemMetrics(SM_CYSMICON), LR_SHARED),
-                      .hCursor = pointer_cursor(), .lpszClassName = L"NX2naviRecompWindow"};
+                      .hCursor = pointer_cursor(), .lpszClassName = L"OOTPCRecompWindow"};
     RegisterClassExW(&wc);
     int cw, ch, ow, oh, x = CW_USEDEFAULT, y = CW_USEDEFAULT;
     cfg_window_size(&cw, &ch);
-    // NX2NAVI_MONITOR: the window is created centred in the chosen monitor's work area, with its frame measured at that
+    // OOTPC_MONITOR: the window is created centred in the chosen monitor's work area, with its frame measured at that
     // monitor's DPI, so it opens there at the scale it will have. Without a choice the system places it. Either way
     // the size is scaled down first if it does not fit the work area it opens in.
     MonInfo mon;
@@ -693,12 +693,12 @@ static void window_main(void *arg) {
     // The window opens behind the user's windows first and is then raised (raise_window): a game started by a frontend
     // has no other way to reach it. The game counts itself in focus until the first WM_ACTIVATEAPP, so loading goes on,
     // and keyboard input waits for the foreground (input_win.c). If Windows still refuses the foreground, the taskbar
-    // button flashes. With NX2NAVI_FULLSCREEN the window is made fullscreen on the monitor it was created on before it
+    // button flashes. With OOTPC_FULLSCREEN the window is made fullscreen on the monitor it was created on before it
     // is first shown (fullscreen_before_show), so no framed window appears; the windowed rectangle stays in g_saved_place
     // for F11. If that fails, g_fs_pending retries at the first activation (wnd_proc, WM_ACTIVATEAPP).
-    // NX2NAVI_BACKGROUND_WINDOW=1 (test runs): no flashing, never fullscreen at start, and F11 keeps the window's place.
-    int background = g_background = cfg_get("NX2NAVI_BACKGROUND_WINDOW") && atoi(cfg_get("NX2NAVI_BACKGROUND_WINDOW"));
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"OOT-DEBUG-MENU", WND_STYLE, x, y, ow, oh, NULL, NULL,
+    // OOTPC_BACKGROUND_WINDOW=1 (test runs): no flashing, never fullscreen at start, and F11 keeps the window's place.
+    int background = g_background = cfg_get("OOTPC_BACKGROUND_WINDOW") && atoi(cfg_get("OOTPC_BACKGROUND_WINDOW"));
+    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"OOT-PC", WND_STYLE, x, y, ow, oh, NULL, NULL,
                              inst, NULL);
     if (!g_hwnd) {
         rt_log("gfx: CreateWindowEx failed (%lu)", GetLastError());

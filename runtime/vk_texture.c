@@ -20,6 +20,7 @@
 #include "flight.h"
 #include "gfx.h"
 #include "host.h"
+#include "n64world.h"
 #include "nvn_api.h"
 #include "nvn_hmap.h"
 #include "nvn_tex.h"
@@ -28,6 +29,7 @@
 #include "vk.h"
 #include "vk_dlaa.h"
 #include "vk_exec.h"
+#include "vk_n64world.h"
 #include "vk_tex_compact.h"
 #include "vk_tex_release.h"
 #include "prof.h"
@@ -102,7 +104,7 @@ typedef struct Tex {
     uint8_t in_gwin;              // in gwin[]
     int pidx;                     // 1 + its index in pent[] (vk_texture_pool_note_locked); 0: not listed
     int ph;                       // 1 + its index in pref[] (pool_ref); 0: none
-    // Where the entry and its content came from ("origins", below drop_note), for the lines of NX2NAVI_TRACE=perf
+    // Where the entry and its content came from ("origins", below drop_note), for the lines of OOTPC_TRACE=perf
     uint8_t had;                  // HAD_*: what put content into the image of an entry the CPU does not write
     uint8_t og_start;             // START_*: how its content started (start_at)
     uint8_t og_drop;              // DROP_*: the drop of this descriptor's last entry, when the ring still knew it
@@ -123,6 +125,12 @@ typedef struct Tex {
     uint8_t in_rt;                // in rts[] (bound into pool memory, the GPU wrote it)
     uint8_t compacting;           // a compaction pass lists it (CP.item): destroy_tex takes it off the list
     uint8_t clobbered;            // another image of another layout wrote over its pool memory since its own last write
+    // N64 Graphics' levels (vk_n64world.h, "N64 world textures" after upload)
+    int32_t w64;                  // 0 not looked up yet, -1 not one of world.bin's textures, else its entry + 1
+    uint8_t w64_opq;              // its own content's alpha: 0 not known yet, 1 opaque, 2 not
+    uint8_t w64_listed;           // in w64_list
+    uint8_t w64_wrote;            // its image holds the N64 texture, not the storage's content
+    uint32_t w64_state;           // n64world_state when its upload last decided (0: the part off or no area)
 } Tex;
 
 // A slot keeps what vk_texture_by_id resolved for it, so a draw binding skips the key lookup and the address chain: the
@@ -163,10 +171,10 @@ static uint64_t n_uploads, n_reuploads;
 // Re-uploads since the last perf line (tex_lock): all, and those of textures a WriteTexels wrote since their last upload.
 static uint64_t ru_n, ru_bytes, ru_ns, ru_wt_n, ru_wt_bytes, ru_wt_ns;
 static uint64_t ru_same_n, ru_same_bytes;   // re-uploads skipped: the pages were written, the texture's bytes were not
-// The same for textures over CHASH_MAX (NX2NAVI_TEX_SAME_BIG), since the last pool log line: comparisons that found the
+// The same for textures over CHASH_MAX (OOTPC_TEX_SAME_BIG), since the last pool log line: comparisons that found the
 // bytes unchanged and their bytes, comparisons that found others, and uploads that took a hash with their bytes.
 static uint64_t big_same_n, big_same_bytes, big_diff_n, big_hash_n, big_hash_bytes;
-// NX2NAVI_TEX_ALIAS (default on; =0: a new image over live storage starts empty): a new descriptor over the storage of a
+// OOTPC_TEX_ALIAS (default on; =0: a new image over live storage starts empty): a new descriptor over the storage of a
 // live image that the GPU wrote gets that image's content (alias_copy). Counts since the last log line.
 static int tex_alias = -1;
 static uint64_t n_alias_copied, n_alias_upload, n_alias_uninit, n_alias_kept, n_alias_released;
@@ -237,7 +245,7 @@ static uint32_t slots_gen = 1;
 static uint32_t samp_gen = 1;   // bumped whenever a sampler slot is registered: vk_sampler_by_id may answer otherwise
 static uint64_t n_checks;    // draw-binding storage checks (make_fresh_snap) since the last perf line
 // tex_gen per storage address (hashed): a slot resolves through the entries at its own address only (slot_resolve), so
-// a slot's resolution stays valid while its address's generation does. NX2navi finalizes and initializes transient
+// a slot's resolution stays valid while its address's generation does. OOT-PC finalizes and initializes transient
 // textures every frame: about 90 tex_gen and 160 slots_gen bumps per frame in the monsters fight, one every 16 draws,
 // which emptied every cache keyed on the global generations. 65536 buckets, the most the 16-bit index of sinfo,
 // slot_bucket and the dirty ring's bucket entries holds: with 4096, about 8 slots shared each bucket, and every
@@ -311,7 +319,7 @@ static void tex_gen_bump(uint64_t addr) {
     dirty_push(DIRTY_BUCKET | b);
 }
 
-// NX2NAVI_TEX_GEN_UNDO (default 1; 0: every release and take-back is a new generation). Ocarina finalizes and
+// OOTPC_TEX_GEN_UNDO (default 1; 0: every release and take-back is a new generation). Ocarina finalizes and
 // initializes transient textures all through a frame: in a large town about 40,000 releases and as many take-backs
 // per 3,600 submissions, each a bump of its address bucket, and the buckets with the most slots (1,300 registered over
 // one address) were the ones bumped most. The texture pool refresh refilled about 6,000 slots per submission for it.
@@ -366,7 +374,7 @@ static void tex_gen_flip(Tex *e, int plain) {
 // keeps up to ~400 descriptors of each transient render target registered over its storage, and the fullest bucket,
 // 1,281 slots, moves 8 times a submission in Kokiri Forest: 12,800 of the 17,600 slots a submission's dirty walks
 // refilled held their views already. The dirty walk can hand each group to the pool whole (vk_texture_dirty_slots_locked's
-// gfn), which leaves its members alone when their resolution did not change (NX2NAVI_POOL_GROUP). A slot is in its
+// gfn), which leaves its members alone when their resolution did not change (OOTPC_POOL_GROUP). A slot is in its
 // bucket's own list (khash 0: a CPU-written texture) or in its group's member list, through the same links. A slot that
 // joins a group goes to its tail and leaves the group's stamp as it was: its registration put it on the dirty ring, so
 // the walk that follows refills it on its own, and the head, whose state the pool tests, is a member from before. (The
@@ -501,7 +509,7 @@ static void tex_init(void *p) {
     __atomic_store_n(&tex_ready, 1, __ATOMIC_RELEASE);
     return;
 }
-// NX2NAVI_LOCK_TIME: the outermost hold of the lock is timed from here, and one over 1 ms is reported with the code
+// OOTPC_LOCK_TIME: the outermost hold of the lock is timed from here, and one over 1 ms is reported with the code
 // that took it (perf_lock_hold); lock is not inlined so that its return address names that code.
 static uint64_t hold_t0;
 static void *hold_site;
@@ -627,7 +635,7 @@ static int format_compressed(VkFormat f) {   // vkCmdClearColorImage takes no bl
            (f >= VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK && f <= VK_FORMAT_ASTC_12x12_SFLOAT_BLOCK);
 }
 
-// Image reuse (NX2NAVI_TEX_REUSE, default on): a GPU-only texture that needs an image of its own takes the image of a
+// Image reuse (OOTPC_TEX_REUSE, default on): a GPU-only texture that needs an image of its own takes the image of a
 // released entry made with the same parameters (ImgKey) instead of a new one, which then starts over as a new image
 // would (init_image: undefined content, cleared). Ocarina places its per-frame render targets with a linear allocator
 // behind small targets whose size follows an effect on screen (77x77 to 97x97), so every few frames the targets after
@@ -705,13 +713,16 @@ static void gwin_remove(Tex *e) {
 
 static int tex_reuse_on(void) {
     if (tex_reuse < 0) {
-        tex_reuse = cfg_bool("NX2NAVI_TEX_REUSE");
-        rt_log("vk: texture image reuse %s (NX2NAVI_TEX_REUSE)", tex_reuse ? "on" : "off");
+        tex_reuse = cfg_bool("OOTPC_TEX_REUSE");
+        rt_log("vk: texture image reuse %s (OOTPC_TEX_REUSE)", tex_reuse ? "on" : "off");
     }
     return tex_reuse;
 }
 
 static void destroy_tex(Tex *e);
+static void world_apply(Tex *e);   // N64 world textures, after upload
+static void w64_unlist(Tex *e);
+static void world_refresh(void);
 static int used_lately(const struct Tex *e, uint64_t now, uint64_t within);
 static int sampled_lately(const struct Tex *e, uint64_t now, uint64_t within);
 static int marks_tell(void);
@@ -733,7 +744,7 @@ static int over_share;   // sweep_pressure: the driver's figure of the memory in
 // since the last perf line: released entries create_tex passed by as released too lately, as used, as named by a slot
 static uint64_t n_reuse_young, n_reuse_used, n_reuse_slot;
 
-// NX2NAVI_TEX_REUSE_NAMED (default 0; 1: as before, any released entry's image may go): a registered slot that is not
+// OOTPC_TEX_REUSE_NAMED (default 0; 1: as before, any released entry's image may go): a registered slot that is not
 // finalized names e's descriptor, so a shader can still sample e through the pool. The game finalizes a texture object
 // while another one it initialized at the same storage with the same parameters stays registered (vk_texture_release
 // leaves that slot current), and the entry they share is released all the same. Its image then went to the next
@@ -745,7 +756,7 @@ static uint64_t n_reuse_young, n_reuse_used, n_reuse_slot;
 static uint64_t n_reuse_named;   // released entries left out of the reuse because a current slot names them
 static int slot_names(const Tex *e) {
     static int off = -1;
-    if (off < 0) off = cfg_bool("NX2NAVI_TEX_REUSE_NAMED");
+    if (off < 0) off = cfg_bool("OOTPC_TEX_REUSE_NAMED");
     if (off || !sinfo) return 0;
     for (int id = bucket_head[agen_idx(e->key.addr)]; id >= 0; id = slot_next[id]) {
         const TexSlot *s = &tslots[id];
@@ -755,7 +766,7 @@ static int slot_names(const Tex *e) {
         if (memcmp(&sk, &e->key, sizeof sk)) continue;
         if (!n_reuse_named++ || !(n_reuse_named & (n_reuse_named - 1)))   // the first, then at each power of two
             rt_log("vk: a released texture keeps its image, a registered slot still names it: %#llx fmt %#x %ux%u, slot "
-                   "%d (%llu so far; NX2NAVI_TEX_REUSE_NAMED=1 lets such an image go to another texture)",
+                   "%d (%llu so far; OOTPC_TEX_REUSE_NAMED=1 lets such an image go to another texture)",
                    (unsigned long long)e->key.addr, e->t.d.format, e->t.d.width, e->t.d.height, id,
                    (unsigned long long)n_reuse_named);
         return 1;
@@ -771,7 +782,7 @@ static void drop_tex(Tex *e, int why);
 static void reuse_dropped(const Tex *e, int why);   // "reuse of released textures", after vk_texture_census
 static void reuse_made(const Tex *e);
 static void reuse_taken_back(const Tex *e);
-static int compact_on(void);          // NX2NAVI_TEX_COMPACT ("compaction", near the end of the file)
+static int compact_on(void);          // OOTPC_TEX_COMPACT ("compaction", near the end of the file)
 static void compact_step(void);
 static void compact_forget(Tex *e);
 // How an entry's content started (start_at; Tex.og_start), in the order of start_names.
@@ -780,7 +791,7 @@ enum { START_NEW, START_UPLOAD_LIVE, START_COPY_LIVE, START_COPY_RELEASED, START
 // What put content into the image of an entry the CPU does not write (Tex.had); a GPU write is pub.gpu_owned.
 enum { HAD_COPY = 1, HAD_TEXELS = 2, HAD_FILL = 4 };
 
-// ---- split fill (NX2NAVI_TEX_SPLIT_FILL, tex_split_fill in nx2navi.ini: 1 the default, 0 off, 2 filled once)
+// ---- split fill (OOTPC_TEX_SPLIT_FILL, tex_split_fill in OOT-PC.ini: 1 the default, 0 off, 2 filled once)
 // Two descriptors can name one storage the CPU writes: a texture whose content the cache takes from the CPU
 // (tex_mirrored), and a second one with a texture flag for which tex_mirrored refuses. The second has no upload of its
 // own: its slot shows the first one's image for as long as that entry is live (slot_resolve). Once the first is
@@ -802,7 +813,7 @@ enum { HAD_COPY = 1, HAD_TEXELS = 2, HAD_FILL = 4 };
 // SPLIT_FILL_MAX, and an entry made with a released entry's image, whose first transition is recorded at the replay's
 // position, after the upload batch (init_new); so create_tex gives an entry that is to be filled a new image. Nothing
 // is filled where a live entry at the address holds content the GPU wrote (that is what the new one should show, and
-// start_at copies it when it can), nor with NX2NAVI_TEX_ALIAS off.
+// start_at copies it when it can), nor with OOTPC_TEX_ALIAS off.
 //
 // What follows the storage also takes what a stale descriptor's entry does not need: an entry made for a slot the game
 // let go of is uploaded again whenever its pages are written, by the next textures loaded into that memory, read in
@@ -824,9 +835,9 @@ static uint64_t split_total[2];   // copies and fills so far (vk_texture_split_c
 
 static int split_fill_mode(void) {
     if (split_mode < 0) {
-        int v = cfg_int("NX2NAVI_TEX_SPLIT_FILL");
+        int v = cfg_int("OOTPC_TEX_SPLIT_FILL");
         split_mode = v == 0 ? 0 : v == 2 ? 2 : 1;
-        rt_log("vk: a texture the CPU does not write, made at storage the CPU writes, %s (NX2NAVI_TEX_SPLIT_FILL=%d)",
+        rt_log("vk: a texture the CPU does not write, made at storage the CPU writes, %s (OOTPC_TEX_SPLIT_FILL=%d)",
                !split_mode ? "starts empty" : split_mode == 2 ? "starts with the storage's bytes, once"
                                                              : "starts with the storage's bytes and follows them", split_mode);
     }
@@ -949,7 +960,7 @@ static void init_image(Tex *e, VkCommandBuffer cb) {
     }
 }
 
-// NX2NAVI_DEPTH_INIT_INLINE (default 1; 0: in the upload batch, as before): a new depth or stencil image goes through
+// OOTPC_DEPTH_INIT_INLINE (default 1; 0: in the upload batch, as before): a new depth or stencil image goes through
 // init_image at the replay's position too. Its clear writes the image's memory, and an image bound into pool memory
 // (bind_pool_memory) shares that with the live texture at its address; from the upload batch, which runs before the
 // whole part being recorded (vk_sync.c split_part), the clear can zero what earlier commands of the part still read as
@@ -982,7 +993,7 @@ static void init_new(Tex *e) {
     vk_upload_end();
 }
 
-// NX2NAVI_SHADOW_SCALE (1 to 4): the game's shadow maps are made this many times larger on each side. NX2navi renders its
+// OOTPC_SHADOW_SCALE (1 to 4): the game's shadow maps are made this many times larger on each side. OOT-PC renders its
 // sun cascades into a 960x960 DEPTH16 2D array of 4 layers and its static shadows into 1440x1440 and 720x720 arrays of 2,
 // whatever the output resolution, and shrinks the cascades under load (872, 848, 800, 480 and so on). Those are made
 // larger here: render passes into them scale the game's viewports and scissors (vk_exec.c resolve_rt, pass_scale),
@@ -992,7 +1003,7 @@ static void init_new(Tex *e) {
 static int shadow_scale(void) {
     static int scale = -1;
     if (scale < 0) {
-        int s = cfg_int("NX2NAVI_SHADOW_SCALE");
+        int s = cfg_int("OOTPC_SHADOW_SCALE");
         s = s < 1 ? 1 : s > 4 ? 4 : s;
         rt_log("vk: shadow map scale %d", s);
         scale = s;
@@ -1009,23 +1020,23 @@ static int shadow_scale_of(const nvn_texdesc *d, const TexVkFormat *f, uint32_t 
     return d->width * (uint32_t)scale <= most ? scale : 1;
 }
 
-// NX2NAVI_SHADOW_PCF (default 0): every depth-compare sampler filters linearly. Through a nearest filter each of the
+// OOTPC_SHADOW_PCF (default 0): every depth-compare sampler filters linearly. Through a nearest filter each of the
 // game's shadow compares tests one texel and returns 0 or 1, so a shadow edge is a staircase of shadow map texels, and
 // the sun cascades follow the camera, so the stairs crawl along the ground as it moves (Hyrule Field's hills). Through a
 // linear filter the GPU tests the 2x2 texels around the coordinate and blends the four results (percentage-closer
-// filtering), which the game's own four compares then smooth further. With NX2NAVI_SHADOW_SCALE above 1 the samplers
+// filtering), which the game's own four compares then smooth further. With OOTPC_SHADOW_SCALE above 1 the samplers
 // filter linearly anyway (make_sampler). Read once: samplers live until shutdown.
 static int shadow_pcf(void) {
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_SHADOW_PCF");
-        rt_log("vk: depth-compare samplers: %s (NX2NAVI_SHADOW_PCF=%d)",
+        on = cfg_bool("OOTPC_SHADOW_PCF");
+        rt_log("vk: depth-compare samplers: %s (OOTPC_SHADOW_PCF=%d)",
                on ? "linear, each compare blends the 2x2 texels around it" : "the game's filters", on);
     }
     return on;
 }
 
-// The filters of the depth-compare samplers made, each kind once (8 at most): whether NX2NAVI_SHADOW_PCF changes
+// The filters of the depth-compare samplers made, each kind once (8 at most): whether OOTPC_SHADOW_PCF changes
 // anything shows in the log (with every one already linear it does not). Caller holds the lock.
 static void compare_sampler_note(const samp_par *d) {
     static uint32_t seen[8];
@@ -1039,7 +1050,7 @@ static void compare_sampler_note(const samp_par *d) {
            (unsigned)d->minf, (unsigned)d->magf, (unsigned)d->cmp_func);
 }
 
-// ---- ASTC as BC1 (NX2NAVI_ASTC_BC1, vk_astc.c)
+// ---- ASTC as BC1 (OOTPC_ASTC_BC1, vk_astc.c)
 // A texture the CPU provides whose ASTC blocks all decode opaque is held as BC1, not BC3: the encoder then writes only
 // the colour half of the BC3 blocks it would have written (bc3_encode.comp), which BC1 decodes to the same texels, in
 // half the memory. Every ASTC texture is made BC3 (create_tex); its first upload checks its blocks inside the copy into
@@ -1067,13 +1078,13 @@ static int astc_opaque(const tex_t *t, uint64_t addr, const TexVkFormat *f) {
     return ok;
 }
 
-// ---- texture detail (NX2NAVI_TEXTURE_DETAIL = auto | full | reduced | low, texture_detail in nx2navi.ini; read at
+// ---- texture detail (OOTPC_TEXTURE_DETAIL = auto | full | reduced | low, texture_detail in OOT-PC.ini; read at
 // the first texture, so a change waits for a restart)
 // The material textures of a loaded area are what fills a small card, and three quarters of a mipmapped texture is its
 // largest level. Over the budget Windows moves device memory into system memory and the frame rate falls to a
 // fraction (a tester's RTX 3060 Laptop, 6 GiB with a budget of 4,730 MiB, ran the world at 5 to 15 fps).
 //
-// Measured on an RTX 5090 with the budget taken as those 4,730 MiB (NX2NAVI_VRAM_BUDGET_MB), a walk through Castle
+// Measured on an RTX 5090 with the budget taken as those 4,730 MiB (OOTPC_VRAM_BUDGET_MB), a walk through Castle
 // Town at 1440p with DLSS Balanced, device memory in use at its peak and the textures in it:
 //   full     6,907 MiB, textures 4,302 MiB (2,852 MiB of them ASTC as BC3), 2,589 M ASTC texels decoded
 //   reduced  5,472 MiB, textures 2,357 MiB (908 MiB), 826 M texels
@@ -1152,7 +1163,7 @@ const char *vk_texture_detail_name(void) {
 static int detail_most(void) {   // the most levels a texture is made without: 0 full, 1 reduced, 2 low
     static int most = -1;
     if (most >= 0) return most;
-    const char *v = cfg_value("NX2NAVI_TEXTURE_DETAIL");
+    const char *v = cfg_value("OOTPC_TEXTURE_DETAIL");
     most = !strcmp(v, "full") ? 0 : !strcmp(v, "reduced") ? 1 : !strcmp(v, "low") ? 2 : -1;
     if (most >= 0) {
         rt_log("vk: texture detail: %s (texture_detail)", v);
@@ -1285,7 +1296,7 @@ static void own_memory(VkCtx *c, Tex *e) {
 }
 
 // defer_init: the caller records the image's first transition (init_image or alias_copy).
-// ---------------------------------------------------------------- overwritten pool memory (NX2NAVI_TEX_CLOBBER)
+// ---------------------------------------------------------------- overwritten pool memory (OOTPC_TEX_CLOBBER)
 // The game places transient render targets over each other in its memory pools, and the replay binds their images
 // into the same memory (bind_pool_memory). An image of another format or size that renders over an image's memory
 // leaves it holding the other image's texels in the GPU's own tiled and compressed layout, which reads back as
@@ -1294,7 +1305,7 @@ static void own_memory(VkCtx *c, Tex *e) {
 // that memory, and the fog lighting took those numbers as volume distances and types: teal splotches in the fog of
 // Kokiri Forest, on AMD and NVIDIA. An image read while in that state gets memory of its own from then on
 // (private_keys), so it keeps what it last drew; the read that found it takes an empty image once.
-// NX2NAVI_TEX_CLOBBER=0 keeps such images in pool memory.
+// OOTPC_TEX_CLOBBER=0 keeps such images in pool memory.
 static Tex **rts;                    // pool-bound images the GPU wrote, sorted by address
 static int nrts, crts;
 static uint64_t max_rt;              // largest storage size in rts[]
@@ -1343,7 +1354,7 @@ static int alias_compatible(const Tex *e, const Tex *src, const char **why);
 // e, bound into pool memory, was just written by the GPU: its own content is current, and the pool-bound images of
 // another layout whose storage overlaps it no longer hold theirs.
 static void mark_clobbered(Tex *e) {
-    if (clobber_fix < 0) clobber_fix = cfg_bool("NX2NAVI_TEX_CLOBBER");
+    if (clobber_fix < 0) clobber_fix = cfg_bool("OOTPC_TEX_CLOBBER");
     e->clobbered = 0;
     if (!clobber_fix || !e->bound_to) return;
     rt_add(e);
@@ -1428,14 +1439,14 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
                             .samples = (VkSampleCountFlagBits)samples, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     int bw, bh, block_views = 0;
-    // NX2NAVI_BLOCK_VIEWS_3D (default 0): a 3D BC image also gets block views. On RDNA2 cards (driver 26.10.1, issue #5)
+    // OOTPC_BLOCK_VIEWS_3D (default 0): a 3D BC image also gets block views. On RDNA2 cards (driver 26.10.1, issue #5)
     // the 32x32x32 BC4 volume the game creates at the logo, made BLOCK_TEXEL_VIEW_COMPATIBLE and 2D_ARRAY_COMPATIBLE,
     // took a GPU write just past the end of its memory: device lost at the first submit after it when the image ended
     // its memory block. Draws into a 3D BC image go through a stand-in instead (vk_exec.c bc_target).
     static int bv3d = -1;
     if (bv3d < 0) {
         bv3d = rt_knob("BLOCK_VIEWS_3D", "0");
-        rt_log("vk: 3D BC textures %s (NX2NAVI_BLOCK_VIEWS_3D=%d)", bv3d ? "get block views (renderable)" : "have no block views",
+        rt_log("vk: 3D BC textures %s (OOTPC_BLOCK_VIEWS_3D=%d)", bv3d ? "get block views (renderable)" : "have no block views",
                bv3d);
     }
     if (!ds && samples == 1 && f.vk == f.ideal && nvn_fmt_bpb(d->format, &bw, &bh) && bw == 4 && bh == 4 &&
@@ -1703,7 +1714,7 @@ static PEnt *pent;
 static int npent, cpent, *pq, cpq;
 static uint64_t n_pool_checks, n_pool_skips, n_pool_rel;
 // The region check's misses (vk_mem_unchanged_why_locked): not uploaded, a region without this epoch's snapshot yet, one
-// untracked, one written since, nothing to check; and the snapshot queries its own pass made (NX2NAVI_POOL_PRESNAP).
+// untracked, one written since, nothing to check; and the snapshot queries its own pass made (OOTPC_POOL_PRESNAP).
 static uint64_t n_pool_miss[5], n_presnap_q;
 static void make_fresh_snap(Tex *e);
 
@@ -1801,7 +1812,7 @@ int vk_texture_pool_note_locked(int id, uint32_t *ent) {
 
 // Released entries are left out: a slot resolves to none of those whose content the CPU provides (slot_resolve's stale
 // rule), and the game may be unmapping their storage.
-// NX2NAVI_POOL_PRESNAP=1 (default), 0, ab: the check takes the write-watch snapshot of an entry's regions that have
+// OOTPC_POOL_PRESNAP=1 (default), 0, ab: the check takes the write-watch snapshot of an entry's regions that have
 // none in this submission yet before it looks at them (one exclusive hold of the generation table's lock for the list),
 // so an unchanged entry in such a region passes there. Without it 97 % of the 5,600 entries missed the region check for
 // want of a snapshot and went the long way, one entry and one lock at a time. With it 97 % pass, 3.5 snapshot queries
@@ -1811,7 +1822,7 @@ static int pool_presnap(void) {
     if (mode < 0) mode = rt_knob("POOL_PRESNAP", "1");
     return RT_KNOB_ON(mode);
 }
-// NX2NAVI_POOL_PRESNAP_RUNS=1 (default), 0, ab: those snapshots are taken for the whole list first, one write-watch
+// OOTPC_POOL_PRESNAP_RUNS=1 (default), 0, ab: those snapshots are taken for the whole list first, one write-watch
 // query per run of adjacent regions (vk_memory.c vk_mem_snap_noted_locked), instead of one per region as the list comes
 // to it. The log's "snapshot queries" of the pool freshness check count either.
 static int pool_presnap_runs(void) {
@@ -1882,7 +1893,7 @@ int vk_texture_pool_fresh_locked(void) {
 // slot_resolve's last answer was none because of its stale rule (vk_texture_slot_retry_locked)
 static int resolve_stale;
 
-// NX2NAVI_TRACE=perf, since the last perf line: slots a finalize marked (its own texture object's), slots at the storage
+// OOTPC_TRACE=perf, since the last perf line: slots a finalize marked (its own texture object's), slots at the storage
 // with the same parameters registered with another texture object, which a finalize leaves current
 // (vk_texture_release), and lookups the stale rule answered with the stand-in (slot_resolve). _hm: of them, the
 // terrain's streamed heightmaps (R32F 260x260), whose stand-in draws a chunk of ground at height zero.
@@ -1908,7 +1919,7 @@ static void retire_remove(Tex *e);
 // was uploaded or drawn into since (n_up, wr_fence) or another layer is asked for; a 3D view of that gives the 2D
 // texel for any w. The copy is recorded in the upload batch, which runs before the part that samples it, so a texture
 // the GPU draws every frame is sampled as it was a part or a frame before. Small plain colour textures only:
-// FLAT3D_MAX texels, one sample, not block-compressed (BC rejects 3D on some drivers). NX2NAVI_TEX_FLAT3D=0: the
+// FLAT3D_MAX texels, one sample, not block-compressed (BC rejects 3D on some drivers). OOTPC_TEX_FLAT3D=0: the
 // stand-in, as before. Texture lock held; NULL when the texture does not qualify or the image cannot be made.
 #define FLAT3D_MAX (1024u * 1024u)
 static volatile int32_t n_flat3d;
@@ -1973,7 +1984,7 @@ const VkTexImage *vk_texture_flat3d_locked(const VkTexImage *img, uint32_t layer
     if (cb) vk_upload_end();
     return e->flat3d;
 }
-// ---- origins (NX2NAVI_TRACE=perf; a run without it tests the flag and counts the drops, nothing more)
+// ---- origins (OOTPC_TRACE=perf; a run without it tests the flag and counts the drops, nothing more)
 // A texture drawn without its content leaves nothing in the log: no call fails and the image exists. What can still be
 // told afterwards is where the entry came from, so each entry keeps how it was made and how its content started
 // (og_*, had), and the last DROPS_N destroyed entries keep their descriptor and the reason they went. An entry made
@@ -2214,7 +2225,7 @@ static int others_at(char *out, size_t n, const Tex *e, const Tex *skip) {
     return k < (int)n ? k : (int)n - 1;
 }
 
-// NX2NAVI_LOG_TEX_NEW=<frame> (diagnostics): from that presented frame on, the first LOG_NEW_MAX textures made are
+// OOTPC_LOG_TEX_NEW=<frame> (diagnostics): from that presented frame on, the first LOG_NEW_MAX textures made are
 // logged with what was at their address and, when the same key was destroyed before, how many frames ago and from
 // where (destroy_tex's caller, an address the map file names: "destroy_tex at" gives the reference). For the steady
 // creations a still scene shows (about seven a frame in Kokiri Forest), each with its image, memory and upload.
@@ -2227,7 +2238,7 @@ static int log_new_n;
 
 static void log_new(const Tex *e, const TexKey *k) {   // tex_lock held
     if (log_new_at == -2) {
-        const char *v = cfg_get("NX2NAVI_LOG_TEX_NEW");
+        const char *v = cfg_get("OOTPC_LOG_TEX_NEW");
         log_new_at = v && *v ? atoll(v) : -1;
     }
     uint64_t now = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
@@ -2253,7 +2264,7 @@ static void log_new(const Tex *e, const TexKey *k) {   // tex_lock held
 }
 
 __attribute__((noinline)) static void destroy_tex(Tex *e) {
-    if (log_new_at >= 0) {   // NX2NAVI_LOG_TEX_NEW: who destroyed which key, for the log of new textures
+    if (log_new_at >= 0) {   // OOTPC_LOG_TEX_NEW: who destroyed which key, for the log of new textures
         uint32_t j = gone_n++ & (GONE_N - 1);
         gone[j].h = key_hash(&e->key), gone[j].frame = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
         gone[j].ra = __builtin_return_address(0);
@@ -2265,6 +2276,7 @@ __attribute__((noinline)) static void destroy_tex(Tex *e) {
     own_remove(e);
     gwin_remove(e);
     rt_remove(e);
+    if (e->w64_listed) w64_unlist(e);
     n_site[0]++;
     tex_gen_bump(e->key.addr);
     nvn_hm_del(&by_key, &e->key);
@@ -2295,7 +2307,7 @@ __attribute__((noinline)) static void destroy_tex(Tex *e) {
 }
 
 // Released entries with another descriptor at the same address are replaced; past RELEASED_MAX released entries one
-// goes at each release (it comes back on demand, a mirrored one re-uploaded from its storage). NX2navi
+// goes at each release (it comes back on demand, a mirrored one re-uploaded from its storage). OOT-PC
 // finalizes and initializes transient textures every frame, so a released entry is mostly taken back within frames.
 // Dropping all of them at once when the count passed 4096 destroyed thousands of images in one frame: 333-422 ms
 // frames every 40-50 s on a GTX 1050 Ti, then the textures still in use were created and uploaded again.
@@ -2349,10 +2361,10 @@ __attribute__((noinline)) static void destroy_tex(Tex *e) {
 // of the route early and 2,300 to 2,500 in the others; frame times and the peak of the device memory in use were the
 // same in all three forms, the device memory at the end of a run 0.3 to 0.5 GiB higher with 6,200 kept.
 // A kept entry bound into pool memory owns no memory and goes with its pool (vk_texture_range_gone); the memory of
-// the others is bounded by NX2NAVI_TEX_RELEASED_MB (drop_stale).
+// the others is bounded by OOTPC_TEX_RELEASED_MB (drop_stale).
 // Each call looks at up to SWEEP_LOOK entries from where the last one stopped (sweep_at; rel_unlink moves it off an
 // entry that leaves): with thousands of entries that stay, a walk from the head at every release would cross them all.
-// RELEASED_MAX is the floor of that limit; released_max raises it by the card (NX2NAVI_TEX_RELEASED_MAX sets it).
+// RELEASED_MAX is the floor of that limit; released_max raises it by the card (OOTPC_TEX_RELEASED_MAX sets it).
 #define RELEASED_MAX 2048
 #define RELEASED_MAX_TOP 8192
 #define RELEASED_HARD 16384
@@ -2365,12 +2377,12 @@ static uint64_t stale_after(const Tex *e);
 // The limit of released entries past which the sweep drops those that lose nothing: one per 2 MiB of the video memory
 // budget, from RELEASED_MAX to RELEASED_MAX_TOP. In Castle Town market on a 16 GB card (RTX 5060 Ti) with 2048 the
 // sweep dropped 412 entries in a session and a few textures blinked black for a moment; with 8192 (and
-// NX2NAVI_TEX_RELEASED_MB = 4096) it dropped none, 6,863 were kept and none blinked. Their memory stays bounded by
-// NX2NAVI_TEX_RELEASED_MB and the VRAM pressure. Read once the budget is known.
+// OOTPC_TEX_RELEASED_MB = 4096) it dropped none, 6,863 were kept and none blinked. Their memory stays bounded by
+// OOTPC_TEX_RELEASED_MB and the VRAM pressure. Read once the budget is known.
 static int released_max(void) {
     static int max;
     if (max) return max;
-    const char *s = cfg_get("NX2NAVI_TEX_RELEASED_MAX");
+    const char *s = cfg_get("OOTPC_TEX_RELEASED_MAX");
     if (s && *s) {
         long long n = atoll(s);
         max = n < 1 ? 1 : n > RELEASED_HARD ? RELEASED_HARD : (int)n;
@@ -2381,7 +2393,7 @@ static int released_max(void) {
         long long n = (long long)(vbudget >> 21);
         max = n < RELEASED_MAX ? RELEASED_MAX : n > RELEASED_MAX_TOP ? RELEASED_MAX_TOP : (int)n;
     }
-    rt_log("vk: released textures: the sweep keeps up to %d entries (NX2NAVI_TEX_RELEASED_MAX)", max);
+    rt_log("vk: released textures: the sweep keeps up to %d entries (OOTPC_TEX_RELEASED_MAX)", max);
     return max;
 }
 
@@ -2421,7 +2433,7 @@ static void sweep_released(void) {
     }
 }
 
-// NX2NAVI_TEX_VRAM_PRESSURE (percent of the device-local budget, default VRAM_PRESSURE_DEFAULT; 0 = off): above it, each
+// OOTPC_TEX_VRAM_PRESSURE (percent of the device-local budget, default VRAM_PRESSURE_DEFAULT; 0 = off): above it, each
 // submit drops up to PRESSURE_STEP of the oldest released entries, so a 4 GiB card does not keep RELEASED_MAX released
 // images (each ASTC one decoded to RGBA8) while the heap spills into system memory. A few per submit, for the reason
 // above. Only entries that come back intact are dropped: mirrored ones the GPU never wrote, re-uploaded from their
@@ -2447,7 +2459,7 @@ static int comes_back_intact(const Tex *e) { return e->pub.mirrored && !e->pub.g
 // texture object, nothing samples it. The clock is look_round, which only a submission whose slot checks reached half
 // of the registered pool slots moves on (vk_texture_new_submit): counted in submissions, a pause screen or a fade that
 // draws nothing through the pool made the whole world's textures idle within seconds.
-// With NX2NAVI_POOL_FAST the refresh checks the entries by list instead (vk_texture_pool_fresh_locked), which is no
+// With OOTPC_POOL_FAST the refresh checks the entries by list instead (vk_texture_pool_fresh_locked), which is no
 // lookup. Such a submission counts for the clock all the same, and the entries the pool's slots hold get their stamp
 // from the count of those slots (pool_touch), each at least once in POOL_TOUCH_DIV submissions: an entry a slot names
 // never comes near IDLE_ROUNDS.
@@ -2466,7 +2478,7 @@ void vk_texture_pool_ctx(int on) { pool_ctx = on; }
 
 static int idle(const Tex *e, uint64_t now);
 
-// NX2NAVI_TEX_RELEASED_MB (default a thirty-second of the installed memory, 512 MiB to 2 GiB, or more by the card's
+// OOTPC_TEX_RELEASED_MB (default a thirty-second of the installed memory, 512 MiB to 2 GiB, or more by the card's
 // budget, released_cap_bytes; 0 = no limit) bounds the own memory of the released entries. With the hold on (drop_aged,
 // the default) what they hold is what the last minutes released, and the bound is the safety net for a burst of area
 // changes within the hold; sweep_pressure lets young entries past it while the card and the system have room
@@ -2475,13 +2487,13 @@ static int idle(const Tex *e, uint64_t now);
 // driver also charges to the system's commit (the process's private bytes reached 31 GiB). A sixteenth (1 to 4 GiB)
 // still let them hold 1.3 GiB on a 32 GB PC whose commit then ran out at an area load (device lost); only entries
 // released STALE_FRAMES presents ago go, so the transient ones the game takes back within frames stay.
-// NX2NAVI_TEX_COMMIT_FREE_MB (default the larger of 4 GiB and a tenth of the commit
+// OOTPC_TEX_COMMIT_FREE_MB (default the larger of 4 GiB and a tenth of the commit
 // limit; 0 = off) lowers that bound to COMMIT_LOW_KEEP while less of the system's commit is free: an allocation that
 // fails there ends the game. On Linux nothing fails at the limit: the OOM killer ends the game when its cgroup or the
 // machine runs out of memory, and plat_commit_info reports the tighter of the two. Both drop only stale entries
 // (drop_stale), a few per check like the VRAM pressure.
 //
-// NX2NAVI_TEX_PROC_COMMIT_MB (default the installed memory, at least PROC_COMMIT_MIN_MB; 0 = off) is a bound on this
+// OOTPC_TEX_PROC_COMMIT_MB (default the installed memory, at least PROC_COMMIT_MIN_MB; 0 = off) is a bound on this
 // process's own commit that is logged when passed; it counted the commit as low too until it was found that no texture
 // dropped could bring the process back under it (commit_is_low, at its end). The system's figure depends on the page file and on what else
 // runs: with a 64 GB limit it turned low at 59 GB in use, when this process alone held 42 GB on a PC with 32 GB of
@@ -2515,7 +2527,7 @@ static double commit_free_now = -1, commit_low_mark;
 
 static uint64_t released_cap_bytes(void) {
     if (!released_cap) {
-        const char *s = cfg_get("NX2NAVI_TEX_RELEASED_MB");
+        const char *s = cfg_get("OOTPC_TEX_RELEASED_MB");
         long long mb;
         int by_vram = 0;
         if (s && *s) mb = atoll(s);
@@ -2529,7 +2541,7 @@ static uint64_t released_cap_bytes(void) {
             // it returns; walking through a village the released ones passed 1 GiB within two or three minutes, and
             // from then on each release dropped an older one that was decoded and encoded again on its way back,
             // hundreds a second, on a card with 30 GiB free. The two pressure rules still come first: released
-            // entries go before anything else above NX2NAVI_TEX_VRAM_PRESSURE of the budget, and the bound falls to
+            // entries go before anything else above OOTPC_TEX_VRAM_PRESSURE of the budget, and the bound falls to
             // COMMIT_LOW_KEEP while the commit is low.
             uint64_t vused = 0, vbudget = 0;
             int exact = 0;
@@ -2541,7 +2553,7 @@ static uint64_t released_cap_bytes(void) {
             }
         }
         released_cap = mb > 0 ? (uint64_t)mb << 20 : UINT64_MAX;
-        if (mb > 0) rt_log("vk: released textures keep at most %lld MiB of their own memory%s (NX2NAVI_TEX_RELEASED_MB)", mb,
+        if (mb > 0) rt_log("vk: released textures keep at most %lld MiB of their own memory%s (OOTPC_TEX_RELEASED_MB)", mb,
                            by_vram ? ", a quarter of the video memory budget" : "");
         else rt_log("vk: released textures: no size limit");
     }
@@ -2550,10 +2562,10 @@ static uint64_t released_cap_bytes(void) {
 
 static int commit_is_low(void) {
     if (commit_free_mb == -2) {
-        const char *s = cfg_get("NX2NAVI_TEX_COMMIT_FREE_MB");
+        const char *s = cfg_get("OOTPC_TEX_COMMIT_FREE_MB");
         commit_free_mb = s && *s ? atoll(s) : -1;
         if (commit_free_mb < -1) commit_free_mb = -1;
-        s = cfg_get("NX2NAVI_TEX_PROC_COMMIT_MB");
+        s = cfg_get("OOTPC_TEX_PROC_COMMIT_MB");
         proc_commit_mb = s && *s ? atoll(s) : -1;
         if (proc_commit_mb < 0) {
             float ram_used, ram_total, ram_proc;
@@ -2564,7 +2576,7 @@ static int commit_is_low(void) {
         char note[2048];   // the platform layer's own lines go to stderr only, so the log file gets this through here
         if (plat_commit_note(note, sizeof note)) rt_log("platform: %s", note);
         if (proc_commit_mb)
-            rt_log("vk: this process's commit%s is logged when it passes %lld MB (NX2NAVI_TEX_PROC_COMMIT_MB; 0 = off); "
+            rt_log("vk: this process's commit%s is logged when it passes %lld MB (OOTPC_TEX_PROC_COMMIT_MB; 0 = off); "
                    "textures give way only when the system's commit is low",
                    plat_commit_counts_vram() ? ", less the video memory in use on a discrete card," : "", proc_commit_mb);
     }
@@ -2654,7 +2666,7 @@ static int idle(const Tex *e, uint64_t now) {
            now - e->samp_frame >= STALE_FRAMES;
 }
 
-// NX2NAVI_TEX_KEEP_TAKEN (default 1; 0: as before): an entry that comes back intact waits out GAP_TIMES the longest it
+// OOTPC_TEX_KEEP_TAKEN (default 1; 0: as before): an entry that comes back intact waits out GAP_TIMES the longest it
 // stayed released before the game took it back, as one whose content lives only in its image does, and not
 // STALE_FRAMES alone. Coming back intact is not free: the descriptor finds no entry, the frame samples its stand-in
 // while the entry is made and uploaded again, and the next frame has it. Kakariko's hazy air is drawn with ASTC
@@ -2704,7 +2716,7 @@ static int sampled_lately(const Tex *e, uint64_t now, uint64_t within) { return 
 
 // Drops up to PRESSURE_STEP entries that were marked overwritten OVERWRITTEN_KEEP presents ago or earlier
 // (overwrite_others): the image reuse found no texture to give their images to in that time.
-// Not one that was used since (NX2NAVI_TEX_OVERWRITTEN_USED=0: those too, as before): the mark says another target was
+// Not one that was used since (OOTPC_TEX_OVERWRITTEN_USED=0: those too, as before): the mark says another target was
 // drawn over the entry's storage, not that nothing reads the entry. In a player's recording the entry of a second
 // descriptor at the scene target's address (format 0x40 beside the target's 0x3f, both 2400x1350) was dropped here
 // and made again in the same frame, its content copied from a released entry at that address, whose bits are the
@@ -2722,7 +2734,7 @@ static uint64_t n_over_full;   // since the last perf line: of n_over_drops, dro
 static void drop_overwritten(int full) {
     static int used_too = -1;
     static uint64_t n_kept;
-    if (used_too < 0) used_too = !cfg_bool("NX2NAVI_TEX_OVERWRITTEN_USED");
+    if (used_too < 0) used_too = !cfg_bool("OOTPC_TEX_OVERWRITTEN_USED");
     uint64_t now = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
     // used: drawn with or sampled (sampled_lately); a slot that merely still holds the entry does not keep it
     int dropped = 0, marks = marks_tell();
@@ -2733,7 +2745,7 @@ static void drop_overwritten(int full) {
         if (!used_too && (marks ? sampled_lately(e, now, keep) : used_lately(e, now, keep))) {
             if (e->kept_frame != now + 1 && (!n_kept++ || !(n_kept & (n_kept - 1))))   // the first, then at powers of two
                 rt_log("vk: an overwritten texture stays, it is still used: %#llx fmt %#x %ux%u, last used %llu presents "
-                       "ago (%llu so far; NX2NAVI_TEX_OVERWRITTEN_USED=0 drops such a texture)",
+                       "ago (%llu so far; OOTPC_TEX_OVERWRITTEN_USED=0 drops such a texture)",
                        (unsigned long long)e->key.addr, e->t.d.format, e->t.d.width, e->t.d.height,
                        (unsigned long long)(now - (marks || e->samp_frame > e->use_frame ? e->samp_frame
                                                                                                  : e->use_frame)),
@@ -2748,7 +2760,7 @@ static void drop_overwritten(int full) {
 }
 
 // ---- released textures by age (vk_tex_release.h has the take-back figures behind the hold)
-// NX2NAVI_TEX_RELEASED_HOLD (seconds, default TRL_HOLD_S, at most TRL_HOLD_MAX_S; 0 = no hold):
+// OOTPC_TEX_RELEASED_HOLD (seconds, default TRL_HOLD_S, at most TRL_HOLD_MAX_S; 0 = no hold):
 // a released entry that owns memory goes once it has gone unused that long, twice that for content only the GPU made,
 // whatever the size bound says. Unused counts from the release or the last sample of the released image, whichever is
 // later, in seconds of the wall clock (secs_since). The rules drop_stale keeps hold here too: not before stale_after
@@ -2764,17 +2776,17 @@ static uint64_t n_age_drops, n_age_bytes;   // since the last vk_texture_reuse_l
 
 static uint32_t released_hold(void) {
     if (rel_hold < 0) {
-        const char *s = cfg_get("NX2NAVI_TEX_RELEASED_HOLD");
+        const char *s = cfg_get("OOTPC_TEX_RELEASED_HOLD");
         long long v = s && *s ? atoll(s) : TRL_HOLD_S;
         rel_hold = v < 0 ? 0 : v > TRL_HOLD_MAX_S ? TRL_HOLD_MAX_S : (int)v;
         if (rel_hold)
             rt_log("vk: released textures go once unused for %d s, %d s for content only the GPU made "
-                   "(NX2NAVI_TEX_RELEASED_HOLD); young ones past the size bound stay while the card and the system "
+                   "(OOTPC_TEX_RELEASED_HOLD); young ones past the size bound stay while the card and the system "
                    "have room, up to %d times the bound", rel_hold, (int)trl_hold((uint32_t)rel_hold, TRL_GPU),
                    TRL_ROOM_TIMES);
         else
             rt_log("vk: released textures stay until the size bound or a pressure takes them "
-                   "(NX2NAVI_TEX_RELEASED_HOLD=0)");
+                   "(OOTPC_TEX_RELEASED_HOLD=0)");
     }
     return (uint32_t)rel_hold;
 }
@@ -2803,7 +2815,7 @@ static void drop_aged(void) {   // tex_lock held
     aged_at = e;
 }
 
-// NX2NAVI_TEX_EVICT (default on; 0 = only released entries go under VRAM pressure, as before): above the VRAM pressure
+// OOTPC_TEX_EVICT (default on; 0 = only released entries go under VRAM pressure, as before): above the VRAM pressure
 // threshold, once the released entries that come back intact are gone, live entries go too, least recently looked up
 // first: those that come back intact and that no lookup reached for IDLE_ROUNDS pool walks and STALE_FRAMES presents
 // (touch: no live descriptor names them). A later lookup creates the image again and uploads it from its storage, as
@@ -2862,7 +2874,7 @@ static uint64_t evict_idle(uint64_t want, uint64_t used, uint64_t budget, int wh
     return freed;
 }
 
-// ---- disuse (NX2NAVI_TEX_DISUSE, default on; vk_pipeline.c "texture pool marks", vk_exec_draw.c "pool marks")
+// ---- disuse (OOTPC_TEX_DISUSE, default on; vk_pipeline.c "texture pool marks", vk_exec_draw.c "pool marks")
 // Ocarina keeps the textures of the areas it has loaded registered in the pool, and the pool refresh looks every
 // registered slot up, so idle (above) never holds for them, and their memory, which the driver charges to the system's
 // commit, only grew. Marked shaders tell which slots they sample: vk_pool_marks_read sets samp_frame of the texture of
@@ -2879,7 +2891,7 @@ static uint64_t evict_idle(uint64_t want, uint64_t used, uint64_t budget, int wh
 //    slot drops the hold and the next refresh makes the texture again, as does any other lookup.
 // An image freed at the eviction itself, as before, faulted the GPU once (a read of freed memory in a pass, 0.6.1.14)
 // without a path to it found in the code; the delay leaves no window in the pool sets, and the cancels count uses the
-// marks missed. NX2NAVI_TEX_DISUSE=2 retires and never destroys (stand-ins only, nothing freed): it tells the marks and
+// marks missed. OOTPC_TEX_DISUSE=2 retires and never destroys (stand-ins only, nothing freed): it tells the marks and
 // stand-ins from the freeing as the cause of a fault. Only while every module that indexes the pool was marked and two
 // reads arrived: an unmarked shader could sample what the marks call unused.
 // Two minutes, not the thirty seconds it was: a texture out of view that long and then seen again shows its stand-in
@@ -3016,19 +3028,19 @@ static int shared_address(const Tex *e) {
     return 0;
 }
 
-// NX2NAVI_TEX_DISUSE_EVICT (default 0; 1 = textures no shader sampled for a while are retired under pressure, as
+// OOTPC_TEX_DISUSE_EVICT (default 0; 1 = textures no shader sampled for a while are retired under pressure, as
 // before). Off since players' ground went flat and see-through after such evictions and stayed so (Hyrule Field, Lon
 // Lon Ranch; 1,441 retired on arriving in a village, 82 back): with the eviction off the same play kept its ground,
 // and neither of the two holes closed in the way back (shared_address, the hold drop in vk_pool_marks_read) acted
 // in the session that still lost it. What takes the retired texture's place for good is not known yet; a draw that
 // samples the stand-in once into a picture the game keeps would do it, and no mark can undo that. The shaders keep
-// their marks (NX2NAVI_TEX_DISUSE), so turning this on changes no pipeline. Released textures and the idle ones the
+// their marks (OOTPC_TEX_DISUSE), so turning this on changes no pipeline. Released textures and the idle ones the
 // game no longer names still give way under pressure.
 static int disuse_evict_on(void) {
     static int on = -1;
     if (on < 0) {
         on = rt_knob("TEX_DISUSE_EVICT", "0") == 1;
-        rt_log("vk: textures no shader sampled for a while %s under pressure (NX2NAVI_TEX_DISUSE_EVICT)",
+        rt_log("vk: textures no shader sampled for a while %s under pressure (OOTPC_TEX_DISUSE_EVICT)",
                on ? "are retired" : "stay");
     }
     return on;
@@ -3142,7 +3154,7 @@ static void slots_text(char *out, size_t n, const Tex *e) {
              n_own, n_own ? own : " none", n_show, n_show ? show : " none", n_other, n_other ? other : " none");
 }
 
-// NX2NAVI_TRACE=perf, from vk_pool_marks_read: a shader sampled slot id, and nothing has ever put content into e, the
+// OOTPC_TRACE=perf, from vk_pool_marks_read: a shader sampled slot id, and nothing has ever put content into e, the
 // entry the slot shows or one credited with the mark (no_content): the picture drawn through it is an empty or
 // undefined image, which nothing else reports. One line per entry and up to MARK_LINES per address (said_at); the
 // marked slots that met such an entry are counted in the texture origins line whether or not a line was written.
@@ -3248,10 +3260,10 @@ void vk_pool_marks_read(const uint32_t *marks, uint32_t n) {
     unlock();
 }
 
-// NX2NAVI_TEX_COMMIT_EVICT (default on; 0 = off): while the commit is low (commit_is_low), idle live textures go as
+// OOTPC_TEX_COMMIT_EVICT (default on; 0 = off): while the commit is low (commit_is_low), idle live textures go as
 // under VRAM pressure (evict_idle), COMMIT_EVICT_STEP at a time, once the released entries gave what they could: they
 // are down to COMMIT_LOW_KEEP, or drop_stale found less than a full step to drop. The driver charges device memory to
-// the commit too, and the eviction above starts only at NX2NAVI_TEX_VRAM_PRESSURE of the device's budget: on a 16-32 GB
+// the commit too, and the eviction above starts only at OOTPC_TEX_VRAM_PRESSURE of the device's budget: on a 16-32 GB
 // card the textures of every area visited stayed until the commit ran out (27-37 GB processes, then a failed
 // allocation or a device lost, #177 #203 #215), as nothing else gave them back while they stayed below that share of
 // the video memory. Waiting for the released entries to be down to COMMIT_LOW_KEEP, as before, never ended where the
@@ -3314,15 +3326,15 @@ static void rel_census(uint64_t cap) {   // tex_lock held
 
 static void sweep_pressure(void) {   // tex_lock held
     if (vram_pressure < 0) {
-        const char *s = cfg_get("NX2NAVI_TEX_VRAM_PRESSURE");
+        const char *s = cfg_get("OOTPC_TEX_VRAM_PRESSURE");
         vram_pressure = s && *s ? atoi(s) : VRAM_PRESSURE_DEFAULT;
         if (vram_pressure < 0 || vram_pressure > 100) vram_pressure = VRAM_PRESSURE_DEFAULT;
         tex_evict = rt_knob("TEX_EVICT", "1");
         rt_log("vk: textures under VRAM pressure: %s%d%%%s", vram_pressure ? "dropped above " : "off", vram_pressure,
-               !vram_pressure ? "" : tex_evict ? ", released ones first, then idle live ones (NX2NAVI_TEX_EVICT=0: released only)"
-                                               : ", released ones only (NX2NAVI_TEX_EVICT=0)");
+               !vram_pressure ? "" : tex_evict ? ", released ones first, then idle live ones (OOTPC_TEX_EVICT=0: released only)"
+                                               : ", released ones only (OOTPC_TEX_EVICT=0)");
         if (vram_pressure > 87)
-            rt_log("vk: NX2NAVI_TEX_VRAM_PRESSURE=%d is above the seven eighths of the budget past which a new VRAM "
+            rt_log("vk: OOTPC_TEX_VRAM_PRESSURE=%d is above the seven eighths of the budget past which a new VRAM "
                    "mirror is refused: textures make room only once a mirror was refused", vram_pressure);
     }
     retire_sweep();
@@ -3351,7 +3363,7 @@ static void sweep_pressure(void) {   // tex_lock held
         // Released entries that come back intact, by the rule drop_stale keeps: released STALE_FRAMES ago and reached by
         // no lookup since (idle). The game releases and takes back hundreds of textures a frame in towns, and the
         // release list is mostly those: dropped, each was made and uploaded again within frames and freed nothing.
-        // With the budget taken as 7.5 GiB (NX2NAVI_VRAM_BUDGET_MB), teleports from Hyrule Field through Kakariko
+        // With the budget taken as 7.5 GiB (OOTPC_VRAM_BUDGET_MB), teleports from Hyrule Field through Kakariko
         // Village, the Graveyard, Death Mountain Trail and Kokiri Forest dropped 82,288 under the pressure and the card
         // stayed over its budget throughout; with this rule 34,699 went, a fifth fewer textures were made again, the
         // render thread waited a third less on textures, and 4 draws met a texture gone where 11 had.
@@ -3394,7 +3406,7 @@ static void sweep_pressure(void) {   // tex_lock held
 // ---------------------------------------------------------------- per-frame texture work (vk.h VK_TS_*)
 // Sums for the frame being made, by the render and replay threads (atomics: both may add at once). vk_texstat_frame,
 // called at each present (perf.c ft_frame), takes them; a frame whose texture work (creation, upload and upload flush)
-// reaches NX2NAVI_TEXUP_LOG_MS gets a "texup:" line, so an area change's hitch shows where its time went (default 0:
+// reaches OOTPC_TEXUP_LOG_MS gets a "texup:" line, so an area change's hitch shows where its time went (default 0:
 // no lines; 16 is a useful value).
 static volatile int64_t ts_ns[VK_TS_N], ts_n[VK_TS_N], ts_bytes[VK_TS_N];
 static int ts_log_ms = -1;
@@ -3421,7 +3433,7 @@ static void compact_frame_time(uint64_t d);
 void vk_texstat_frame(uint64_t frame, uint64_t d) {
     if (compact_on()) compact_frame_time(d);
     if (ts_log_ms < 0) {
-        ts_log_ms = cfg_int("NX2NAVI_TEXUP_LOG_MS");
+        ts_log_ms = cfg_int("OOTPC_TEXUP_LOG_MS");
         if (ts_log_ms < 0) ts_log_ms = 0;
     }
     int64_t ns[VK_TS_N], n[VK_TS_N], b[VK_TS_N];
@@ -3471,7 +3483,7 @@ static void shrink_rgb(int format, const uint8_t *src, uint8_t *dst, size_t n) {
     for (size_t i = 0; i < n; i++, src += 4 * e, dst += 3 * e) memcpy(dst, src, 3 * e);
 }
 
-// NX2NAVI_ASTC=check: the compute decoder's texels of n regions (gpu: the regions one after the other) against
+// OOTPC_ASTC=check: the compute decoder's texels of n regions (gpu: the regions one after the other) against
 // astc_decode_ldr of the same raw blocks (raw: the staging bytes the regions point into).
 static void astc_check(const Tex *e, const uint8_t *raw, const VkAstcRegion *ar, int n, const uint8_t *gpu) {
     static volatile int32_t n_bad;
@@ -3511,7 +3523,7 @@ static void astc_check(const Tex *e, const uint8_t *raw, const VkAstcRegion *ar,
                (unsigned long long)n_texels, (unsigned long long)n_diff_tex);
 }
 
-// Staging bytes of one part of a texture upload decoded or copied on the CPU (see upload). With NX2NAVI_ASTC=cpu a
+// Staging bytes of one part of a texture upload decoded or copied on the CPU (see upload). With OOTPC_ASTC=cpu a
 // large ASTC array decodes to RGBA8 in one go: a staging buffer of 676682336 bytes failed (-2) on an Intel UHD with
 // 8 GB of shared memory and the game closed before the title screen.
 #define UPLOAD_PART (32ull << 20)   // fits the staging pool (vk_staging takes up to half of its 64 MiB block)
@@ -3522,7 +3534,7 @@ static void astc_check(const Tex *e, const uint8_t *raw, const VkAstcRegion *ar,
 // costs a staging buffer, a copy and a barrier, several microseconds, where hashing 1.5 KiB takes a fraction of one.
 // A CPU write during the hash sets the pages' write bits again, so the next check sees it.
 //
-// NX2NAVI_TEX_SAME_BIG=1 (default 0; ab): textures up to CHASH_BIG_MAX keep the hash too. While the player runs through
+// OOTPC_TEX_SAME_BIG=1 (the default; 0 off; ab): textures up to CHASH_BIG_MAX keep the hash too. While the player runs through
 // a town the game moves about 32 textures to new storage every four or five frames, back to back in one block, and a
 // frame after their first upload every page of the block shows a write again. Of the ones the hash covers, 0 to 4 in a
 // hundred are uploaded again (128x128, 171x171, 256x256 BC1: 9 of 440 in one recording of 600 frames); of the others,
@@ -3536,6 +3548,11 @@ static void astc_check(const Tex *e, const uint8_t *raw, const VkAstcRegion *ar,
 // frame, and that has not been measured in play. A texture the CPU really rewrites would pay the hash for nothing each
 // time: after CHASH_MISSES comparisons in a row that found other bytes its uploads take no hash any more. An area load
 // takes none either (vk_exec_pool_loading): it uploads gigabytes in a few frames.
+// On since 2026-11-17: after Hyrule Field and Kokiri Forest, Lake Hylia re-uploaded 155 textures a second (457 MiB,
+// their ASTC decoded and encoded again on the GPU), the upload batches took 8 to 9.5 ms of GPU time a frame, some single
+// ones 83 ms, and the area ran at 27 to 45 fps with stalls of 90 to 150 ms (RTX 3080 class, 10 GiB). With the hash 709
+// of them a second (212 MiB) were found unchanged and left as they were, no re-upload remained, the upload batches took
+// 0.5 ms a frame and the same route ran Lake Hylia at 52 fps.
 // The pool log's buckets line counts the comparisons and the hashed bytes.
 enum { CHASH_MAX = 64 << 10, CHASH_BIG_MAX = 8 << 20, CHASH_MISSES = 2 };
 static uint64_t content_hash(const void *p, uint64_t n) {
@@ -3576,14 +3593,14 @@ static uint64_t content_hash(const void *p, uint64_t n) {
 // copy, and the decoder reads each block from its block-linear place (VkAstcRegion.bl, astc_decode.comp bl_block).
 // The CPU deswizzle moved every 16 bytes through the GOB arithmetic and was most of an ASTC upload's CPU time when an
 // area loads. Fills ar (n = levels * layers, level-major as upload's regions) and returns 1 when every level and layer
-// qualifies: block-linear, starting 16-byte aligned, its layout inside the storage. NX2NAVI_ASTC_GPU_DESWIZZLE=0 keeps
+// qualifies: block-linear, starting 16-byte aligned, its layout inside the storage. OOTPC_ASTC_GPU_DESWIZZLE=0 keeps
 // the CPU deswizzle. levels counts the image's levels: level lv of the image is the game's level lv + skip (texture
 // detail), which is where its blocks lie and what its size is.
 static int astc_bl_regions(const Tex *e, uint32_t levels, uint32_t layers, int bw, int bh, VkAstcRegion *ar) {
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_ASTC_GPU_DESWIZZLE");
-        if (!on) rt_log("vk: ASTC blocks deswizzled on the CPU (NX2NAVI_ASTC_GPU_DESWIZZLE=0)");
+        on = cfg_bool("OOTPC_ASTC_GPU_DESWIZZLE");
+        if (!on) rt_log("vk: ASTC blocks deswizzled on the CPU (OOTPC_ASTC_GPU_DESWIZZLE=0)");
     }
     const nvn_texdesc *d = &e->t.d;
     if (!on || nvn_tex_is_linear(d)) return 0;
@@ -3604,7 +3621,7 @@ static int astc_bl_regions(const Tex *e, uint32_t levels, uint32_t layers, int b
     return 1;
 }
 
-// NX2NAVI_ASTC_ARENA=1 (the default): the raw ASTC blocks for the GPU decoder stage in a
+// OOTPC_ASTC_ARENA=1 (the default): the raw ASTC blocks for the GPU decoder stage in a
 // range of the staging arena (vk_staging_at) like the other formats, not in a VkBuffer of their own. vk_astc_record
 // reads its source only through a buffer copy at each region's src, so the range's offset is added to the regions. A
 // buffer per texture cost a vmaCreateBuffer and, after the batch, a vmaDestroyBuffer each; an area load uploads
@@ -3614,8 +3631,8 @@ static int astc_bl_regions(const Tex *e, uint32_t levels, uint32_t layers, int b
 static int astc_arena(void) {
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_ASTC_ARENA");
-        rt_log("vk: ASTC blocks for the GPU decoder stage in %s (NX2NAVI_ASTC_ARENA=%d)",
+        on = cfg_bool("OOTPC_ASTC_ARENA");
+        rt_log("vk: ASTC blocks for the GPU decoder stage in %s (OOTPC_ASTC_ARENA=%d)",
                on ? "the staging arena" : "a buffer per texture", on);
     }
     return on;
@@ -3703,12 +3720,12 @@ static int astc_copy_opaque(const Tex *e, uint8_t *dst, const uint8_t *src, uint
 }
 
 // Whether an upload of e takes the hash of its storage: always up to CHASH_MAX; above it, up to CHASH_BIG_MAX, with
-// NX2NAVI_TEX_SAME_BIG, outside an area load, and while the comparisons have not found other bytes CHASH_MISSES times
-// in a row ("NX2NAVI_TEX_SAME_BIG" above content_hash).
+// OOTPC_TEX_SAME_BIG, outside an area load, and while the comparisons have not found other bytes CHASH_MISSES times
+// in a row ("OOTPC_TEX_SAME_BIG" above content_hash).
 static int chash_wanted(const Tex *e) {
     static int mode = -1;
     if (e->t.L.size <= CHASH_MAX) return 1;
-    if (mode < 0) mode = rt_knob("TEX_SAME_BIG", "0");
+    if (mode < 0) mode = rt_knob("TEX_SAME_BIG", "1");
     return RT_KNOB_ON(mode) && e->t.L.size <= CHASH_BIG_MAX && e->chash_miss < CHASH_MISSES && !vk_exec_pool_loading();
 }
 
@@ -3830,7 +3847,7 @@ static void upload(Tex *e) {
         VkCommandBuffer cb = vk_upload_begin();
         // The part stages in a range of the staging arena (vk_staging_at, its offset added to the regions below), or in
         // a buffer of its own at offset 0 when larger than an arena range; the GPU decoder takes one with
-        // NX2NAVI_ASTC_ARENA=0 or in the check mode (astc_arena).
+        // OOTPC_ASTC_ARENA=0 or in the check mode (astc_arena).
         VkDeviceSize soff = 0;
         uint64_t s0 = kern_now_ns();
         uint8_t *stg = agpu && (acheck || !astc_arena()) ? vk_staging(size, &sb, NULL) : vk_staging_at(size, &sb, &soff);
@@ -3989,9 +4006,77 @@ static void upload(Tex *e) {
     } else {
         e->up_retry = 0;
     }
+    if (!no_mem && !(agpu && checked <= 0)) world_apply(e);
     perf_end(PERF_TEX, p0);
     vk_texstat_time(VK_TS_UPLOAD, u0);
     vk_texstat_add(VK_TS_UPLOAD, 0, src_bytes);
+}
+
+// ---- N64 world textures (N64 Graphics' N64_WORLD part, vk_n64world.h)
+// After each upload of a texture world.bin names, the N64 texture of its category in the area now is written over its
+// image in the same upload batch; the storage stays the game's. The textures it named are listed (w64_list): when the
+// part is switched or the area changes (n64world_state), world_refresh uploads each again from its storage, and the
+// upload writes the N64 texture of the new state over it, or leaves the remake's.
+static Tex **w64_list;
+static int w64_n, w64_cap;
+static uint32_t w64_seen;
+
+static void w64_unlist(Tex *e) {
+    for (int i = 0; i < w64_n; i++)
+        if (w64_list[i] == e) {
+            w64_list[i] = w64_list[--w64_n];
+            break;
+        }
+    e->w64_listed = 0;
+}
+
+static void world_apply(Tex *e) {
+    if (!e->w64) e->w64 = vk_n64world_match(&e->pub, &e->t);
+    if (e->w64 <= 0) return;
+    int entry = e->w64 - 1;
+    if (!e->w64_listed) {
+        if (w64_n == w64_cap) {
+            int cap = w64_cap ? 2 * w64_cap : 256;
+            Tex **p = realloc(w64_list, (size_t)cap * sizeof *p);
+            if (!p) return;
+            w64_list = p, w64_cap = cap;
+        }
+        w64_list[w64_n++] = e, e->w64_listed = 1;
+    }
+    if (!e->w64_opq && vk_n64world_needs_opacity(entry)) {
+        int bc1 = e->pub.format >= VK_FORMAT_BC1_RGB_UNORM_BLOCK && e->pub.format <= VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+        int bc3 = e->pub.format == VK_FORMAT_BC3_UNORM_BLOCK || e->pub.format == VK_FORMAT_BC3_SRGB_BLOCK;
+        int op = bc1 ? 1
+               : e->f.astc_bw ? astc_opaque(&e->t, e->pub.addr, &e->f)
+               : bc3 ? vk_n64world_bc3_opaque(&e->t, e->pub.addr)
+               : 0;
+        e->w64_opq = op ? 1 : 2;
+    }
+    e->w64_state = n64world_state();
+    e->w64_wrote = (uint8_t)vk_n64world_apply(&e->pub, &e->t, &e->f, entry, e->w64_opq == 1);
+}
+
+// Each submission, texture lock held: the part or the area changed since the last look.
+static void world_refresh(void) {
+    if (!w64_n) return;
+    uint32_t st = n64world_state();
+    if (st == w64_seen) return;
+    w64_seen = st;
+    int again = 0;
+    for (int i = 0; i < w64_n; i++) {
+        Tex *e = w64_list[i];
+        if (e->w64_state == st) continue;
+        // an image that holds the storage's content and would keep it needs nothing
+        if (!e->w64_wrote && !vk_n64world_wants(e->w64 - 1, e->w64_opq == 1, &e->pub, &e->f)) {
+            e->w64_state = st;
+            continue;
+        }
+        if (e->released || e->retiring || !e->uploaded || e->pub.gpu_owned || e->sfill) continue;
+        upload(e);
+        again++;
+    }
+    rt_log("n64: world: %d of %d listed textures uploaded again for %s", again, w64_n,
+           st ? n64world_area() : "the remake's own textures");
 }
 
 // Whether e's storage fills no 4 KiB page of its own, so the write tracking can only see writes to pages it shares.
@@ -4000,18 +4085,18 @@ static int fills_no_page(const Tex *e) {
 }
 
 // A texture that fills no page keeps a copy of its storage bytes from when a GPU write to it was recorded
-// (vk_texture_gpu_written), up to SNAP_MAX bytes; wb_exact (NX2NAVI_WB_EXACT, default on) enables it.
+// (vk_texture_gpu_written), up to SNAP_MAX bytes; wb_exact (OOTPC_WB_EXACT, default on) enables it.
 enum { SNAP_MAX = 4096 };
 static int wb_exact = -1;
 static volatile int32_t n_kept;
 
 // vk_mem_changed over the pages wholly inside e's storage (all of its pages when it fills none): a neighbour that shares
 // the first or last page does not count as a write to e. A texture that fills no page shares all of its pages, so
-// there a page write counts only when e's own bytes differ from the copy taken at the GPU write. NX2navi's Purah Pad
+// there a page write counts only when e's own bytes differ from the copy taken at the GPU write. OOT-PC's Purah Pad
 // camera renders the ID, screen rect and depth of what is under the reticle into 4x4 targets of 512 bytes, two
 // slots used in turn, and the CPU reads them a frame later. One slot's rect target shares its page with data the CPU
 // writes every frame: without the copy its renders were never written back, the game read a zero rect every other
-// frame and the target's name label blinked. NX2NAVI_WB_EXACT=0 restores the page-only decision.
+// frame and the target's name label blinked. OOTPC_WB_EXACT=0 restores the page-only decision.
 static int storage_rewritten(const Tex *e, uint32_t since, uint32_t *now) {
     uint64_t lo = (e->pub.addr + 0xfff) & ~0xfffull, hi = (e->pub.addr + e->t.L.size) & ~0xfffull;
     if (hi <= lo) lo = e->pub.addr, hi = e->pub.addr + e->t.L.size;
@@ -4026,8 +4111,8 @@ static int storage_rewritten(const Tex *e, uint32_t since, uint32_t *now) {
 // The pages of an uploaded texture show a write (or are not tracked): whether its own bytes are still those it was
 // uploaded with (upload, content_hash). WriteTexels since the upload always counts as a change.
 static int same_content(Tex *e) {
-    static int on = -1;   // NX2NAVI_TEX_SAME=0: every write to the pages uploads again (diagnosis)
-    if (on < 0) { const char *v = cfg_get("NX2NAVI_TEX_SAME"); on = !(v && !strcmp(v, "0")); }
+    static int on = -1;   // OOTPC_TEX_SAME=0: every write to the pages uploads again (diagnosis)
+    if (on < 0) { const char *v = cfg_get("OOTPC_TEX_SAME"); on = !(v && !strcmp(v, "0")); }
     if (!on || !e->chash_ok || e->wt_n) return 0;   // chash_ok: the upload took the hash (chash_wanted)
     if (!mem_read_hold(e->pub.addr, e->t.L.size)) return 0;   // unmapped since: not the same; the upload deals with it
     uint64_t h = content_hash((const void *)(uintptr_t)e->pub.addr, e->t.L.size);
@@ -4076,7 +4161,7 @@ static void make_fresh_snap(Tex *e) {
     if (ch && !same_content(e)) upload(e);
 }
 
-// ---------------------------------------------------------------- aliases (NX2NAVI_TEX_ALIAS)
+// ---------------------------------------------------------------- aliases (OOTPC_TEX_ALIAS)
 // Bytes per block and block size of the image's VkFormat (ASTC decodes to RGBA8, RGB expands to RGBA); 0 when the
 // VkFormat substitutes another one of unknown size.
 static int img_block(const Tex *e, int *bw, int *bh) {
@@ -4199,7 +4284,7 @@ static void create_failed(const TexKey *k) {
     failed_hold[i].k = *k, failed_hold[i].until_ns = plat_now_ns() + 2000000000ull;
 }
 
-// NX2NAVI_TRACE=perf: a line for each event of the two kinds that can leave a descriptor showing an image without
+// OOTPC_TRACE=perf: a line for each event of the two kinds that can leave a descriptor showing an image without
 // content, up to START_LINES per address and kind (said_at).
 //  - over: e, which the CPU writes, was made over the live entry `over` and is filled from its storage. `over` stays
 //    as it is, and a slot that names its descriptor goes on showing it, whatever it holds.
@@ -4254,7 +4339,7 @@ static int split_fill(Tex *e) {
     return 1;
 }
 
-static int depth_alias_log(void) {   // NX2NAVI_DEPTH_ALIAS_LOG=1: start_at logs each new depth entry over a live texture
+static int depth_alias_log(void) {   // OOTPC_DEPTH_ALIAS_LOG=1: start_at logs each new depth entry over a live texture
     static int on = -1;
     if (on < 0) on = rt_knob("DEPTH_ALIAS_LOG", "0");
     return on;
@@ -4467,7 +4552,7 @@ static Tex *entry_of(const tex_t *t) {
         if (held_out(&k) || create_held(&k)) return NULL;
         uint64_t c0 = kern_now_ns();   // the entry's creation (VK_TS_CREATE): image, memory, first transition
         if (tex_alias < 0) {
-            tex_alias = cfg_bool("NX2NAVI_TEX_ALIAS");
+            tex_alias = cfg_bool("OOTPC_TEX_ALIAS");
             rt_log("vk: texture aliases: %s", tex_alias ? "a new image takes the live image's content" : "a new image starts empty");
         }
         if (!(e = create_tex(t, &k, tex_alias))) return create_failed(&k), NULL;
@@ -4528,9 +4613,9 @@ const VkTexImage *vk_texture_get(const tex_t *t) {
 }
 
 // Render targets the CPU reads without NVN's invalidate (vk_texture_write_back_small); small_pending: one may be dirty.
-// wb_limit: targets up to this size (bytes) always go back when the CPU waits for a fence, NX2NAVI_WB_FENCE_LIMIT, read
+// wb_limit: targets up to this size (bytes) always go back when the CPU waits for a fence, OOTPC_WB_FENCE_LIMIT, read
 // once. A larger one goes back unless the GPU wrote it in each of the last WB_RUN frames (wb_wanted). wb_trace:
-// NX2NAVI_TRACE=gfx, read together with it.
+// OOTPC_TRACE=gfx, read together with it.
 enum { WB_SMALL_DEFAULT = 64 << 10, WB_RUN = 16 };
 static int small_pending;
 static uint64_t wb_limit = WB_SMALL_DEFAULT;
@@ -4539,7 +4624,7 @@ static int wb_cfg_read;
 
 static void wb_cfg_init(void) {
     if (wb_cfg_read) return;
-    int v = cfg_int("NX2NAVI_WB_FENCE_LIMIT");
+    int v = cfg_int("OOTPC_WB_FENCE_LIMIT");
     wb_limit = v < 0 ? 0 : (uint64_t)v;
     wb_trace = (rt_trace & RT_TRACE_GFX) != 0;
     wb_cfg_read = 1;
@@ -4548,7 +4633,7 @@ static void wb_cfg_init(void) {
 
 // Whether the fence write-back takes a dirty target. A target the GPU draws every frame is scratch the CPU does not
 // read: in Hyrule Field three 256x256 RGBA8 targets and a 256x256 RG8 one, which cost 2.7 ms a frame to write back.
-// NX2navi's 260x260 RG8 grass maps, which its fire spread reads after a fence wait (#132), are drawn once per change, or
+// OOT-PC's 260x260 RG8 grass maps, which its fire spread reads after a fence wait (#132), are drawn once per change, or
 // up to 9 frames in a row while a tile loads.
 static int wb_wanted(const Tex *e) { return e->t.L.size <= wb_limit || e->run < WB_RUN; }
 
@@ -4609,7 +4694,7 @@ void vk_texture_gpu_written(const tex_t *t) {
         if (e->pub.mirrored) {
             e->gpu_dirty = 1;
             storage_rewritten(e, 0, &e->gpu_gen);   // CPU writes up to here are older than this render
-            if (wb_exact < 0) wb_exact = cfg_bool("NX2NAVI_WB_EXACT");
+            if (wb_exact < 0) wb_exact = cfg_bool("OOTPC_WB_EXACT");
             if (wb_exact && !e->snap && e->t.L.size <= SNAP_MAX && fills_no_page(e) && !(e->snap = malloc(SNAP_MAX)))
                 rt_fatal("vk: out of memory for a texture's storage copy");
             if (e->snap) memcpy(e->snap, (const void *)(uintptr_t)e->pub.addr, e->t.L.size);
@@ -4781,7 +4866,7 @@ static int want_take(void) {
 
 void vk_texture_create_budget_locked(int n) { create_budget = n, create_deferred = 0; }
 
-// NX2NAVI_POOL_SHOWN_FIRST (default 1; 0: such a slot waits for the budget like any other): the slot being looked up
+// OOTPC_POOL_SHOWN_FIRST (default 1; 0: such a slot waits for the budget like any other): the slot being looked up
 // shows a texture in the pool's set now (vk_exec_draw.c pool_fill), or the game has registered it since its last
 // lookup that found a texture (TexSlot.fresh). When its own texture is not made, the game has registered the slot
 // with another texture and draws with it next: it is made at this lookup, beside the count budget and the frame's
@@ -4802,7 +4887,7 @@ static int shown_take(const TexSlot *s) {
     static int on = -1;
     static uint64_t frame = ~0ull;
     static int left;
-    if (on < 0) on = cfg_bool("NX2NAVI_POOL_SHOWN_FIRST");
+    if (on < 0) on = cfg_bool("OOTPC_POOL_SHOWN_FIRST");
     if (!on || !(pool_shown || s->fresh)) return 0;
     uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
     if (f != frame) frame = f, left = SHOWN_PER_FRAME;
@@ -4816,7 +4901,7 @@ uint64_t vk_texture_pool_make_ns_take(void) { return __atomic_exchange_n(&pool_m
 static void pool_made(uint64_t t0) { __atomic_fetch_add(&pool_make_ns, kern_now_ns() - t0, __ATOMIC_RELAXED); }
 int vk_texture_create_deferred_locked(void) { int d = create_deferred; create_deferred = 0; return d; }
 
-// NX2NAVI_TEX_STALE_KEPT (default 1; 0: the stand-in, as before): a finalized slot of a CPU-written texture resolves to
+// OOTPC_TEX_STALE_KEPT (default 1; 0: the stand-in, as before): a finalized slot of a CPU-written texture resolves to
 // its own entry while that entry holds the texture's content: uploaded or drawn by the GPU, and neither superseded by
 // another descriptor at its address nor overwritten. The game finalizes texture objects on its own thread ahead of the
 // replay, which still draws the frame the game recorded before that; on the console the memory still holds the texels
@@ -4830,7 +4915,7 @@ static int stale_kept(const Tex *own) {
     return on && own && !own->superseded && !own->overwritten && (own->uploaded || own->pub.gpu_owned);
 }
 
-// NX2NAVI_POOL_DATA_FIRST (default 1; 0: it waits for the budget like any other): a slot of a texture that is not
+// OOTPC_POOL_DATA_FIRST (default 1; 0: it waits for the budget like any other): a slot of a texture that is not
 // block-compressed and holds at most DATA_FIRST_BYTES is made at its lookup too, beside the count budget and the
 // frame's creation time, DATA_PER_FRAME of them a present. The budget exists for the pictures the game streams, ASTC
 // that has to be decoded; a plain-format texture is as often the game's data (a terrain height map, a lookup table,
@@ -4842,7 +4927,7 @@ static int data_take(const TexSlot *s) {
     static int on = -1;
     static uint64_t frame = ~0ull;
     static int left;
-    if (on < 0) on = cfg_bool("NX2NAVI_POOL_DATA_FIRST");
+    if (on < 0) on = cfg_bool("OOTPC_POOL_DATA_FIRST");
     if (!on || s->t.L.size > DATA_FIRST_BYTES) return 0;
     int bw = 1, bh = 1;
     if (!nvn_fmt_bpb(s->t.d.format, &bw, &bh) || bw > 1 || bh > 1) return 0;   // unknown or block-compressed
@@ -5003,13 +5088,13 @@ void vk_texture_bucket_stats(char *out, size_t n) {
     if (used < n)
         snprintf(out + used, n - used, "; pool freshness check: %llu entries checked, %llu passed by their regions (missed: "
                  "%llu not uploaded, %llu a region without a snapshot yet, %llu untracked, %llu written since, %llu "
-                 "nothing to check; %llu snapshot queries of NX2NAVI_POOL_PRESNAP; %llu released entries passed by)",
+                 "nothing to check; %llu snapshot queries of OOTPC_POOL_PRESNAP; %llu released entries passed by)",
                  (unsigned long long)n_pool_checks, (unsigned long long)n_pool_skips,
                  (unsigned long long)n_pool_miss[0], (unsigned long long)n_pool_miss[1],
                  (unsigned long long)n_pool_miss[2], (unsigned long long)n_pool_miss[3],
                  (unsigned long long)n_pool_miss[4], (unsigned long long)n_presnap_q, (unsigned long long)n_pool_rel);
     used = strlen(out);
-    if (used < n && big_hash_n + big_same_n + big_diff_n)   // NX2NAVI_TEX_SAME_BIG
+    if (used < n && big_hash_n + big_same_n + big_diff_n)   // OOTPC_TEX_SAME_BIG
         snprintf(out + used, n - used, "; textures over 64 KiB: %llu uploads hashed (%.1f MiB), after a write to their "
                  "pages %llu left as they were (%.1f MiB), %llu uploaded again",
                  (unsigned long long)big_hash_n, big_hash_bytes / 1048576.0, (unsigned long long)big_same_n,
@@ -5168,6 +5253,7 @@ void vk_texture_new_submit(void) {
     round_checks = 0, pool_by_list = 0;
     if (!++submit_epoch) submit_epoch = 1;
     rate_tick();
+    world_refresh();
     sweep_pressure();
     if (compact_on()) compact_step();
     static uint64_t log_at;
@@ -5239,7 +5325,7 @@ void vk_texture_new_submit(void) {
         n_mark_empty = n_mark_none = n_drop_wb = 0;
         rt_log("perf: frame %llu: texture finalizes: slots marked %llu; slots of another live texture with the same "
                "parameters at the storage, left current %llu (terrain heightmaps %llu); lookups the stale rule gave the "
-               "stand-in %llu (terrain heightmaps %llu), their own kept image %llu (NX2NAVI_TEX_STALE_KEPT)",
+               "stand-in %llu (terrain heightmaps %llu), their own kept image %llu (OOTPC_TEX_STALE_KEPT)",
                (unsigned long long)f * 60, (unsigned long long)n_fin_own, (unsigned long long)n_fin_other, (unsigned long long)n_fin_other_hm,
                (unsigned long long)n_stale, (unsigned long long)n_stale_hm, (unsigned long long)n_stale_kept);
         n_fin_own = n_fin_other = n_fin_other_hm = n_stale = n_stale_hm = n_stale_kept = 0;
@@ -5511,7 +5597,7 @@ void vk_write_texels(const tex_t *t, const view_t *v, const NVNcopyRegion *r, co
 
 // ---------------------------------------------------------------- CPU reads of GPU-written storage
 // A mirrored texture the GPU rendered into holds its texels in its image only; its storage keeps what the CPU last put
-// there. The game may still read that storage with the CPU: NX2navi moves its generated grass maps between pools with
+// there. The game may still read that storage with the CPU: OOT-PC moves its generated grass maps between pools with
 // memcpy once the GPU is done, and the copy then carried zeros. Such a read writes the image back first.
 //
 // Every level and layer of every texture in v is copied to staging in one upload batch with one wait: one GPU round
@@ -5625,7 +5711,7 @@ uint64_t vk_texture_dirty_fence(uint64_t addr, uint64_t size) {
     return f;
 }
 
-// The image is the newest content only while nothing wrote the storage since the GPU render: NX2navi finalizes grass maps,
+// The image is the newest content only while nothing wrote the storage since the GPU render: OOT-PC finalizes grass maps,
 // reuses their storage for new data and memcpys that data on, and writing the old image back first handed the copy
 // a stale map or stale resource bytes (wrong textures in the distance). Every hit is checked before any is written
 // back, since a write-back is itself a CPU write to storage another hit may share; the hits then go back oldest render
@@ -5652,7 +5738,7 @@ void vk_texture_write_back(uint64_t addr, uint64_t size) {
     unlock();
 }
 
-// NX2navi's grass system renders a 128x128 RGBA8 map of cut and trampled grass into a CPU-cached pool every frame and its
+// OOT-PC's grass system renders a 128x128 RGBA8 map of cut and trampled grass into a CPU-cached pool every frame and its
 // CPU code reads the pool bytes without nvnMemoryPoolInvalidateMappedRange (cut reactions: blades, insects, the cut
 // itself). On the Switch the bytes are there once the frame's fence has passed. So when the
 // CPU waits for a fence, mirrored targets rendered by work up to that fence go back to their storage (wb_wanted:
@@ -5660,7 +5746,7 @@ void vk_texture_write_back(uint64_t addr, uint64_t size) {
 // still go back on an invalidate, memcpy or ReadTexels.
 int vk_texture_small_dirty(void) { return __atomic_load_n(&small_pending, __ATOMIC_ACQUIRE); }
 
-// NX2NAVI_TRACE=gfx: a dirty target the fence write-back leaves alone because it is over the limit and drawn every frame
+// OOTPC_TRACE=gfx: a dirty target the fence write-back leaves alone because it is over the limit and drawn every frame
 // (what a CPU read after the wait would miss), or sends back although it is over the default limit. One line per
 // target address and outcome; the table is small and a full one stops logging.
 static void wb_note(const Tex *e, int skipped) {
@@ -5739,11 +5825,24 @@ static VkCompareOp compare_op(uint32_t f) {
     }
 }
 
-static struct { int init, mirror_clamp_edge, minmax, border_no_format; float aniso; } sf;   // aniso: NX2NAVI_ANISO, 0 = the game's
+// aniso: OOTPC_ANISO, 0 = the game's. lod_bias: OOTPC_TEXTURE_LOD_BIAS, mip levels added on the surface textures.
+static struct { int init, mirror_clamp_edge, minmax, border_no_format; float aniso, lod_bias; } sf;
 
 static float aniso_setting(void) {
-    const char *an = cfg_value("NX2NAVI_ANISO");
+    const char *an = cfg_value("OOTPC_ANISO");
     return strcmp(an, "game") ? (float)atoi(an) : 0;
+}
+
+// OOTPC_TEXTURE_LOD_BIAS: 0 (the default) samples as the game asks. A positive value moves the surface textures (the
+// set dlss_biased names) that many mip levels toward the smaller ones: a blurrier picture, less texture memory traffic
+// per pixel, which a GPU short of memory bandwidth (an integrated one) feels. Kept within 0..4.
+static float lod_bias_setting(void) {
+    double b = cfg_double("OOTPC_TEXTURE_LOD_BIAS");
+    return b > 0 ? (float)(b < 4 ? b : 4) : 0;
+}
+
+static void lod_bias_log(void) {
+    if (sf.lod_bias > 0) rt_log("vk: texture LOD bias +%.2f on the surface textures (OOTPC_TEXTURE_LOD_BIAS)", sf.lod_bias);
 }
 
 static void aniso_log(void) {
@@ -5764,10 +5863,12 @@ static void sampler_features(VkCtx *c) {
     sf.border_no_format = c->has_custom_border_color && cbf.customBorderColors && cbf.customBorderColorWithoutFormat;
     sf.aniso = aniso_setting();
     aniso_log();
+    sf.lod_bias = lod_bias_setting();
+    lod_bias_log();
     sf.init = 1;
 }
 
-// NX2NAVI_ANISO raises the level for filtered, mipmapped colour samplers that repeat on U and V: the surface textures,
+// OOTPC_ANISO raises the level for filtered, mipmapped colour samplers that repeat on U and V: the surface textures,
 // which tile, so ground and walls seen at a shallow angle stay sharp into the distance. Depth-compare (shadow)
 // samplers, nearest or unmipmapped ones (data maps, LUTs) and clamped ones keep the game's level: clamped samplers
 // read screen-sized buffers, whose coordinates can stretch steeply at an object's edge, where anisotropic taps reach
@@ -5812,7 +5913,7 @@ static VkSampler make_sampler(VkCtx *c, const samp_par *d) {
     if (si.maxLod < si.minLod) si.maxLod = si.minLod;
     float lim = c->props.limits.maxSamplerLodBias;
     si.mipLodBias = fmaxf(-lim, fminf(lim, d->lod_bias));
-    // d->aniso holds NX2NAVI_ANISO's level where it applies (sampler_for, aniso_raised)
+    // d->aniso holds OOTPC_ANISO's level where it applies (sampler_for, aniso_raised)
     if (d->aniso > 1) {
         si.anisotropyEnable = VK_TRUE;
         si.maxAnisotropy = fminf(d->aniso, c->props.limits.maxSamplerAnisotropy);
@@ -5821,8 +5922,8 @@ static VkSampler make_sampler(VkCtx *c, const samp_par *d) {
         si.compareEnable = VK_TRUE;
         si.compareOp = compare_op(d->cmp_func);
         // A depth-compare sampler set to nearest returns 0 or 1 per tap, and the game's shaders smooth shadow edges by
-        // a few taps spaced for its own shadow map texels. With NX2NAVI_SHADOW_SCALE those taps cover a fraction of the
-        // area and the edges turn hard and stepped; linear filtering makes every tap a 2x2 PCF instead. NX2NAVI_SHADOW_PCF
+        // a few taps spaced for its own shadow map texels. With OOTPC_SHADOW_SCALE those taps cover a fraction of the
+        // area and the edges turn hard and stepped; linear filtering makes every tap a 2x2 PCF instead. OOTPC_SHADOW_PCF
         // does the same at the game's own map size (shadow_pcf).
         compare_sampler_note(d);
         if (shadow_scale() > 1 || shadow_pcf()) si.magFilter = si.minFilter = VK_FILTER_LINEAR;
@@ -5893,21 +5994,25 @@ void vk_sampler_dlss_bias(float b) {
     unlock();
 }
 
-// NX2NAVI_ANISO, read again at each present after a settings change (vk_backend.c present_image, beside the DLSS bias of
-// vk_dlaa_frame): the raised level is part of the sampler key (sampler_for), so on a change the slots look their
-// samplers up again and the descriptor caches follow samp_gen, as for vk_sampler_dlss_bias. The old level's samplers
-// stay until shutdown like every sampler: one set per level at most. Before the first sampler there is nothing to do:
-// sampler_features reads the setting then.
+// OOTPC_ANISO and OOTPC_TEXTURE_LOD_BIAS, read again at each present after a settings change (vk_backend.c
+// present_image, beside the DLSS bias of vk_dlaa_frame): the raised level and the added bias are part of the sampler
+// key (sampler_for), so on a change the slots look their samplers up again and the descriptor caches follow samp_gen,
+// as for vk_sampler_dlss_bias. The old samplers stay until shutdown like every sampler: one set per value at most.
+// Before the first sampler there is nothing to do: sampler_features reads the settings then.
 void vk_sampler_aniso_live(void) {
     static unsigned seen = ~0u;
     unsigned v = cfg_version();
     if (v == seen) return;
     seen = v;
     lock();
-    float a = aniso_setting();
-    if (sf.init && a != sf.aniso) {
-        sf.aniso = a;
-        aniso_log();
+    float a = aniso_setting(), b = lod_bias_setting();
+    if (sf.init && (a != sf.aniso || b != sf.lod_bias)) {
+        if (a != sf.aniso) sf.aniso = a, aniso_log();
+        if (b != sf.lod_bias) {
+            sf.lod_bias = b;
+            if (b > 0) lod_bias_log();
+            else rt_log("vk: texture LOD bias: the game's");
+        }
         for (int i = 0; i < nsslots; i++)   // looked up again (the key moves)
             sslots[i].s = sslots[i].sp = sslots[i].sc = sslots[i].sd[0] = sslots[i].sd[1] = VK_NULL_HANDLE;
         samp_gen++;
@@ -5922,6 +6027,7 @@ static VkSampler sampler_for(VkCtx *c, const samp_par *s) {
     memset(&k, 0, sizeof k);
     k = *s;
     if (dlss_bias != 0 && dlss_biased(&k)) k.lod_bias += dlss_bias;   // part of the key: samplers live until shutdown
+    if (sf.lod_bias != 0 && dlss_biased(&k)) k.lod_bias += sf.lod_bias;   // likewise (OOTPC_TEXTURE_LOD_BIAS)
     if (aniso_raised(&k)) k.aniso = sf.aniso;                          // likewise
     VkSampler v = (VkSampler)nvn_hm_get(&samplers, &k);
     if (!v) {
@@ -5971,13 +6077,13 @@ VkSampler vk_sampler_point_by_id_locked(int id) {
 // A depth-compare read through a sampler without a compare is undefined in Vulkan. NVIDIA's driver compares anyway; AMD's
 // returns the raw depth, so the game's shadow tests (which sample this way) come out wrong there. Such a read gets the
 // slot's sampler with the compare on: the game's function when it set a valid one, LEQUAL otherwise, as NVIDIA's driver
-// compares. NX2NAVI_SHADOW_COMPARE=0 binds the game's sampler as it is.
+// compares. OOTPC_SHADOW_COMPARE=0 binds the game's sampler as it is.
 VkSampler vk_sampler_compare_by_id_locked(int id) {
     VkCtx *c = vk_ctx();
     if (!c || id < 0 || id >= nsslots || !sslots[id].used) return VK_NULL_HANDLE;
     SampSlot *s = &sslots[id];
     static int on = -1;
-    if (on < 0) on = cfg_int("NX2NAVI_SHADOW_COMPARE") != 0;
+    if (on < 0) on = cfg_int("OOTPC_SHADOW_COMPARE") != 0;
     if (s->p.cmp_mode || !on) return vk_sampler_by_id_locked(id);
     if (!s->sc) {
         samp_par k = s->p;
@@ -6132,9 +6238,9 @@ static void compact_table(CompTable *t, const VkBlockRow *other, int nother, uin
     tcp_tally(t->b, t->nb, t->a, t->na);
 }
 
-// ---- the pass (NX2NAVI_TEX_COMPACT, default 0; read at start)
+// ---- the pass (OOTPC_TEX_COMPACT, default 1, a row of the Game tab's Performance group; 0 off; read at start)
 // With the setting on, the holes are closed by moving textures: every COMPACT_PERIOD presents, when the free space
-// inside the device-local blocks is at least NX2NAVI_TEX_COMPACT_MIN_MB (one block while the video memory in use is
+// inside the device-local blocks is at least OOTPC_TEX_COMPACT_MIN_MB (one block while the video memory in use is
 // above the VRAM pressure threshold), the block table is built and vk_tex_compact.h chooses the blocks to empty
 // (vk_texture_compact_plan, at a present). Each submission then takes a few of the listed textures (compact_step):
 //  - a released one the size cap would drop is dropped (drop_tex, DROP_COMPACT), as that rule does it;
@@ -6173,7 +6279,7 @@ static void compact_table(CompTable *t, const VkBlockRow *other, int nother, uin
 //  - a flat texture's 3D copy (flat3d) and a compute pass's depth twin (vk_exec_draw.c twin_update): images of their
 //    own, made from the entry's image when used; the copy keeps its content, the twin is copied again for each use.
 //
-// The work is bounded by the frame: COMPACT_FRAME_N textures and NX2NAVI_TEX_COMPACT_FRAME_MB of them per presented
+// The work is bounded by the frame: COMPACT_FRAME_N textures and OOTPC_TEX_COMPACT_FRAME_MB of them per presented
 // frame, none while the texture pool loads an area, while this frame already spent COMPACT_WORK_NS making or uploading
 // textures, or right after a frame that took a quarter longer than the frames before it (compact_slack). A texture
 // larger than the frame's bytes is not moved at all, so no frame copies more than that.
@@ -6226,14 +6332,14 @@ static struct {
 
 static int compact_on(void) {
     if (CP.on < 0) {
-        int mb = cfg_int("NX2NAVI_TEX_COMPACT_MIN_MB"), fmb = cfg_int("NX2NAVI_TEX_COMPACT_FRAME_MB");
+        int mb = cfg_int("OOTPC_TEX_COMPACT_MIN_MB"), fmb = cfg_int("OOTPC_TEX_COMPACT_FRAME_MB");
         CP.min_bytes = (uint64_t)(mb < 64 ? 64 : mb > 65536 ? 65536 : mb) << 20;
         CP.frame_bytes = (uint64_t)(fmb < 1 ? 1 : fmb > 32 ? 32 : fmb) << 20;
-        CP.on = cfg_bool("NX2NAVI_TEX_COMPACT") ? 1 : 0;
+        CP.on = cfg_bool("OOTPC_TEX_COMPACT") ? 1 : 0;
         if (CP.on)
-            rt_log("vk: texture compaction on (NX2NAVI_TEX_COMPACT): idle textures move out of sparsely used blocks of "
-                   "video memory once %llu MiB or more is free inside the blocks (NX2NAVI_TEX_COMPACT_MIN_MB), at most "
-                   "%d textures and %llu MiB a frame (NX2NAVI_TEX_COMPACT_FRAME_MB)", (unsigned long long)(CP.min_bytes >> 20),
+            rt_log("vk: texture compaction on (OOTPC_TEX_COMPACT): idle textures move out of sparsely used blocks of "
+                   "video memory once %llu MiB or more is free inside the blocks (OOTPC_TEX_COMPACT_MIN_MB), at most "
+                   "%d textures and %llu MiB a frame (OOTPC_TEX_COMPACT_FRAME_MB)", (unsigned long long)(CP.min_bytes >> 20),
                    COMPACT_FRAME_N, (unsigned long long)(CP.frame_bytes >> 20));
     }
     return CP.on;
@@ -6695,7 +6801,7 @@ void vk_texture_reuse_log(uint64_t frame) {
     rt_log("%s", line);
 }
 
-// With NX2NAVI_TRACE=perf every 600 frames, after vk_memory.c's vram line: what the live entries' own memory holds. By
+// With OOTPC_TRACE=perf every 600 frames, after vk_memory.c's vram line: what the live entries' own memory holds. By
 // kind: decoded ASTC (as BC3 or RGBA8) and other textures whose content the CPU provides, all of which a re-upload
 // brings back (comes_back_intact), and the GPU-written ones (render targets, textures the GPU drew or copied into),
 // whose content lives only in the image. "idle" is the part no lookup reached for IDLE_ROUNDS pool walks and
@@ -6841,7 +6947,7 @@ void vk_texture_shutdown(void) {
     unlock();
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): the texture cache's entries (the bytes are in the "mem: vram" line), the
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): the texture cache's entries (the bytes are in the "mem: vram" line), the
 // released ones, those retired by disuse, the sampler cache, the image requirements cache, the disuse holds, the
 // reuse keys, and the pool's texture and sampler slots. Counters, and a walk of at most 4096 sampler slots.
 void vk_texture_sizes(PerfSizes *s) {

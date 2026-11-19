@@ -37,7 +37,7 @@ static int g_applied;           // what the entries hold now (g_lock)
 
 int dbg_any_age_items_on(void) {
     int on = atomic_load(&g_on);
-    if (on < 0) atomic_compare_exchange_strong(&g_on, &on, cfg_bool("NX2NAVI_DEBUG_ANY_AGE_ITEMS") != 0), on = atomic_load(&g_on);
+    if (on < 0) atomic_compare_exchange_strong(&g_on, &on, cfg_bool("OOTPC_DEBUG_ANY_AGE_ITEMS") != 0), on = atomic_load(&g_on);
     return on;
 }
 
@@ -105,8 +105,8 @@ void dbg_any_age_items_tick(void) {
 
 void dbg_any_age_items(int on) {
     atomic_store(&g_on, on != 0);
-    if (cfg_bool("NX2NAVI_DEBUG_ANY_AGE_ITEMS") != (on != 0)) {
-        cfg_set("NX2NAVI_DEBUG_ANY_AGE_ITEMS", on ? "1" : "0");
+    if (cfg_bool("OOTPC_DEBUG_ANY_AGE_ITEMS") != (on != 0)) {
+        cfg_set("OOTPC_DEBUG_ANY_AGE_ITEMS", on ? "1" : "0");
         menu_save_settings_soon();
     }
 }

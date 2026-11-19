@@ -1,4 +1,4 @@
-// The C interface of nx2navi_dlssg.dll (runtime/dlssg/nx2_sl.cpp), which runtime/vk_dlssg.c loads for DLSS Frame
+// The C interface of ootpc_dlssg.dll (runtime/dlssg/nx2_sl.cpp), which runtime/vk_dlssg.c loads for DLSS Frame
 // Generation. The DLL is built with MSVC against NVIDIA's Streamline SDK (its C++ types have MSVC's ABI); nothing of
 // the SDK is in this repository, and the game itself is built without it.
 #pragma once

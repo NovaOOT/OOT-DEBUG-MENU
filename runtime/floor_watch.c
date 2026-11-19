@@ -1,4 +1,4 @@
-// NX2NAVI_FLOOR_WATCH (floor_watch in nx2navi.ini, 0 by default; diagnosis, 1.1.1, Windows): which code reads and
+// OOTPC_FLOOR_WATCH (floor_watch in OOT-PC.ini, 0 by default; diagnosis, 1.1.1, Windows): which code reads and
 // writes the moving floor under Link, at 60 fps and above it. It takes its addresses from frame_rate.c's floor scan
 // (which it switches on), once the scan has the values below Link that move with him at 60 fps:
 //   - the candidates: up to two survivors inside the platform's rigid body controller unit (the object with vtable
@@ -66,7 +66,7 @@ static struct {
 int floor_watch_wanted(void) {
     static int wanted = -1;
     if (wanted < 0) {
-        const char *e = cfg_get("NX2NAVI_FLOOR_WATCH");
+        const char *e = cfg_get("OOTPC_FLOOR_WATCH");
         wanted = RT_V111 && e && *e && strcmp(e, "0") != 0;
         if (wanted) rt_log("floor watch: on; it waits for the floor scan's addresses");
     }

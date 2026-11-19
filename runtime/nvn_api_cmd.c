@@ -245,7 +245,7 @@ static void copy_view(view_t *dst, uint8_t *has, const NVNtextureView *v) {
 //   so a freed address reused by a new pin would read as the same target: nvn_pins_sweep runs between submissions on
 //   the thread that replays them and keeps the pins it is given.
 // Instead of marking pins by walking every live recording each window, counting at copy and release walks each
-// copy's ops once more, when it is freed. NX2NAVI_PIN_SWEEP=0 keeps every copy.
+// copy's ops once more, when it is freed. OOTPC_PIN_SWEEP=0 keeps every copy.
 typedef struct {
     tex_t t;              // first: ops hold pins as tex_t pointers
     uint64_t last_use;    // nsubmits at the last tex_pin or the last drop of refs
@@ -365,9 +365,9 @@ void nvn_pins_sweep(uint64_t now, const tex_t *const *keep, int nkeep) {
     if (now < NVN_PIN_AGE) return;
     static int on = -1;
     if (on < 0) {
-        const char *s = cfg_get("NX2NAVI_PIN_SWEEP");
+        const char *s = cfg_get("OOTPC_PIN_SWEEP");
         on = !(s && !strcmp(s, "0"));
-        if (!on) rt_log("nvn: NX2NAVI_PIN_SWEEP=0: texture pin copies are kept for the run (the heap grows in long sessions)");
+        if (!on) rt_log("nvn: OOTPC_PIN_SWEEP=0: texture pin copies are kept for the run (the heap grows in long sessions)");
     }
     if (!on) return;
     static uint64_t logged;
@@ -862,14 +862,14 @@ NVN_API(nvnCommandBufferSetDepthClamp) { REC(cmd_of(c), OP_DEPTH_CLAMP, p_flag)-
 NVN_API(nvnCommandBufferSetRenderEnable) { REC(cmd_of(c), OP_RENDER_ENABLE, p_flag)->value = nvn_arg_bool(c, 1) != 0; }
 // Rasterizer discard runs vertex work without rasterising; with no transform feedback that equals not drawing.
 NVN_API(nvnCommandBufferSetRasterizerDiscard) { REC(cmd_of(c), OP_RASTER_DISCARD, p_flag)->value = nvn_arg_bool(c, 1) != 0; }
-// void nvnCommandBufferSetPrimitiveRestart(NVNcommandBuffer *cmd, NVNboolean enable, int index): NX2NAVI draws its
+// void nvnCommandBufferSetPrimitiveRestart(NVNcommandBuffer *cmd, NVNboolean enable, int index): OOTPC draws its
 // terrain and cliff strips with 16-bit indices and restart at 0xffff; the replay applies it per indexed draw (op_draw_idx)
 NVN_API(nvnCommandBufferSetPrimitiveRestart) {
     *REC(cmd_of(c), OP_PRIM_RESTART, p_prim_restart) = (p_prim_restart){nvn_arg_bool(c, 1) != 0, (uint32_t)arg_x(c, 2)};
 }
 // void nvnCommandBufferSetRenderEnableConditional(NVNcommandBuffer *cmd, NVNconditionalRenderMode mode,
 // NVNbufferAddress counters): rendering is enabled when the two NVNcounterData.counter values at addr / addr+16
-// compare equal (mode 0) or not equal (mode 1). NX2NAVI gates most of its ClearColor commands with it; the replay
+// compare equal (mode 0) or not equal (mode 1). OOTPC gates most of its ClearColor commands with it; the replay
 // evaluates it in GPU order.
 NVN_API(nvnCommandBufferSetRenderEnableConditional) {
     int m = (int)arg_x(c, 1);
@@ -1030,9 +1030,9 @@ NVN_API(nvnCommandBufferSetStencilRef) {
 // void nvnCommandBufferSetPolygonOffsetClamp(NVNcommandBuffer *cmd, float factor, float units, float clamp)
 NVN_API(nvnCommandBufferSetPolygonOffsetClamp) {
     *REC(cmd_of(c), OP_POLY_OFFSET, p_poly_offset) = (p_poly_offset){arg_s(c, 0), arg_s(c, 1), arg_s(c, 2)};
-    // NX2NAVI_POLY_OFFSET_LOG: what the game asks for, to tell a decal that relies on the offset from one that does not
+    // OOTPC_POLY_OFFSET_LOG: what the game asks for, to tell a decal that relies on the offset from one that does not
     static int logged, on = -1;   // the environment read once: this runs for every offset the game sets
-    if (on < 0) on = getenv("NX2NAVI_POLY_OFFSET_LOG") != NULL;
+    if (on < 0) on = getenv("OOTPC_POLY_OFFSET_LOG") != NULL;
     float f = (float)arg_s(c, 0), u = (float)arg_s(c, 1), cl = (float)arg_s(c, 2);
     if (on && logged < 24 && (f != 0.0f || u != 0.0f)) {
         logged++;
@@ -1323,7 +1323,7 @@ const char *nvn_op_name(uint32_t op) {
     return op < OP_COUNT_ ? names[op] : "?";
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): live recording copies and the zombies waiting for their submissions, texture
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): live recording copies and the zombies waiting for their submissions, texture
 // pins with their sweep queue, and the recording-buffer pool.
 void nvn_cmd_sizes(PerfSizes *s) {
     plat_mutex_lock_shared(&copy_lock);

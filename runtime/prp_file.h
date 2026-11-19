@@ -4,7 +4,7 @@
 //
 //   "NX2NSPRP", version (u32), record size (u32, 36)
 //   version 2 only: what the list was prepared from, 96 bytes: the sha256 of seed-programs.bin, the sha256 of
-//     seed-answers.bin (each over the whole file), and the translator identity (the 32 bytes of nx2navi_xlate.id,
+//     seed-answers.bin (each over the whole file), and the translator identity (the 32 bytes of ootpc_xlate.id,
 //     before the host options are mixed in)
 //   records: stage, priority, 2 zero bytes, input id (32 bytes); in priority order, one per input id
 //

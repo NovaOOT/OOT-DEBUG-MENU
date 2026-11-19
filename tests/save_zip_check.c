@@ -42,12 +42,12 @@ static int write_all(const char *path, const void *data, size_t n) {
 }
 
 static void selftest_json(void) {
-    const char *j = "{\n \"format\": \"nx2navi-save\", \"nested\": {\"format\": \"inner\", \"list\": [1, \"]\", {}]},\n"
+    const char *j = "{\n \"format\": \"ootpc-save\", \"nested\": {\"format\": \"inner\", \"list\": [1, \"]\", {}]},\n"
                     " \"format_version\": 1, \"neg\": -12, \"float\": 1.5, \"esc\": \"a\\\"b\\\\c\\u0041\\u00e9\",\n"
                     " \"t\": true, \"title_id\": \"0400486024DEC000\"}";
     char s[64];
     long long v = 0;
-    CHECK(sz_json_str(j, "format", s, sizeof s) && !strcmp(s, "nx2navi-save"), "format: %s", s);
+    CHECK(sz_json_str(j, "format", s, sizeof s) && !strcmp(s, "ootpc-save"), "format: %s", s);
     CHECK(sz_json_int(j, "format_version", &v) && v == 1, "format_version: %lld", v);
     CHECK(sz_json_int(j, "neg", &v) && v == -12, "neg: %lld", v);
     CHECK(!sz_json_int(j, "float", &v), "a float is no integer");
@@ -56,7 +56,7 @@ static void selftest_json(void) {
     CHECK(sz_json_str(j, "esc", s, sizeof s) && !strcmp(s, "a\"b\\cA?"), "escapes: %s", s);
     CHECK(sz_json_str(j, "title_id", s, sizeof s) && !strcmp(s, "0400486024DEC000"), "after a literal: %s", s);
     CHECK(!sz_json_str(j, "list", s, sizeof s) && !sz_json_str(j, "missing", s, sizeof s), "not at the top level");
-    CHECK(sz_json_str(j, "format", s, 5) && !strcmp(s, "nx2n"), "cut: %s", s);
+    CHECK(sz_json_str(j, "format", s, 5) && !strcmp(s, "ootp"), "cut: %s", s);
     CHECK(!sz_json_str("[\"format\"]", "format", s, sizeof s) && !sz_json_str("{\"format\" \"x\"}", "format", s, sizeof s) &&
               !sz_json_str("", "format", s, sizeof s) && !sz_json_str("{\"format\": \"open", "format", s, sizeof s),
           "malformed JSON");

@@ -1,5 +1,5 @@
 // Fly, hover and infinite Hover Boots for the debug menu (debug_tools.h), with the No void-out and Bomb T-Pose settings.
-// Game build 1.1.1 only.
+// Game builds 1.1.1 and 1.0.0 (their addresses through RT_OOT_ADDR).
 //
 // Fly and hover put the player where they want with the game's own actor warp (debug_warp.c dbg_frame_teleport) on
 // every frame, from the debug frame hook (debug_game.c, game thread), so the physics body goes along and gravity never
@@ -54,21 +54,21 @@ int dbg_hover_on(void) { return atomic_load(&hover_on); }
 static void move_load(void) {
     static _Atomic int done;
     if (atomic_load(&done) || atomic_exchange(&done, 1)) return;
-    atomic_store(&boots_on, cfg_bool("NX2NAVI_DEBUG_HOVER_BOOTS") != 0);
-    atomic_store(&no_void_on, cfg_bool("NX2NAVI_DEBUG_NO_VOID_OUT") != 0);
-    atomic_store(&bomb_bug_on, cfg_bool("NX2NAVI_DEBUG_BOMB_BUG") != 0);
-    atomic_store(&bunny_on, cfg_bool("NX2NAVI_DEBUG_BUNNY") != 0);
-    atomic_store(&mask_powers_on, cfg_bool("NX2NAVI_DEBUG_MASK_POWERS") != 0);
-    float bf = strtof(cfg_value("NX2NAVI_DEBUG_BUNNY_SPEED"), NULL);
+    atomic_store(&boots_on, cfg_bool("OOTPC_DEBUG_HOVER_BOOTS") != 0);
+    atomic_store(&no_void_on, cfg_bool("OOTPC_DEBUG_NO_VOID_OUT") != 0);
+    atomic_store(&bomb_bug_on, cfg_bool("OOTPC_DEBUG_BOMB_BUG") != 0);
+    atomic_store(&bunny_on, cfg_bool("OOTPC_DEBUG_BUNNY") != 0);
+    atomic_store(&mask_powers_on, cfg_bool("OOTPC_DEBUG_MASK_POWERS") != 0);
+    float bf = strtof(cfg_value("OOTPC_DEBUG_BUNNY_SPEED"), NULL);
     atomic_store(&bunny_factor, bf >= 1.0f && bf <= 3.0f ? bf : 1.5f);
-    float ms = strtof(cfg_value("NX2NAVI_DEBUG_FLY_SPEED"), NULL);
+    float ms = strtof(cfg_value("OOTPC_DEBUG_FLY_SPEED"), NULL);
     atomic_store(&fly_speed, ms >= 1.0f && ms <= 100.0f ? ms : 8.0f);
 }
 
 void dbg_hover_boots(int on) {
     move_load();
     atomic_store(&boots_on, on != 0);
-    dbg_keep("NX2NAVI_DEBUG_HOVER_BOOTS", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_HOVER_BOOTS", on ? "1" : "0");
 }
 int dbg_hover_boots_on(void) { move_load(); return atomic_load(&boots_on); }
 // No void-out: read by debug_game.c debug_abyss_hits, the host function of the abyss areas' patch site, on every
@@ -76,20 +76,43 @@ int dbg_hover_boots_on(void) { move_load(); return atomic_load(&boots_on); }
 void dbg_no_void_out(int on) {
     move_load();
     atomic_store(&no_void_on, on != 0);
-    dbg_keep("NX2NAVI_DEBUG_NO_VOID_OUT", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_NO_VOID_OUT", on ? "1" : "0");
 }
 int dbg_no_void_out_on(void) { move_load(); return atomic_load(&no_void_on); }
+
+// What sends the player back, as the game sees it (debug_game.c: debug_abyss_type gives the type the player's own
+// check gathered, debug_abyss_hits DBG_ABYSS_ZONE when an abyss area has the player among its hits): the last cause
+// seen, when, and where the player stood. Noted whether or not No void-out holds it back, so the debug overlay can
+// say "void-out here" at spots that have no volume to draw (a fall check, the edge of the world).
+static _Atomic uint32_t abyss_cause;
+static _Atomic uint64_t abyss_ns;
+static float abyss_at[3];
+void dbg_abyss_note(uint32_t cause) {
+    if (!cause) return;
+    float p[3];
+    if (dbg_player_pos(p)) memcpy(abyss_at, p, sizeof p);
+    atomic_store(&abyss_cause, cause);
+    atomic_store(&abyss_ns, plat_now_ns());
+}
+int dbg_abyss_last(uint32_t *cause, float pos[3], uint64_t *age_ns) {
+    uint64_t t = atomic_load(&abyss_ns);
+    if (!t) return 0;
+    *cause = atomic_load(&abyss_cause);
+    memcpy(pos, abyss_at, sizeof abyss_at);
+    *age_ns = plat_now_ns() - t;
+    return 1;
+}
 // Bomb T-Pose: bomb_frame below, on every frame; kept from one start to the next (debug_bomb_bug).
 void dbg_bomb_bug(int on) {
     move_load();
     atomic_store(&bomb_bug_on, on != 0);
-    dbg_keep("NX2NAVI_DEBUG_BOMB_BUG", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_BOMB_BUG", on ? "1" : "0");
 }
 int dbg_bomb_bug_on(void) { move_load(); return atomic_load(&bomb_bug_on); }
 void dbg_bunny(int on) {
     move_load();
     atomic_store(&bunny_on, on != 0);
-    dbg_keep("NX2NAVI_DEBUG_BUNNY", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_BUNNY", on ? "1" : "0");
 }
 int dbg_bunny_on(void) { move_load(); return atomic_load(&bunny_on); }
 float dbg_bunny_speed(void) { move_load(); return atomic_load(&bunny_factor); }
@@ -99,7 +122,7 @@ void dbg_set_bunny_speed(float f) {
     atomic_store(&bunny_factor, f);
     char v[16];
     snprintf(v, sizeof v, "%.2f", f);
-    dbg_keep("NX2NAVI_DEBUG_BUNNY_SPEED", v);
+    dbg_keep("OOTPC_DEBUG_BUNNY_SPEED", v);
 }
 float dbg_fly_speed(void) { move_load(); return atomic_load(&fly_speed); }
 void dbg_set_fly_speed(float ms) {
@@ -108,7 +131,7 @@ void dbg_set_fly_speed(float ms) {
     atomic_store(&fly_speed, ms);
     char v[16];
     snprintf(v, sizeof v, "%g", ms);
-    dbg_keep("NX2NAVI_DEBUG_FLY_SPEED", v);
+    dbg_keep("OOTPC_DEBUG_FLY_SPEED", v);
 }
 
 // ---- the camera actor, found by a helper thread and checked on every use
@@ -422,19 +445,59 @@ static void air_step(struct Cpu *c, const float p[3], uint64_t b, int32_t lx, in
 }
 
 // ---- Ragdoll
-// The game's own player ragdoll, started and ended as the AI node ExecuteEventPlayerImmediateRagdollDown does it (the
-// Wallmaster's drop back to the entrance; the node's enter method main+0x26b3ec0, its leave method main+0x26b42c0).
+// The game's own player ragdoll as a bomb's blast starts it: the reaction Rolling_Medium, the one the AI node
+// ExecutePlayerRolling (Player.action.rolling.module; its enter method main+0x27fb9c0) asks for when the player takes a
+// hit of knock-back intensity Normal, which every bomb's attack has (Item_Bomb BombFruit and ExplosionBase AttackParam:
+// DamageType Bomb, KnockbackIntensity Normal). The node turns the hit's intensity (the player component's +0x2d2) into
+// the strength: 2 Rolling_Strong, 3 Rolling_Weak, any other Rolling_Medium (main+0x27fc7f0).
 // The player's ragdoll controller is a component of the actor's physics owner ([[[[actor+0x270]+0x50]+0x20]+0x10], as
-// main+0x837620 reads it), found by main+0x5f88c0. Its request (RD_START) takes a block of the actor, a weight of 1 and
-// the two modes the node gives (1 and 2) and sets the controller's state to 3; its end (RD_END, the node's leave) puts
-// the body back under the animation, the player standing, and the state to 0. The state is not 0 while a ragdoll runs.
+// main+0x837620 reads it), found by main+0x5f88c0. Its rolling request (RD_START) is the block rd_start fills, laid out
+// as the node fills it for a blast behind the player on open ground (rd_fill_rolling); it sets the controller's state to 1. Its end (RD_END, the
+// leave method of ExecuteEventPlayerImmediateRagdollDown, which ends whichever reaction runs) puts the body back under
+// the animation, the player standing, and the state to 0. The state is not 0 while a ragdoll runs.
 #define RD_FIND RT_OOT_ADDR(0x70005f88c0ull, 0x7000587460ull)    // physics owner -> ragdoll controller
-#define RD_START RT_OOT_ADDR(0x7003218d30ull, 0x70031c1580ull)   // controller, &request
+#define RD_START RT_OOT_ADDR(0x7003217550ull, 0x70031bfdd0ull)   // controller, &request: a Rolling_* reaction
 #define RD_END RT_OOT_ADDR(0x7003219090ull, 0x70031c18e0ull)     // controller, &{actor, 0}; returns at once with no ragdoll running
+// The controller's other reactions, each started by its own function (controller, &request) that names the reaction
+// and sets the state: DownLand 2, ImmediateDown 3 (the Wallmaster's drop), AirDead 4, DeadStand 5, DeadDown 6,
+// Pressed 7. They read the request ImmediateDown's AI node fills (rd_fill_plain).
+// Each frame a reaction runs, its AI node hands the controller the player's state (ExecutePlayerRolling's update,
+// main+0x27fc270; ExecuteEventPlayerImmediateRagdollDown's, main+0x26b4040): RD_FEED (controller, &block) copies the
+// block into the controller (+0x60 on), RD_STEP (controller) runs the controller's own update. Without them the
+// reaction keeps the operation it started with: in water it never takes its InWater one and the body sinks.
+// The block: the actor, the actor's water component (RD_WATER), the frame time in game frames, 0.0f, 1.0f, 3 when the
+// player component's +0x7e8 is 1 (else 2), 0, then bytes: RD_MODE7 (the component's mode is 7), and for the rolling
+// reactions twice RD_GROUND.
+#define RD_FEED RT_OOT_ADDR(0x700321c040ull, 0x70031c4810ull)
+#define RD_STEP RT_OOT_ADDR(0x70038911a0ull, 0x700382ffd0ull)
+#define RD_WATER RT_OOT_ADDR(0x7000d95780ull, 0x7000d5dfd0ull)    // actor -> [actor+0x270]+0x268
+#define RD_COMP RT_OOT_ADDR(0x7000944e50ull, 0x7000943fe0ull)     // actor -> the player component
+#define RD_MODE7 RT_OOT_ADDR(0x700301aff0ull, 0x7002fc5d10ull)
+#define RD_GROUND RT_OOT_ADDR(0x70030223e0ull, 0x7002fcce80ull)
+#define RD_COMP_HEAVY 0x7e8   // both builds: the node method that reads it (1.1.1 main+0x27fc7b0, 1.0.0 main+0x27aac00)
+static const struct { uint64_t v111, v100; } rd_starts[RD_KINDS - 4] = {
+    {0x7003217e90ull, 0x70031c06e0ull},   // DownLand
+    {0x7003218d30ull, 0x70031c1580ull},   // ImmediateDown
+    {0x7003218bc0ull, 0x70031c1410ull},   // AirDead
+    {0x7003218250ull, 0x70031c0aa0ull},   // DeadStand
+    {0x70032188f0ull, 0x70031c1140ull},   // DeadDown
+    {0x7003218f00ull, 0x70031c1750ull},   // Pressed
+};
 #define RD_STATE 0x17c
+// The request's fields (main+0x3217550 reads them).
+#define RQ_WEIGHT 0x08        // float, 1
+#define RQ_BACK_ANGLE 0x0c    // float: the push's yaw less the yaw of the player's back, -pi to pi
+#define RQ_SLOPE 0x10         // float: 0 on open ground (the node adds 10 degrees when a wall stands in the push)
+#define RQ_FIXED 0x14         // the node's constants: 12.0f, 6.0f, 1, 2
+#define RQ_STRENGTH 0x24      // 0 Rolling_Weak, 1 Rolling_Medium, 2 Rolling_Strong, 3 Rolling_RestraintThrown
+#define RQ_SITUATION 0x28     // 0 OnGround, 1 InAir, 2 InWater, 3 Climb, 4 Ride (the reaction's operation)
+#define RQ_PUSH 0x30          // float[3]: the direction the player is thrown, along the ground
+#define RQ_SIDE 0x3c          // 2: thrown more than 75 degrees away from where the player faces (backwards); else 1
+#define RD_AIR_MS 1.5f        // vertical speed over this: the player is in the air
 static _Atomic int rd_req = -2;    // -2 nothing asked; else dbg_ragdoll's how
+static _Atomic int rd_kind = RD_ROLLING_MEDIUM;   // the reaction dbg_ragdoll starts
 static _Atomic uint64_t rd_actor, rd_ctrl;   // the controller found for that actor
-static _Alignas(16) uint8_t rd_block[0x30];
+static _Alignas(16) uint8_t rd_block[0x40];
 
 static uint64_t ragdoll_owner(uint64_t actor) {
     uint64_t p = rd64(actor + 0x270);
@@ -452,6 +515,16 @@ int dbg_ragdoll(int how) {
     if (!dbg_player_actor()) return 0;
     atomic_store(&rd_req, how < 0 ? -1 : how != 0);
     return 1;
+}
+
+int dbg_ragdoll_kind(int kind) {
+    if (kind >= 0 && kind < RD_KINDS) atomic_store(&rd_kind, kind);
+    return atomic_load(&rd_kind);
+}
+
+uint32_t dbg_ragdoll_state(void) {
+    uint64_t actor = dbg_player_actor();
+    return actor && actor == atomic_load(&rd_actor) ? ragdoll_state(atomic_load(&rd_ctrl)) : 0;
 }
 
 int dbg_ragdoll_on(void) {
@@ -475,6 +548,59 @@ static void ragdoll_call(struct Cpu *c, uint64_t fn, uint64_t ctrl) {
     dbg_frame_call(c, fn, a);
 }
 
+// Fills rd_block as ExecutePlayerRolling does for a bomb going off behind the player on open ground: the push straight
+// along where the player faces, so its angle to the player's back is pi and it counts as forwards.
+static void rd_fill_rolling(uint32_t strength) {
+    float face[3] = {0, 0, 1};
+    if (!dbg_player_facing(face) || (face[0] == 0 && face[2] == 0)) face[0] = 0, face[2] = 1;
+    const float push[3] = {face[0], 0.0f, face[2]};
+    const float weight = 1.0f, back_angle = 3.14159265f, slope = 0.0f, fixed_f[2] = {12.0f, 6.0f};
+    const uint32_t fixed_i[2] = {1, 2}, side = 1;
+    const uint32_t situation = fabsf(dbg_vertical_speed()) > RD_AIR_MS ? 1 : 0;
+    memcpy(rd_block + RQ_WEIGHT, &weight, 4);
+    memcpy(rd_block + RQ_BACK_ANGLE, &back_angle, 4);
+    memcpy(rd_block + RQ_SLOPE, &slope, 4);
+    memcpy(rd_block + RQ_FIXED, fixed_f, 8);
+    memcpy(rd_block + RQ_FIXED + 8, fixed_i, 8);
+    memcpy(rd_block + RQ_STRENGTH, &strength, 4);
+    memcpy(rd_block + RQ_SITUATION, &situation, 4);
+    memcpy(rd_block + RQ_PUSH, push, 12);
+    memcpy(rd_block + RQ_SIDE, &side, 4);
+}
+
+// The request ExecuteEventPlayerImmediateRagdollDown fills for its reaction (enter main+0x26b3ec0): weight 1.0 and the
+// constants 1 and 2, the rest 0.
+static void rd_fill_plain(void) {
+    const float weight = 1.0f;
+    const uint32_t fixed_i[2] = {1, 2};
+    memcpy(rd_block + RQ_WEIGHT, &weight, 4);
+    memcpy(rd_block + RQ_FIXED + 8, fixed_i, 8);
+}
+
+// Hands the controller this frame's state as the reaction's AI node does (RD_FEED), then runs its update (RD_STEP).
+static _Alignas(16) uint8_t rd_feed[0x28];
+static void ragdoll_feed(struct Cpu *c, uint64_t ctrl, uint64_t actor, float frames, int rolling) {
+    uint64_t a[8] = {actor};
+    uint64_t water = dbg_frame_call(c, RD_WATER, a);
+    uint64_t comp = dbg_frame_call(c, RD_COMP, a);
+    uint32_t heavy = 0;
+    if (comp) plat_mem_read(comp + RD_COMP_HEAVY, &heavy, 4);
+    const float zero_one[2] = {0.0f, 1.0f};
+    const uint32_t kind = heavy == 1 ? 3 : 2;
+    memset(rd_feed, 0, sizeof rd_feed);
+    memcpy(rd_feed, &actor, 8);
+    memcpy(rd_feed + 0x08, &water, 8);
+    memcpy(rd_feed + 0x10, &frames, 4);
+    memcpy(rd_feed + 0x14, zero_one, 8);
+    memcpy(rd_feed + 0x1c, &kind, 4);
+    rd_feed[0x24] = (uint8_t)(dbg_frame_call(c, RD_MODE7, a) & 1);
+    if (rolling && comp) rd_feed[0x25] = rd_feed[0x26] = (uint8_t)(dbg_frame_call(c, RD_GROUND, a) & 1);
+    uint64_t f[8] = {ctrl, (uint64_t)(uintptr_t)rd_feed};
+    dbg_frame_call(c, RD_FEED, f);
+    uint64_t s[8] = {ctrl};
+    dbg_frame_call(c, RD_STEP, s);
+}
+
 static void ragdoll_frame(struct Cpu *c, float dt) {
     int how = atomic_exchange(&rd_req, -2);
     uint64_t actor = dbg_player_actor(), owner = actor ? ragdoll_owner(actor) : 0;
@@ -494,11 +620,14 @@ static void ragdoll_frame(struct Cpu *c, float dt) {
     memcpy(rd_block, &actor, 8);
     if (how == -1) how = !on;
     if (how == 1 && !on) {
-        const float weight = 1.0f;
-        const uint32_t modes[2] = {1, 2};
-        memcpy(rd_block + 0x08, &weight, 4);
-        memcpy(rd_block + 0x1c, modes, sizeof modes);
-        ragdoll_call(c, RD_START, ctrl);
+        int kind = atomic_load(&rd_kind);
+        if (kind < 4) {
+            rd_fill_rolling((uint32_t)kind);
+            ragdoll_call(c, RD_START, ctrl);
+        } else {
+            rd_fill_plain();
+            ragdoll_call(c, RT_OOT_ADDR(rd_starts[kind - 4].v111, rd_starts[kind - 4].v100), ctrl);
+        }
         rd_ours = 1, rd_still_s = rd_total_s = 0.0f;
         return;
     }
@@ -509,6 +638,7 @@ static void ragdoll_frame(struct Cpu *c, float dt) {
     }
     if (!rd_ours) return;
     float gdt = dt * dbg_time_scale();
+    ragdoll_feed(c, ctrl, actor, gdt * 30.0f, atomic_load(&rd_kind) < 4);
     rd_total_s += gdt;
     int still = dbg_ground_speed() < RD_STILL_MS && fabsf(dbg_vertical_speed()) < RD_STILL_MS;
     rd_still_s = still ? rd_still_s + gdt : 0.0f;
@@ -600,7 +730,7 @@ static struct { uint64_t actor, comps, as; float written; } rate;   // the playe
 void dbg_mask_powers(int on) {
     move_load();
     atomic_store(&mask_powers_on, on != 0);
-    dbg_keep("NX2NAVI_DEBUG_MASK_POWERS", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_MASK_POWERS", on ? "1" : "0");
 }
 int dbg_mask_powers_on(void) { move_load(); return atomic_load(&mask_powers_on); }
 

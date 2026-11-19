@@ -35,22 +35,23 @@ import time
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
-from .. import NAME, build, feed, gameini, gamefiles, installs, jobs, locks, mods, saves, steam, versions, winsys
+from .. import NAME, build, feed, gameini, gamefiles, installs, jobs, locks, mods, rebrand, saves, steam, steamlib, versions, winsys
 from ..context import Context
 from ..paths import long_path_problem
 from . import art, picture, sound
 
-W, H = 1000, 640
-BAND = (0, 1000, 56)            # x0, x1, height: the whole top of the window, which is also its title bar
-PIC_TOP = 60                    # the player's background picture starts under the band and its two lines
-TITLE_BUTTONS = (('min', 908, 954), ('close', 954, 1000))   # x ranges on the band
-PANEL = (112, 60, 580)          # x0, top, x1
-ROWS = (140, 552, 96)           # x0, x1, top
-LABEL_W = 222                   # 54 % of the row
-GAP = 12
-DESC = (614, 336)               # x, width
+W, H = 1440, 850
+BAND = (0, W, 178)             # the header inside the frame also moves the frameless window
+PIC_TOP = 88
+TITLE_BUTTONS = (('min', 1250, 1296), ('close', 1296, 1342))
+TITLE_BUTTON_Y = (88,124)
+PANEL = (365, 88, 1375)         # one continuous dark surface beneath the brass frame
+ROWS = (390, 895, 188)
+LABEL_W = 255
+GAP = 9
+DESC = (925, 390)
 P = art.PALETTE                 # the colour scheme in use: art.set_theme changes it in place
 FRAME_MS = 15                   # between two steps of the animations; they move by the time that really passed
 SPARKS = 22                     # the dust drifting over the backdrop
@@ -60,14 +61,21 @@ MODS_PAGE = 7     # mods on a page of the Mods screen, beside its other rows
 ORDER_PAGE = 10   # ... of the Load Order screen
 # the Custom scheme's picker (draw_picker), logical pixels: its box (x, top, width, height), the colour square and
 # the hue bar (x0, y0, x1, y1)
-PICKER_BOX = (614, 100, 336, 452)
-SQUARE = (667, 160, 897, 390)
-BAR = (667, 408, 897, 430)
+PICKER_BOX = (925, 188, 390, 452)
+SQUARE = (990, 248, 1220, 478)
+BAR = (990, 496, 1220, 518)
 CUSTOM_LABELS = {'background': 'Background Color', 'panel': 'Panel Color', 'buttons': 'Button Color'}
 CUSTOM_DESC = {'background': 'The color behind the menus.', 'panel': 'The color of the panels and the top bar.',
                'buttons': 'The color of the buttons.'}
 DIMS = (0, 20, 40, 60, 80)      # Background Dimming, in percent
 SOUND_LEVELS = (('off', 'Off'), ('low', 'Low'), ('medium', 'Medium'), ('high', 'High'))
+# Import a Save and Import a Save Folder are switched off for now: the rows show as off, the home's Saves row no longer
+# says a save waits, and selecting a row anyway asks past a warning that the import may break the saves.
+IMPORT_DISABLED = True
+IMPORT_WARNING = ('Importing saves is turned off for now.\n\n'
+                  'IT MAY BREAK YOUR SAVES. The import replaces the game\'s save, and an imported save can leave '
+                  'your saves broken or glitched.\n\n'
+                  'Your current save is copied to the saves folder first.\n\nImport anyway?')
 
 
 class Row:
@@ -148,13 +156,13 @@ FATAL_SHOWN = 240        # characters of a FATAL line the home screen shows; the
 
 def last_fatal(game_dir):
     """The last FATAL line of the game's latest run, without its "FATAL: ", or ''. The game writes one before it
-    exits with 70 (runtime/dispatch.c rt_fatal) or 71 (runtime/main.c crash_handler) into logs/nx2navi.log, which
+    exits with 70 (runtime/dispatch.c rt_fatal) or 71 (runtime/main.c crash_handler) into logs/ootpc.log, which
     each run starts anew (runtime/main.c log_open). A line this launcher added for an earlier run's end
     (note_exit_in_log) ends the search: what stands before it is not this run's."""
     if not game_dir:
         return ''
     try:
-        with open(Path(game_dir) / 'logs' / 'nx2navi.log', 'rb') as f:
+        with open(Path(game_dir) / 'logs' / 'ootpc.log', 'rb') as f:
             f.seek(max(0, f.seek(0, 2) - FATAL_TAIL))
             lines = f.read().decode('utf-8', 'replace').splitlines()
     except OSError:
@@ -172,7 +180,7 @@ def note_exit_in_log(game_dir, text):
     process died before it could write a line itself."""
     if not game_dir:
         return
-    log = Path(game_dir) / 'logs' / 'nx2navi.log'
+    log = Path(game_dir) / 'logs' / 'ootpc.log'
     try:
         with open(log, 'a', encoding='utf-8') as f:
             f.write(f'[launcher] the game ended with code {text} at {time.strftime("%Y-%m-%d %H:%M:%S")}\n')
@@ -245,6 +253,8 @@ class App:
         self.export_message = ''   # the last Export Save result, shown in its description
         self.steam_message = ''   # the last Add to Steam result, shown in its description
         self.mods_message = ''   # what the last change on the Mods screen did, shown in its descriptions
+        self.n64_busy = False    # make_n64 is writing the N64 Graphics mod
+        self.dark_busy = False   # make_dark_link is writing the Dark Link mod
         self.mods_page = 0       # the page of the Mods and Load Order screens
         self.mods_failed = []    # the mods whose code a build before Play could not take in: Play no longer waits
         self.steam_busy = False   # Add to Steam is making the pictures or writing Steam's files
@@ -289,9 +299,10 @@ class App:
 
         root.title(NAME)
         root.resizable(False, False)
-        root.configure(background=P['window'])
+        window_bg='#010203' if os.name == 'nt' else P['window']
+        root.configure(background=window_bg)
         self.canvas = tk.Canvas(root, width=self.X(W), height=self.X(H), highlightthickness=0, bd=0,
-                                background=P['window'], cursor='arrow')
+                                background=window_bg, cursor='arrow')
         self.canvas.pack()
         self.set_icon()
         self.load_fonts()
@@ -305,6 +316,8 @@ class App:
         self.root.after(60000, self.minute)
         self.center()
         self.framed = not winsys.frameless(root)   # Windows: the band is the title bar
+        if os.name == 'nt':
+            root.attributes('-transparentcolor','#010203')
         self.root.after(60, self.native_window)
 
     # ---------------------------------------------------------------- scale, icon, fonts
@@ -323,20 +336,25 @@ class App:
 
     def center(self):
         self.root.update_idletasks()
-        w, h = self.X(W), self.X(H)
+        left,top,right,bottom=art.forest_bounds(self.X(W),self.X(H))
+        w,h=right-left,bottom-top
+        self.canvas.configure(width=w,height=h,scrollregion=(0,0,self.X(W),self.X(H)),
+                              xscrollincrement=1,yscrollincrement=1,confine=False)
+        self.canvas.xview_moveto(left/self.X(W))
+        self.canvas.yview_moveto(top/self.X(H))
         x = max(0, (self.root.winfo_screenwidth() - w) // 2)
         y = max(0, (self.root.winfo_screenheight() - h) // 3)
         self.root.geometry(f'{w}x{h}+{x}+{y}')
 
     def set_icon(self):
-        """Navi as the window's icon: Tk's photo icon everywhere, and on Windows the .ico set on the window itself, so
-        the taskbar button shows Navi rather than Python's icon."""
+        """The project's icon as the window's icon: Tk's photo icon everywhere, and on Windows the .ico set on the window
+        itself, so the taskbar button shows it rather than Python's icon."""
         try:
-            self.photos['icon'] = art.photo(self.root, art.navi_icon(64))
+            self.photos['icon'] = tk.PhotoImage(master=self.root, data=art.app_icon_png(), format='png')
             self.root.iconphoto(True, self.photos['icon'])
             if os.name == 'nt':
-                data = art.navi_ico()
-                self.ico = self.layout.cache / 'nx2navi.ico'
+                data = art.app_ico()
+                self.ico = self.layout.cache / 'ootpc.ico'
                 if not self.ico.is_file() or self.ico.read_bytes() != data:
                     self.ico.write_bytes(data)
         except (tk.TclError, OSError) as e:
@@ -360,8 +378,10 @@ class App:
         available = set(tkfont.families(self.root))
         fallback = next((f for f in ('Segoe UI', 'Source Sans 3', 'Noto Sans', 'DejaVu Sans', 'Helvetica')
                          if f in available), 'TkDefaultFont')
-        # Every text is in the game's Cetra Display; only the build log keeps a monospaced face so its lines align.
-        text = title = fams.get('title') if fams.get('title') in available else fallback
+        # Distinct display and body faces keep dense settings readable while the headings retain their character.
+        text = fallback
+        title = fams.get('title') if fams.get('title') in available else next(
+            (f for f in ('Georgia', 'Noto Serif', 'DejaVu Serif') if f in available), fallback)
         mono = next((f for f in ('Consolas', 'Cascadia Mono', 'DejaVu Sans Mono', 'Courier New') if f in available),
                     'TkFixedFont')
         self.game_fonts = bool(fams.get('title') and fams['title'] in available)
@@ -378,7 +398,7 @@ class App:
         self.f = {'band': F(title, 25), 'big': F(text, 23), 'big_small': F(text, 21), 'label': F(text, 17),
                   'value': F(text, 16), 'desc': F(text, 17), 'small': F(text, 15), 'heading': F(title, 21),
                   'sub': F(title, 17), 'action': F(text, 18), 'status': F(text, 15), 'mono': F(mono, 11.5),
-                  'badge': F(text, 15, 'bold'), 'action_big': F(text, 21)}
+                  'badge': F(text, 15, 'bold'), 'action_big': F(text, 21), 'page': F(title, 36)}
 
     def fit_font(self, font, text, width, smallest=0.72):
         """font, or the same face a few pixels smaller so text fits width (down to smallest of its size)."""
@@ -396,6 +416,8 @@ class App:
     def fonts_from_game(self, game_dir='', dump=''):
         """Decode the game's fonts and its interface sounds in the background, redraw with the fonts and take up
         the sounds."""
+        if self.args.selftest:
+            return
         fonts, sounds = not self.game_fonts, not self.sounds.game
         if not fonts and not sounds:
             return
@@ -464,42 +486,40 @@ class App:
         return 0.8 if self.picture is not None else 1.0
 
     def draw_static(self):
-        c, s = self.canvas, self.s
+        c,s=self.canvas,self.s
         c.delete('static')
-        dim = max(0, min(100, self.settings.get('background_dim', 40))) / 100.0
-        c.create_image(0, 0, anchor='nw', tags='static',
-                       image=self.sprite('backdrop', lambda: art.backdrop(self.X(W), self.X(H), s, self.picture, dim,
-                                                                          self.X(PIC_TOP))))
-        self.make_sparks()   # over the backdrop, under the panel and the band
-        bx0, bx1, bh = BAND
-        px0, ptop, px1 = PANEL
-        c.create_image(self.X(px0), self.X(ptop), anchor='nw', tags='static',
-                       image=self.sprite('panel', lambda: art.panel(self.X(px1) - self.X(px0), self.X(H - ptop), s,
-                                                                    self.see_through())))
-        c.create_image(self.X(bx0), 0, anchor='nw', tags='static',
-                       image=self.sprite('band', lambda: art.band(self.X(bx1) - self.X(bx0), self.X(bh), s)))
-        k = max(1, int(round(2 * s)))   # Navi in whole pixels: two screen pixels per artwork pixel at 100 %
-        emblem = self.sprite(('navi', k), lambda: art.navi(k))
-        ew = emblem.width()
-        title_w = self.f['band'].measure(NAME)
-        gap = self.X(12)
-        x = self.X(W / 2) - (ew + gap + title_w) // 2
-        # Navi's halo, behind her: a soft light that pulses while the animations run
-        size = self.X(bh) - 2
-        if ('halo', size) not in self.sprites:
-            self.sprites[('halo', size)] = [art.photo(self.root, f) for f in art.halo_frames(size)]
-        self.halo = self.sprites[('halo', size)]
-        c.create_image(x + ew // 2, self.X(bh / 2), image=self.halo[0], tags=('static', 'halo'))
-        self.navi_xy = (x, self.X(bh / 2))
-        c.create_image(x, self.X(bh / 2), anchor='w', image=emblem, tags=('static', 'navi'))
-        tx = x + ew + gap
-        c.create_text(tx + 1, self.X(bh / 2) + self.X(2), text=NAME, anchor='w', font=self.f['band'],
-                      fill=P['band_shadow'], tags='static')
-        c.create_text(tx, self.X(bh / 2), text=NAME, anchor='w', font=self.f['band'], fill=P['band_text'],
-                      tags='static')
-        c.create_rectangle(0, 0, self.X(W) - 1, self.X(H) - 1, outline=P['frame'], tags='static')
+        dim=max(0,min(100,self.settings.get('background_dim',40)))/100
+        c.create_image(0,0,anchor='nw',tags='static',image=self.sprite('forest-chassis',
+                       lambda:art.forest_skin(self.X(W),self.X(H),self.picture,dim,os.name == 'nt')))
+        self.make_sparks()
+        # The emblem is part of the authored skin; the brand remains live, crisp text.
+        tx=self.X(214)
+        c.create_text(tx,self.X(116),text=NAME,anchor='w',font=self.f['band'],fill=P['text_bright'],tags='static')
+        c.create_text(tx,self.X(145),text='Ocarina of Time',anchor='w',font=self.f['small'],fill=P['muted'],tags='static')
+        self.halo=[]
+        self.navi_xy=(self.X(140),self.X(132))
         c.tag_lower('static')
         self.draw_title_buttons()
+
+    def draw_navigation(self):
+        c,X=self.canvas,self.X
+        self.nav_hits=[]
+        selected={'home':'home','first_run':'home','job':'home','versions':'versions','saves':'saves',
+                  'mods':'mods','mod_order':'mods','customize':'customize','color':'customize',
+                  'settings':'settings','uninstall':'settings'}.get(self.screen,'home')
+        links=(('home','Play'),('versions','Game versions'),('saves','Saves'),
+               ('mods','Mods'),('customize','Appearance'),('settings','Settings'))
+        for index,(target,label) in enumerate(links):
+            x0,y0,x1,y1=X(96),X(202+index*44),X(332),X(242+index*44)
+            if target==selected:
+                pic=self.sprite(('nav-plate',x1-x0,y1-y0),lambda:art.forest_widget(x1-x0,y1-y0,0))
+                c.create_image(x0,y0,anchor='nw',image=pic,tags='dyn')
+            icon=self.sprite(('nav-icon',target,X(24)),lambda key=target:art.navigation_icon(key,X(24)))
+            c.create_image(x0+X(13),(y0+y1)//2,anchor='w',image=icon,tags='dyn')
+            self.text(x0+X(49),(y0+y1)//2,label,self.f['label'],P['text_bright'] if target==selected else P['muted'])
+            if self.screen not in ('first_run','job'):
+                self.nav_hits.append(((x0,y0,x1,y1),target))
+
 
     def make_sparks(self):
         """The dust over the backdrop: SPARKS soft dots of three sizes, each with its own speed, sway and twinkle, at
@@ -522,8 +542,9 @@ class App:
         """Draw everything again after the colour scheme, the background or Animations changed."""
         art.set_theme(self.settings.get('theme'), self.custom_colors())
         self.sprites.clear()
-        self.root.configure(background=P['window'])
-        self.canvas.configure(background=P['window'])
+        window_bg='#010203' if os.name == 'nt' else P['window']
+        self.root.configure(background=window_bg)
+        self.canvas.configure(background=window_bg)
         self.load_picture()
         self.draw_static()
         self.render()
@@ -532,17 +553,17 @@ class App:
         """Minimise and close at the band's right end, lit when the mouse is over them."""
         c, X = self.canvas, self.X
         c.delete('tb')
-        bh = X(BAND[2])
+        top,bottom=map(X,TITLE_BUTTON_Y)
         for kind, x0, x1 in TITLE_BUTTONS:
             if self.tb_hover == kind:
-                c.create_rectangle(X(x0), 0, X(x1), bh - 1, outline='', tags='tb',
+                c.create_rectangle(X(x0), top, X(x1), bottom - 1, outline='', tags='tb',
                                    fill=P['close_hover'] if kind == 'close' else P['button_hover'])
             size = X(12)
             glyph = self.sprite(('glyph', kind, size), lambda kd=kind: art.title_glyph(kd, size, self.s))
-            c.create_image((X(x0) + X(x1)) // 2, bh // 2, image=glyph, tags='tb')
+            c.create_image((X(x0) + X(x1)) // 2, (top+bottom)//2, image=glyph, tags='tb')
 
     def title_button_at(self, x, y):
-        if y >= self.X(BAND[2]):
+        if y < self.X(TITLE_BUTTON_Y[0]) or y >= self.X(TITLE_BUTTON_Y[1]):
             return None
         for kind, x0, x1 in TITLE_BUTTONS:
             if self.X(x0) <= x < self.X(x1):
@@ -559,13 +580,19 @@ class App:
                         ('<space>', lambda e: self.activate()), ('<Escape>', lambda e: self.back()),
                         ('<F5>', lambda e: self.check_now(force=True))):
             r.bind(key, fn)
-        self.canvas.bind('<Motion>', self.on_motion)
-        self.canvas.bind('<Button-1>', self.on_click)
-        self.canvas.bind('<B1-Motion>', self.on_drag)
-        self.canvas.bind('<ButtonRelease-1>', self.on_release)
+        self.canvas.bind('<Motion>', lambda e: self.canvas_event(self.on_motion,e))
+        self.canvas.bind('<Button-1>', lambda e: self.canvas_event(self.on_click,e))
+        self.canvas.bind('<B1-Motion>', lambda e: self.canvas_event(self.on_drag,e))
+        self.canvas.bind('<ButtonRelease-1>', lambda e: self.canvas_event(self.on_release,e))
         self.canvas.bind('<Leave>', lambda e: self.set_tb_hover(None))
         r.bind('<Alt-F4>', lambda e: self.on_close())
         r.protocol('WM_DELETE_WINDOW', self.on_close)
+
+    def canvas_event(self,handler,event):
+        # Hit tests use design coordinates even though the visible window trims the skin's transparent padding.
+        event.x=round(self.canvas.canvasx(event.x))
+        event.y=round(self.canvas.canvasy(event.y))
+        handler(event)
 
     def poll_gamepad(self):
         try:
@@ -707,6 +734,11 @@ class App:
             self.set_tb_hover(None)
             winsys.minimize(self.root)
             return
+        for (x0,y0,x1,y1),target in getattr(self,'nav_hits',[]):
+            if x0 <= e.x <= x1 and y0 <= e.y <= y1:
+                self.sounds.play('select')
+                self.show(target)
+                return
         if e.y < self.X(BAND[2]):   # the band moves the window, like a title bar
             if not winsys.start_drag(self.root):
                 self.drag = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
@@ -790,7 +822,7 @@ class App:
             self.ctx.log(f'the launcher was stopped during {left["task"]} (started '
                          f'{time.strftime("%Y-%m-%d %H:%M", time.localtime(left.get("started") or 0))}, game folder '
                          f'{left.get("game_dir") or "none"})')
-        for old in self.layout.root.glob('python.old*'):   # the Python an update replaced (launcher/native/nx2navi.c)
+        for old in self.layout.root.glob('python.old*'):   # the Python an update replaced (launcher/native/ootpc.c)
             shutil.rmtree(old, ignore_errors=True)
         if gd or self.settings.get('dump'):
             self.fonts_from_game(gd, self.settings.get('dump'))
@@ -809,7 +841,7 @@ class App:
             if left and not self.message:
                 # make_game.py keeps the old exe until the new one is linked and records each finished step, so the
                 # game folder is playable and a rebuild goes on from there; the player is told that it is due
-                self.message = (f'NX2navi was closed or stopped during {left["task"]}, which did not finish. Play '
+                self.message = (f'OOT-PC was closed or stopped during {left["task"]}, which did not finish. Play '
                                 'starts the last finished build; Rebuild the Game finishes what was left.')
                 self.render()
             if self.install_staged('a staged update waited for the launcher to start'):
@@ -821,14 +853,14 @@ class App:
                 self.check_now()
         else:
             if left and not self.message:
-                self.message = (f'NX2navi was closed or stopped during {left["task"]}, which did not finish. Begin '
+                self.message = (f'OOT-PC was closed or stopped during {left["task"]}, which did not finish. Begin '
                                 'Installation goes on from the steps that were done.')
             self.show('first_run')
             self.find_dumps()
 
     def after_update_notice(self):
         if self.args.rolled_back:
-            self.message = (f'Version {self.args.rolled_back} did not start, so OOT-DEBUG-MENU went back to '
+            self.message = (f'Version {self.args.rolled_back} did not start, so OOT-PC went back to '
                             f'{versions.display(self.layout.version)}.')
 
     def show(self, screen, focus=None):
@@ -904,9 +936,9 @@ class App:
             Row('value', 'Install Folder', gd, big=True, on=self.choose_folder, desc=folder_desc),
             Row('divider'),
             self.toggle('Desktop Shortcut', 'desktop_shortcut',
-                        'Put an OOT-DEBUG-MENU shortcut on the desktop. The Start menu always has one.'),
+                        'Put an OOT-PC shortcut on the desktop. The Start menu always has one.'),
             self.toggle('Check for Updates at Start', 'auto_check',
-                        'Look for a new version of OOT-DEBUG-MENU when the launcher opens, and every hour while it stays '
+                        'Look for a new version of OOT-PC when the launcher opens, and every hour while it stays '
                         'open. A new version downloads in the background and installs when you are not playing; '
                         'Settings can make it wait until you choose Updates.'),
             self.channel_row(),
@@ -934,7 +966,7 @@ class App:
                          'released, which may have new problems.',))
 
     def discord_row(self, game_dir):
-        """The game's discord_rpc setting (runtime/discord_rpc.c), kept in the game's nx2navi.ini as the game's own
+        """The game's discord_rpc setting (runtime/discord_rpc.c), kept in the game's OOT-PC.ini as the game's own
         menu keeps it; the game reads it when it starts. On unless the file says 0, as the game reads it (cfg_bool,
         default on)."""
         def on(v):
@@ -955,10 +987,10 @@ class App:
         def get():
             try:
                 return gameini.get(game_dir, 'discord_rpc') != '0'
-            except OSError:   # nx2navi.ini there but unreadable: the game's default
+            except OSError:   # OOT-PC.ini there but unreadable: the game's default
                 return True
         return Row('toggle', 'Discord Status', on=on, get=get,
-                   desc=('Show "Playing NX2navi" with your play time in your Discord status while the game runs. '
+                   desc=('Show "Playing The Legend of Zelda: Ocarina of Time PC" with your play time in your Discord status while the game runs. '
                          'The game\'s menu switches it too (Game tab).',))
 
     def choose_dump(self):
@@ -983,8 +1015,8 @@ class App:
         if not path:
             return
         p = Path(path)
-        if p.exists() and any(p.iterdir()) and not (p / 'build-cache').is_dir() and p.name.lower() != 'oot-debug-menu':
-            p = p / 'OOT-DEBUG-MENU'
+        if p.exists() and any(p.iterdir()) and not (p / 'build-cache').is_dir() and p.name.lower() not in ('oot-pc', 'oot-debug-menu'):
+            p = p / 'OOT-PC'
         self.settings['game_dir'] = str(p)
         self.settings.save()
         self.show(self.screen, self.focus)
@@ -1032,7 +1064,7 @@ class App:
                       on=self.start_update, focus_value=True, desc=self.update_desc)
         elif self.check and self.check.result is None:
             upd = Row('value', 'Updates', 'Checking…', 'dim', big=True, icon='refresh', on=lambda: None,
-                      desc=('Looking for a new version of OOT-DEBUG-MENU.',))
+                      desc=('Looking for a new version of OOT-PC.',))
         elif self.check_error:
             upd = Row('value', 'Updates', 'Could not check', 'dim', big=True, icon='refresh',
                       on=lambda: self.check_now(force=True),
@@ -1045,7 +1077,7 @@ class App:
         else:
             upd = Row('value', 'Updates', f'Version {mine}', 'normal', big=True, icon='refresh',
                       on=lambda: self.check_now(force=True),
-                      desc=(f'You have OOT-DEBUG-MENU {mine}. Select this row to look for a new version.',))
+                      desc=(f'You have OOT-PC {mine}. Select this row to look for a new version.',))
         # an update that stopped in the compile left no finished build on record, but the exe of the build before it
         unfinished = not built and build.installed(gd)
         rebuild_value = (f'Built with {versions.display(built)}' if built else
@@ -1058,7 +1090,7 @@ class App:
             play_desc += (f'The last rebuild of the game did not finish, so Play starts the build from before it. '
                           f'Rebuild the Game finishes it and brings the game to {mine}; your dump is not needed.',)
         if staged and self.settings.get('auto_install'):
-            play_desc += (f'OOT-DEBUG-MENU {staged["version"]} is downloaded and installs after you quit the game.',)
+            play_desc += (f'OOT-PC {staged["version"]} is downloaded and installs after you quit the game.',)
         if self.message:
             play_desc = (self.message,) + play_desc
         return [
@@ -1068,7 +1100,7 @@ class App:
             self.version_row(),
             Row('value', 'Game Folder', gd, on=lambda: self.open(gd),
                 desc=('Open the game folder. The game keeps your save in its profile folder, its settings in '
-                      'nx2navi.ini and its logs in logs. Its saves folder holds backups and the save tree, and saves '
+                      'OOT-PC.ini and its logs in logs. Its saves folder holds backups and the save tree, and saves '
                       'to import go into saves\\import.',)),
             self.saves_row(gd),
             Row('value', 'Save Tree', 'Open', 'arrow', on=self.open_save_tree,
@@ -1183,7 +1215,7 @@ class App:
                                           'It takes as long and as much space (about 34 GB) as the first install.')))
                 else:
                     rows.append(Row('value', f'Install {v}', 'Not Supported Yet', 'dim', on=lambda: None,
-                                    desc=(f'Your dump holds Ocarina of Time {v}, but OOT-DEBUG-MENU cannot build it '
+                                    desc=(f'Your dump holds Ocarina of Time {v}, but OOT-PC cannot build it '
                                           'yet: the port to this version is still being made.',)))
             if not more:
                 found = ', '.join(v for v, _ in self.dump_versions) or 'no version this launcher knows'
@@ -1647,7 +1679,7 @@ class App:
 
     def saves_row(self, gd):
         """Saves: the screen that exports and imports saves; orange while a save waits in the import folder."""
-        ready = self.save_waiting(gd)
+        ready = not IMPORT_DISABLED and self.save_waiting(gd)
         desc = ('Export your save into one zip, to attach to a bug report or give to another player, or import a '
                 'save someone shared, a Switch save backup or an emulator\'s save.',)
         if ready:
@@ -1664,24 +1696,27 @@ class App:
 
     def rows_saves(self):
         gd = self.settings.get('game_dir')
-        ready = self.save_waiting(gd)
+        ready = not IMPORT_DISABLED and self.save_waiting(gd)
         out = self.export_dir()
         export_desc = ('Write your save into one zip file, to attach to a bug report or give to another player: every '
-                       'save slot and a note of the OOT-DEBUG-MENU and game versions, never your keys or game files. The '
+                       'save slot and a note of the OOT-PC and game versions, never your keys or game files. The '
                        'folder opens with the zip selected.',)
         if self.export_message:
             export_desc = (self.export_message,) + export_desc
-        import_desc = ('Make a save someone shared (an OOT-DEBUG-MENU-save zip) your save: every slot is replaced. Put the zip '
+        import_desc = ('Make a save someone shared (an OOT-PC-save zip) your save: every slot is replaced. Put the zip '
                        'into the import folder (saves\\import in the game folder) and select this row, or select this '
                        'row and choose the zip.', 'Your current save is copied to the saves folder first.')
         if gd and saves.pending_import(gd):
             import_desc += ('A save imported in the game\'s menu waits for the game\'s next start; an import here '
                             'replaces it.',)
-        folder_desc = ('Bring in a save folder: a Switch save backup, an emulator\'s save, another OOT-DEBUG-MENU install, or '
+        folder_desc = ('Bring in a save folder: a Switch save backup, an emulator\'s save, another OOT-PC install, or '
                        'one save slot (a folder named slot_00 to slot_05: only that slot is replaced).',
                        'Your current save is copied to the saves folder first.')
         if self.save_message:
             import_desc, folder_desc = (self.save_message,) + import_desc, (self.save_message,) + folder_desc
+        if IMPORT_DISABLED:
+            off = 'Turned off for now: importing may break your saves.'
+            import_desc, folder_desc = (off,) + import_desc, (off,) + folder_desc
 
         def report(v):
             self.settings['export_with_log'] = bool(v)
@@ -1689,17 +1724,19 @@ class App:
         return [
             Row('value', 'Export Save', out.name or str(out), on=self.export_save, desc=export_desc),
             Row('toggle', 'Add Log and Settings', on=report, get=lambda: bool(self.settings.get('export_with_log')),
-                desc=('On: the zip also holds the game\'s latest log (logs\\nx2navi.log) and its settings '
-                      '(nx2navi.ini), which show what happened and with which settings. Keep it on for a bug report: '
+                desc=('On: the zip also holds the game\'s latest log (logs\\ootpc.log) and its settings '
+                      '(OOT-PC.ini), which show what happened and with which settings. Keep it on for a bug report: '
                       'while the game has no save yet, Export Save then writes these two alone.',
                       'Off: the save alone, to give to another player.')),
             Row('value', 'Export To', str(out), on=self.choose_export_dir,
                 desc=(f'Export Save writes into {out}.', 'Select this row to choose another folder.')),
             Row('divider'),
-            Row('value', 'Import a Save', 'From the Import Folder' if ready else 'Choose a Zip',
-                'orange_arrow' if ready else 'arrow', on=lambda: self.import_saves(folder=False), desc=import_desc),
-            Row('value', 'Import a Save Folder', 'Choose a Folder', 'arrow',
-                on=lambda: self.import_saves(folder=True), desc=folder_desc),
+            Row('value', 'Import a Save', 'Turned Off' if IMPORT_DISABLED else
+                'From the Import Folder' if ready else 'Choose a Zip',
+                'dim' if IMPORT_DISABLED else 'orange_arrow' if ready else 'arrow',
+                on=lambda: self.import_saves(folder=False), desc=import_desc),
+            Row('value', 'Import a Save Folder', 'Turned Off' if IMPORT_DISABLED else 'Choose a Folder',
+                'dim' if IMPORT_DISABLED else 'arrow', on=lambda: self.import_saves(folder=True), desc=folder_desc),
             Row('value', 'Open Import Folder', '', 'arrow',
                 on=lambda: gd and Path(gd).is_dir() and (saves.ensure_saves_dir(gd), self.open(saves.import_dir(gd))),
                 desc=('The import folder (saves\\import in the game folder): put a save here, then select Import a '
@@ -1747,6 +1784,9 @@ class App:
         Folder (folder True): a folder the player picks; the saves or the import folder itself takes what waits
         there."""
         gd = self.settings.get('game_dir')
+        if IMPORT_DISABLED and not messagebox.askyesno('WARNING: this may break your saves', IMPORT_WARNING,
+                                                       icon='warning', default='no', parent=self.root):
+            return
         if not gd or not Path(gd).is_dir():
             self.save_message = 'Install the game first.'
         elif (self.game_proc and self.game_proc.poll() is None) or saves.game_running(gd):
@@ -1763,7 +1803,7 @@ class App:
                 elif saves.waiting(gd)[0] is None:
                     src = filedialog.askopenfilename(parent=self.root, title='Choose the save to import',
                                                      initialdir=str(self.export_dir()),
-                                                     filetypes=[('OOT-DEBUG-MENU save', '*.zip'), ('All files', '*.*')])
+                                                     filetypes=[('OOT-PC save', '*.zip'), ('All files', '*.*')])
                     if not src:
                         return
                 r = saves.import_save(gd, src, log=self.ctx.log)
@@ -1778,8 +1818,8 @@ class App:
         """What an import did, for the import rows' descriptions."""
         m = r.get('manifest')
         if m:
-            text = (f'Save imported from {r["source"].name} (exported {str(m.get("exported", ""))[:10]} with OOT-DEBUG-MENU '
-                    f'{m.get("nx2navi") or "?"}).')
+            text = (f'Save imported from {r["source"].name} (exported {str(m.get("exported", ""))[:10]} with OOT-PC '
+                    f'{m.get("ootpc") or "?"}).')
         elif r['slot']:
             text = f'Save imported into {r["slot"]}.'
         else:
@@ -1839,6 +1879,18 @@ class App:
             Row('value', 'Add a Mod Folder', 'Choose a Folder', 'arrow', on=lambda: self.add_mod(folder=True),
                 desc=msg + ('Choose the folder of a mod (one with a romfs, exefs or cheats folder in it, or an '
                             'atmosphere folder): it is copied into the mods folder.',)),
+            Row('value', 'Make N64 Graphics', 'Working' if self.n64_busy else 'Choose Your ROM', 'arrow',
+                on=self.make_n64,
+                desc=msg + ('Choose your own N64 Ocarina of Time ROM (.z64, .n64 or .v64): the launcher makes the N64 '
+                            "Graphics mod from it, which draws Link as the N64 version's, with his N64 sword, "
+                            "shield, tunics and voice, moving with this game's animations. Takes about a minute; "
+                            "the game loads it at its next start. Do not share the mod: it holds the ROM's graphics "
+                            'and sounds.',)),
+            Row('value', 'Make Dark Link', 'Working' if self.dark_busy else 'Make', 'arrow', on=self.make_dark_link,
+                desc=msg + ("Makes the Dark Link mod from this game's own files: Link plays as Dark Link, the adult "
+                            "with Dark Link's models and the child made dark. With N64 Graphics on too, N64 Link is "
+                            "drawn as the N64 game's Dark Link at both ages. Takes about a minute; the game loads it "
+                            'at its next start. Switch it off below to play as Link again.',)),
         ]
         if found:
             rows.append(Row('divider'))
@@ -1951,6 +2003,78 @@ class App:
                                                               ' It is on: the game loads it at its next start.')
         self.show('mods', self.focus)
 
+    def make_n64(self):
+        """Make the N64 Graphics mod (tools/make_n64_mod.py) from a ROM the player chooses, on a thread of its own."""
+        gd = self.settings.get('game_dir')
+        if self.n64_busy:
+            return
+        if not gd or not Path(gd).is_dir():
+            self.mods_message = 'Install the game first.'
+        elif self.game_busy(gd):
+            self.mods_message = 'Quit the game first: it reads the mods when it starts.'
+        else:
+            rom = filedialog.askopenfilename(parent=self.root, title='Choose your N64 Ocarina of Time ROM',
+                                             initialdir=str(Path.home()),
+                                             filetypes=[('N64 ROM', '*.z64 *.n64 *.v64'), ('All files', '*.*')])
+            if not rom:
+                return
+            self.n64_busy = True
+            self.mods_message = 'Making N64 Graphics from your ROM...'
+
+            def work():
+                try:
+                    import make_n64_mod
+                    out = mods.ensure_mods_dir(gd) / make_n64_mod.MOD_NAME
+                    m = make_n64_mod.make(rom, out, log=self.ctx.log, romfs=Path(gd) / 'romfs')
+                    voice = ' and his voice' if m.get('voice') else ''
+                    msg = (f"Made N64 Graphics: Link's models{voice} from {Path(rom).name}. It is on: the game "
+                           'loads it at its next start.')
+                except Exception as e:   # a ROM that is not Ocarina of Time, a file that cannot be read or written
+                    self.ctx.log(f'n64: {type(e).__name__}: {e}')
+                    msg = f'N64 Graphics was not made: {e}'
+
+                def done():
+                    self.n64_busy, self.mods_message = False, msg
+                    if self.screen == 'mods':
+                        self.show('mods', self.focus)
+                self.root.after(0, done)
+            import threading
+            threading.Thread(target=work, daemon=True).start()
+        self.show('mods', self.focus)
+
+    def make_dark_link(self):
+        """Make the Dark Link mod (tools/make_dark_link_mod.py) from the installed game's files, on a thread of its own."""
+        gd = self.settings.get('game_dir')
+        if self.dark_busy:
+            return
+        if not gd or not Path(gd).is_dir():
+            self.mods_message = 'Install the game first.'
+        elif self.game_busy(gd):
+            self.mods_message = 'Quit the game first: it reads the mods when it starts.'
+        else:
+            self.dark_busy = True
+            self.mods_message = 'Making Dark Link from the game\'s files...'
+
+            def work():
+                try:
+                    import make_dark_link_mod
+                    out = mods.ensure_mods_dir(gd) / make_dark_link_mod.MOD_NAME
+                    make_dark_link_mod.make(gd, out, log=self.ctx.log, msys=self.ctx.layout.msys,
+                                            work=self.ctx.layout.cache / 'dark-link')
+                    msg = 'Made Dark Link. It is on: the game loads it at its next start.'
+                except (Exception, SystemExit) as e:   # no compiler, a game without the models, a file not written
+                    self.ctx.log(f'dark link: {type(e).__name__}: {e}')
+                    msg = f'Dark Link was not made: {e}'
+
+                def done():
+                    self.dark_busy, self.mods_message = False, msg
+                    if self.screen == 'mods':
+                        self.show('mods', self.focus)
+                self.root.after(0, done)
+            import threading
+            threading.Thread(target=work, daemon=True).start()
+        self.show('mods', self.focus)
+
     def rows_mod_order(self):
         gd = self.settings.get('game_dir')
         found = self.mod_list(gd, details=False)
@@ -2023,7 +2147,7 @@ class App:
         notes = feed.plain_notes(m.get('notes', ''), 4)
         if self.settings.get('auto_install'):
             text = (f'You have {mine}. Version {nv} is downloaded and installs when you are not playing: after you '
-                    'quit the game, or when OOT-DEBUG-MENU next opens. Select this row to install it now.')
+                    'quit the game, or when OOT-PC next opens. Select this row to install it now.')
         else:
             text = f'You have {mine}. Version {nv} is downloaded. Select this row to install it.'
         return {'title': f'Version {nv} Is Ready', 'text': [text],
@@ -2057,7 +2181,7 @@ class App:
         if not force and time.time() - self.settings.get('last_check', 0) < 600 and self.release:
             return
         if force and time.time() - self.check_started < FORCED_CHECK_PAUSE:
-            self.message = 'OOT-DEBUG-MENU looked for updates less than a minute ago.'
+            self.message = 'OOT-PC looked for updates less than a minute ago.'
             if self.screen == 'home':
                 self.show('home', self.focus)
             return
@@ -2111,6 +2235,8 @@ class App:
             return
         if waiting:
             self.ctx.log(f'play: without the code of {", ".join(waiting)}, whose build did not finish')
+        if mods.feature_on(gd, mods.STEAM_COOP):   # the Steam Co-op mod: Steam's library file beside the game
+            steamlib.ensure(gd, self.ctx.layout.app / 'bin', log=self.ctx.log)
         try:
             self.game_proc = winsys.start_game(exe)
         except OSError as e:
@@ -2145,10 +2271,10 @@ class App:
                 shown = fatal if len(fatal) <= FATAL_SHOWN else fatal[:FATAL_SHOWN].rstrip() + '…'
                 self.ctx.log(f'the game ended with code {code & 0xFFFFFFFF}; its log says: FATAL: {fatal}')
                 self.message = (f'The game ended with a fatal error (code {code & 0xFFFFFFFF}): {shown}. Its log is '
-                                'logs\\nx2navi.log in the game folder.')
+                                'logs\\ootpc.log in the game folder.')
             else:
                 self.ctx.log(f'the game ended with code {text}')
-                self.message = f'The game ended with code {text}. Its log is logs\\nx2navi.log in the game folder.'
+                self.message = f'The game ended with code {text}. Its log is logs\\ootpc.log in the game folder.'
             note_exit_in_log(self.game_dir(), text)
         if self.install_staged('the game exited'):
             return
@@ -2193,10 +2319,10 @@ class App:
         if not ver:
             return False
         if self.bg.restarting:
-            self.message = f'Installing OOT-DEBUG-MENU {ver}…'
+            self.message = f'Installing OOT-PC {ver}…'
             self.root.after(200, self.root.destroy)
         else:
-            self.message = f'OOT-DEBUG-MENU {ver} is installed: start OOT-DEBUG-MENU again to finish it.'
+            self.message = f'OOT-PC {ver} is installed: start OOT-PC again to finish it.'
         if self.screen == 'home':
             self.show('home', self.focus)
         return True
@@ -2229,11 +2355,11 @@ class App:
         dump = self.settings.get('dump')
         return [
             self.toggle('Check for Updates at Start', 'auto_check',
-                        'Look for a new version of OOT-DEBUG-MENU when the launcher opens, and every hour while it stays '
+                        'Look for a new version of OOT-PC when the launcher opens, and every hour while it stays '
                         'open (also while you play). A new version downloads in the background.'),
             self.toggle('Install Updates Automatically', 'auto_install',
                         'Install a downloaded update by itself when you are not playing: after you quit the game, '
-                        'or when OOT-DEBUG-MENU opens. Off: it waits until you select Updates. Updates download in the '
+                        'or when OOT-PC opens. Off: it waits until you select Updates. Updates download in the '
                         'background either way.'),
             self.toggle('Hide Launcher While Playing', 'hide_while_playing',
                         'Hide this window while the game runs; it comes back when you quit the game.'),
@@ -2244,7 +2370,7 @@ class App:
             *([self.discord_row(gd)] if gd and Path(gd).is_dir() else []),
             Row('divider'),
             Row('value', 'Game Folder', gd or 'Not chosen', on=lambda: gd and self.open(gd),
-                desc=('Open the game folder: saves in profile, the game\'s settings in nx2navi.ini, its logs in '
+                desc=('Open the game folder: saves in profile, the game\'s settings in OOT-PC.ini, its logs in '
                       'logs.',)),
             Row('value', 'Game Dump', Path(dump).name if dump else 'Not chosen', on=self.choose_dump,
                 desc=(f'The dump the game was built from: {dump}.' if dump else 'No dump chosen yet.',
@@ -2253,7 +2379,7 @@ class App:
             Row('value', 'Open Logs Folder', '', 'arrow', on=lambda: self.open(self.layout.logs),
                 desc=('The launcher\'s logs. Attach launcher.log when you report a problem with installing or '
                       'updating; never send game files.',)),
-            Row('value', 'Uninstall OOT-DEBUG-MENU', 'Keeps your saves', 'salmon', on=lambda: self.show('uninstall'),
+            Row('value', 'Uninstall OOT-PC', 'Keeps your saves', 'salmon', on=lambda: self.show('uninstall'),
                 desc=('Remove the launcher and its build tools. You choose on the next screen whether the built '
                       'game goes too.',)),
             Row('action', 'Back', on=lambda: self.show('home'), height=40, desc=('Back to the main menu.',)),
@@ -2271,7 +2397,7 @@ class App:
                       'Off: the game folder and your saves stay where they are.')),
             Row('divider'),
             Row('pair', actions=[('Uninstall', self.do_uninstall), ('Cancel', lambda: self.show('settings'))],
-                desc=('Uninstall removes OOT-DEBUG-MENU, its build tools and its shortcuts. Your dump is never touched.',)),
+                desc=('Uninstall removes OOT-PC, its build tools and its shortcuts. Your dump is never touched.',)),
         ]
 
     def do_uninstall(self):
@@ -2388,7 +2514,7 @@ class App:
 
     def copy_report(self):
         j = self.job
-        report = [f'OOT-DEBUG-MENU {self.layout.version} ({"checkout" if self.layout.dev else "release"}), {sys.platform}',
+        report = [f'OOT-PC {self.layout.version} ({"checkout" if self.layout.dev else "release"}), {sys.platform}',
                   f'Job: {j.kind}, step: {j.current().label}', f'Error: {j.error}', '', 'Last lines:']
         report += j.last_lines(60)
         self.root.clipboard_clear()
@@ -2418,7 +2544,7 @@ class App:
                 if winsys.restart(self.layout, ['--continue-update', versions.display(self.layout.version)]):
                     self.root.after(200, self.root.destroy)
                     return
-                self.message = 'The update is ready: start OOT-DEBUG-MENU again to finish it.'
+                self.message = 'The update is ready: start OOT-PC again to finish it.'
             elif j.after == 'staged':
                 self.message = 'The update was downloaded; a checkout keeps running from the repository.'
             elif j.after == 'play':   # the mods' code is built in (play): the game starts
@@ -2435,7 +2561,7 @@ class App:
                 self.message = 'The game is built. Select Play.'
             elif j.kind in ('update', 'rebuild'):
                 self.message = 'The game is rebuilt and up to date.' if j.kind == 'rebuild' else \
-                    f'OOT-DEBUG-MENU is now {versions.display(self.layout.version)}.'
+                    f'OOT-PC is now {versions.display(self.layout.version)}.'
                 self.release = None
             note = getattr(j, 'note', '')   # what the file check found (jobs.Job.note_scan)
             if note and j.after is None:
@@ -2566,9 +2692,7 @@ class App:
             if k != sp['shown']:
                 sp['shown'] = k
                 c.itemconfigure(sp['id'], image=sp['pics'][k])
-        if self.navi_xy:   # Navi rises and sinks two pixels every 2.4 s, her halo pulses with her
-            x, y = self.navi_xy
-            c.coords('navi', x, y + round(math.sin(t * 2.6) * self.X(2)))
+        if self.navi_xy:   # the emblem's halo pulses every 2.4 s
             if self.halo:
                 c.itemconfigure('halo', image=self.halo[int(t / 2.4 * len(self.halo)) % len(self.halo)])
 
@@ -2577,13 +2701,21 @@ class App:
     def render(self):
         c = self.canvas
         c.delete('dyn')
+        titles = {'home': 'Your adventure', 'first_run': 'Welcome to OOT-PC', 'settings': 'Settings',
+                  'customize': 'Appearance', 'saves': 'Saves', 'mods': 'Mods', 'versions': 'Game versions',
+                  'mod_order': 'Load order', 'uninstall': 'Manage installation', 'color': 'Custom colors',
+                  'job': 'Preparing your adventure'}
+        self.draw_navigation()
+        self.text(self.X(390),self.X(120),titles.get(self.screen,'OOT-PC'),self.f['page'],P['text_bright'])
+        divider=self.sprite(('heading-rule',self.X(925)),lambda:art.forest_widget(self.X(925),self.X(25),2))
+        c.create_image(self.X(390),self.X(161),anchor='w',image=divider,tags='dyn')
         if self.screen == 'job' and self.job:
             if self.job.result is None or self.rows == []:
                 self.rows = self.rows_job()
             if not (0 <= self.focus < len(self.rows)) or not self.rows[self.focus].focusable:
                 self.focus = self.job_focus()
         x0, x1, y = ROWS
-        heights, self.row_gap = self.fit_rows(y, H - 46 if self.screen == 'job' else H - 12)
+        heights, self.row_gap = self.fit_rows(y, H - 115 if self.screen == 'job' else H - 100)
         for r, h in zip(self.rows, heights):
             self.draw_row(r, self.X(x0), self.X(y), self.X(x1), self.X(y + h))
             y += h + self.row_gap
@@ -2627,7 +2759,7 @@ class App:
         left = f'Stopped at step {n} of {len(steps)}' if j.result == 'failed' else f'Step {n} of {len(steps)}'
         if self.message:
             left = self.message
-        y = self.X(H - 24)
+        y = self.X(H - 104)
         self.canvas.create_text(self.X(PANEL[0] + 30), y, text=left, anchor='sw', font=self.f['status'],
                                 fill=P['status'], tags='dyn')
         self.canvas.create_text(self.X(PANEL[2] - 30), y, text=f'Elapsed {jobs.mmss(j.elapsed())}', anchor='se',
@@ -2644,8 +2776,14 @@ class App:
         c, s, X = self.canvas, self.s, self.X
         r.rect = (x0, y0, x1, y1)
         if r.kind == 'divider':
-            img = self.sprite(('filigree', x1 - x0), lambda: art.filigree(x1 - x0, s)[0])
+            img = self.sprite(('forest-divider', x1 - x0), lambda: art.forest_widget(x1-x0,X(22),2))
             c.create_image(x0, (y0 + y1) // 2, anchor='w', image=img, tags='dyn')
+            return
+        if self.screen == 'home' and r.label == 'Play':
+            img=self.sprite(('play-plate',x1-x0,y1-y0),lambda:art.forest_widget(x1-x0,y1-y0,1))
+            c.create_image(x0,y0,anchor='nw',image=img,tags='dyn')
+            self.text((x0+x1)//2,(y0+y1)//2,f'Play  ·  {r.value}',self.f['action_big'],'#20240f',anchor='center',shadow=False)
+            r.value_rect=None
             return
         if r.kind in ('action', 'pair'):
             parts = [(r.label, r.on)] if r.kind == 'action' else r.actions
@@ -2669,9 +2807,9 @@ class App:
         lw = X(LABEL_W)
         lx1 = x0 + lw
         lit = r is self.focused()
-        img = self.sprite(('label', lw, y1 - y0, lit), lambda: art.label_cell(lw, y1 - y0, s, lit))
-        ring = max(1, int(round(s)))
-        c.create_image(x0 - ring, y0 - ring, anchor='nw', image=img, tags='dyn')
+        if lit:
+            img=self.sprite(('selected-row',x1-x0,y1-y0),lambda:art.forest_widget(x1-x0,y1-y0,0))
+            c.create_image(x0,y0,anchor='nw',image=img,tags='dyn')
         tx = x0 + X(16)
         if r.icon:
             size = X(32)
@@ -2690,7 +2828,7 @@ class App:
                           fill=P['badge_text'], tags='dyn')
         vx0 = lx1
         r.value_rect = (vx0, y0, x1, y1)
-        c.create_rectangle(vx0, y0, x1 - 1, y1 - 1, fill=P['value'], outline=P['value_border'], width=1, tags='dyn')
+        c.create_line(x0,y1-1,x1,y1-1,fill=P['value_border'],tags='dyn')
         pad = X(3) if not r.big else X(4)
         ix0, iy0, ix1, iy1 = vx0 + pad, y0 + pad, x1 - pad, y1 - pad
         cy = (y0 + y1) // 2
@@ -2778,8 +2916,6 @@ class App:
             return
         if r.kind == 'pair' and r.parts:
             box = r.parts[getattr(r, 'pick', 0)][0]
-        elif (r.kind in ('toggle', 'enum', 'progress') or r.focus_value) and r.value_rect:
-            box = r.value_rect
         else:
             box = r.rect
         x0, y0, x1, y1 = box
@@ -2847,7 +2983,7 @@ class App:
         if d.get('note'):
             add('text', d['note'], self.f['small'], P['muted'], X(4))
         # measure: draw at a provisional top, then move everything to the final top
-        top0 = X(112)
+        top0 = X(188)
         y = top0 + pady
         made = []
         for kind, args in items:
@@ -2898,8 +3034,8 @@ class App:
                     ty += lh
                 y += h + X(14)
         height = y - top0 + pady - X(4)
-        top = X(236) if height < X(200) else X(112)
-        top = min(top, X(H - 30) - height) if top + height > X(H - 30) else top
+        top = X(210) if height < X(200) else X(188)
+        top = max(X(188), min(top, X(H - 105) - height))
         dy = top - top0
         if dy:
             c.move('desc', 0, dy)
@@ -2914,7 +3050,7 @@ class App:
 
 
 def parse_args(argv):
-    ap = argparse.ArgumentParser(prog='OOT-DEBUG-MENU')
+    ap = argparse.ArgumentParser(prog='OOT-PC')
     ap.add_argument('--from', dest='source', help='a folder to look in for the dump first (the setup\'s folder)')
     ap.add_argument('--continue-update', metavar='OLD', help='finish an update after the restart (from OLD)')
     ap.add_argument('--rolled-back', metavar='VERSION', help='the stub went back from VERSION')
@@ -2972,6 +3108,8 @@ def play_only(ctx):
     if waiting:   # the window builds the mods' code in, then starts the game (App.start with --play)
         ctx.log(f'play from Steam: the game is built again first for the code of {", ".join(waiting)}')
         return None
+    if mods.feature_on(gd, mods.STEAM_COOP):   # the Steam Co-op mod: Steam's library file beside the game
+        steamlib.ensure(gd, ctx.layout.app / 'bin', log=ctx.log)
     try:
         proc = winsys.start_game(exe)
     except OSError as e:
@@ -3003,11 +3141,15 @@ def main(argv=None):
             # A second window on the same folder would run its own jobs into the same game folder and settings. The
             # first one may be out of sight (hidden while the game runs), so the player is told who holds the folder
             ctx.log(f'not started: {e}')
-            tell(f'NX2navi is already running: {e}.\n\nIts window may be hidden while the game runs; it comes back '
+            tell(f'OOT-PC is already running: {e}.\n\nIts window may be hidden while the game runs; it comes back '
                  'when you quit the game.')
             return 0
+        try:
+            rebrand.run(ctx.layout, ctx.log)
+        except Exception as e:   # noqa: BLE001 - the move to the new names never keeps the launcher from starting
+            ctx.log(f'rebrand: {e}')
     try:
-        root = tk.Tk(className='OOT-DEBUG-MENU')
+        root = tk.Tk(className='OOT-PC')
         app = App(root, ctx, a)
         app.instance_lock = lock
         if a.selftest:

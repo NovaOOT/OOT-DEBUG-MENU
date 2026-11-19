@@ -1,13 +1,13 @@
-﻿// nx2navi.exe entry: reserves the guest address space, parses the command line and runs one mode.
+﻿// ocarina.exe entry: reserves the guest address space, parses the command line and runs one mode.
 //
-//   nx2navi.exe [--exefs DIR] [--romfs DIR] [--profile DIR] [--audio-device VALUE] [--monitor VALUE] <mode>
-//     --audio-device VALUE   play the sound on one output device: sets NX2NAVI_AUDIO_DEVICE before the settings are read, so
-//                       it wins over nx2navi.ini's `audio_device =`. VALUE is default (the system default device),
+//   ocarina.exe [--exefs DIR] [--romfs DIR] [--profile DIR] [--audio-device VALUE] [--monitor VALUE] <mode>
+//     --audio-device VALUE   play the sound on one output device: sets OOTPC_AUDIO_DEVICE before the settings are read, so
+//                       it wins over OOT-PC.ini's `audio_device =`. VALUE is default (the system default device),
 //                       a 1-based index as --list-audio-devices prints it (devices sorted by name), or part of a device name, case-insensitive
 //     --list-audio-devices   print each playback device's index, name, channels and frequency, mark the system default and
-//                       show which device NX2NAVI_AUDIO_DEVICE picks; needs no game files
-//     --monitor VALUE   open the game window on one monitor: sets NX2NAVI_MONITOR before the settings are read, so it wins
-//                       over nx2navi.ini's `monitor =`. VALUE is auto (default), primary, a 1-based index as --list-monitors
+//                       show which device OOTPC_AUDIO_DEVICE picks; needs no game files
+//     --monitor VALUE   open the game window on one monitor: sets OOTPC_MONITOR before the settings are read, so it wins
+//                       over OOT-PC.ini's `monitor =`. VALUE is auto (default), primary, a 1-based index as --list-monitors
 //                       prints it, or part of a monitor's name (on Windows also of its GDI device name, DISPLAY3),
 //                       case-insensitive. Wayland places a windowed window itself: only fullscreen opens on the monitor
 //     --list-monitors   print each monitor's index, name (on Windows also its GDI device name), desktop rectangle,
@@ -33,7 +33,7 @@
 //     --boot            run the game to the first NVN call
 //     --seconds S       run the game (implies --boot's start-up) until the world clock (game time since the loaded
 //                       save's first frame) passed S seconds, then exit 0 at that present
-//     --shot PNG        with --seconds: save that frame; env NX2NAVI_GPU=null|vulkan selects the back end
+//     --shot PNG        with --seconds: save that frame; env OOTPC_GPU=null|vulkan selects the back end
 //     (no mode)         run the game
 //
 // Also here: the runtime services the generated code calls besides rt_dispatch and rt_svc (rt_brk, rt_udf,
@@ -46,6 +46,8 @@
 #include <string.h>
 
 #include "cfg.h"
+#include "coop.h"
+#include "coop_game.h"
 #include "host.h"
 #include "logq.h"
 #include "prof.h"
@@ -58,9 +60,9 @@
 unsigned rt_trace;
 
 // Log file. A game run whose stderr is not a file already (started from Explorer, a shortcut or a console) also
-// writes its log to logs\nx2navi.log next to nx2navi.exe, so a player has one to attach to a report; run_game.py and
-// `2> file` keep their own file. Each start moves the earlier logs to nx2navi.1.log .. nx2navi.4.log. A file stops at 64 MiB
-// (NX2NAVI_TRACE can write that much). Lines from before log_open wait in a static buffer: mem_init runs first so that
+// writes its log to logs\ootpc.log next to ocarina.exe, so a player has one to attach to a report; run_game.py and
+// `2> file` keep their own file. Each start moves the earlier logs to ootpc.1.log .. ootpc.4.log. A file stops at 64 MiB
+// (OOTPC_TRACE can write that much). Lines from before log_open wait in a static buffer: mem_init runs first so that
 // nothing else lands in the guest address space, and an earlier open would put the CRT's heap there.
 #define LOG_KEEP 5
 #define LOG_CAP (64ull << 20)
@@ -170,13 +172,13 @@ static void log_open(int game) {
     if (cut && (size_t)(cut - dir) + sizeof "/logs" <= sizeof dir) {
         strcpy(cut, "/logs");
         plat_file_mkdir_p(dir);
-        for (int i = LOG_KEEP - 1; i > 0; i--) {   // nx2navi.3.log -> nx2navi.4.log, ..., nx2navi.log -> nx2navi.1.log
-            if (i > 1) snprintf(from, sizeof from, "%s/nx2navi.%d.log", dir, i - 1);
-            else snprintf(from, sizeof from, "%s/nx2navi.log", dir);
-            snprintf(to, sizeof to, "%s/nx2navi.%d.log", dir, i);
+        for (int i = LOG_KEEP - 1; i > 0; i--) {   // ootpc.3.log -> ootpc.4.log, ..., ootpc.log -> ootpc.1.log
+            if (i > 1) snprintf(from, sizeof from, "%s/ootpc.%d.log", dir, i - 1);
+            else snprintf(from, sizeof from, "%s/ootpc.log", dir);
+            snprintf(to, sizeof to, "%s/ootpc.%d.log", dir, i);
             if (plat_file_exists(from)) plat_file_replace(from, to, 1);
         }
-        snprintf(g_log_path, sizeof g_log_path, "%s/nx2navi.log", dir);
+        snprintf(g_log_path, sizeof g_log_path, "%s/ootpc.log", dir);
         g_log_file = plat_append_open(g_log_path);
     }
     if (!g_log_file) {
@@ -190,15 +192,15 @@ static void log_open(int game) {
         rt_log("log: %s", g_log_path);
     }
     // A game run writes its log from the log thread (logq.c), whether the lines go to a log file or to stderr alone.
-    const char *e = cfg_get("NX2NAVI_LOG_ASYNC");
+    const char *e = cfg_get("OOTPC_LOG_ASYNC");
     if (!game || (e && !strcmp(e, "0"))) return;
     plat_exit_hook = rt_log_sync;
-    if (logq_async()) rt_log("log: lines are written by a thread of their own (NX2NAVI_LOG_ASYNC)");
+    if (logq_async()) rt_log("log: lines are written by a thread of their own (OOTPC_LOG_ASYNC)");
     else rt_log("log: no log thread; every line is written by the thread that logs it");
 }
 
 static void parse_trace(void) {
-    const char *e = cfg_get("NX2NAVI_TRACE");   // no default: nothing is traced when unset
+    const char *e = cfg_get("OOTPC_TRACE");   // no default: nothing is traced when unset
     if (!e) return;
     static const struct { const char *name; unsigned bit; } names[] = {
         {"svc", RT_TRACE_SVC}, {"host", RT_TRACE_HOSTCALL}, {"ipc", RT_TRACE_IPC}, {"fs", RT_TRACE_FS},
@@ -209,7 +211,7 @@ static void parse_trace(void) {
         int known = 0;
         for (unsigned i = 0; i < sizeof names / sizeof *names; i++)
             if (strlen(names[i].name) == n && !strncmp(p, names[i].name, n)) rt_trace |= names[i].bit, known = 1;
-        if (!known && n) rt_log("NX2NAVI_TRACE: unknown item '%.*s' (svc, host, ipc, fs, gfx, perf, sched, audio, present, all)", (int)n, p);
+        if (!known && n) rt_log("OOTPC_TRACE: unknown item '%.*s' (svc, host, ipc, fs, gfx, perf, sched, audio, present, all)", (int)n, p);
         p += n + (p[n] == ',');
     }
 }
@@ -333,7 +335,7 @@ static void crash_handler(const PlatCrash *x) {
     uintptr_t rip = x->rip;
     rt_logf("FATAL: %s (%#x) at host %p (", x->what, x->code, (void *)rip);
     if (x->module && !*x->module) rt_logf("outside every module)");
-    else rt_logf("%s+%#llx)", x->module ? x->module : "nx2navi", (unsigned long long)x->offset);
+    else rt_logf("%s+%#llx)", x->module ? x->module : "ocarina", (unsigned long long)x->offset);
     if (x->access >= 0)
         rt_logf(", %s address %#llx", x->access == 1 ? "writing" : x->access == 8 ? "executing" : "reading",
                 (unsigned long long)x->addr);
@@ -351,7 +353,7 @@ static void crash_handler(const PlatCrash *x) {
     uintptr_t exe = plat_exe_base();
     for (int i = 0; i < x->nframes; i++) {
         uint64_t g = lifted_function(x->frames[i]);
-        rt_logf("  host frame %2d: nx2navi+%#llx", i, (unsigned long long)(x->frames[i] - exe));
+        rt_logf("  host frame %2d: ocarina+%#llx", i, (unsigned long long)(x->frames[i] - exe));
         if (g) rt_logf(" in lifted function f_%llx", (unsigned long long)g);
         rt_log_raw("\n", 1);
     }
@@ -376,7 +378,7 @@ static void crash_handler(const PlatCrash *x) {
     fs_save_crash_wait();   // a save the game already reported as done finishes first (bounded; fs_host.c)
     rtss_limit_restore();   // after the report: RivaTuner Statistics Server's profile as it was
     fflush(stderr);
-    prof_sampler_write();   // NX2NAVI_PROFILE: what was sampled until the crash (it gives up after 2 s if the sampler hangs)
+    prof_sampler_write();   // OOTPC_PROFILE: what was sampled until the crash (it gives up after 2 s if the sampler hangs)
     plat_exit(71);
 }
 
@@ -607,9 +609,9 @@ static int usage(const char *argv0) {
     return 2;
 }
 
-// Paths for a copied folder (tools/package_build.py). Per path: NX2NAVI_EXEFS, NX2NAVI_ROMFS, NX2NAVI_PROFILE_DIR, else the
-// folder next to nx2navi.exe (exefs with main.npdm, romfs with romfs.bin, any profile folder) if it is there, else the
-// path baked in at build time. A relative value is relative to nx2navi.exe's folder.
+// Paths for a copied folder (tools/package_build.py). Per path: OOTPC_EXEFS, OOTPC_ROMFS, OOTPC_PROFILE_DIR, else the
+// folder next to ocarina.exe (exefs with main.npdm, romfs with romfs.bin, any profile folder) if it is there, else the
+// path baked in at build time. A relative value is relative to ocarina.exe's folder.
 static char pp_exefs[PLAT_PATH_MAX * 2], pp_romfs[PLAT_PATH_MAX * 2], pp_profile[PLAT_PATH_MAX * 2];
 
 static const char *portable_path(const char *dir, const char *var, const char *sub, const char *must, char *out, size_t cap,
@@ -634,9 +636,9 @@ static void portable_paths(RtConfig *c) {
     char *cut = n && n < sizeof exe ? plat_last_sep(exe) : NULL;
     if (!cut) return;
     *cut = 0;
-    c->exefs = portable_path(exe, "NX2NAVI_EXEFS", "exefs", "main.npdm", pp_exefs, sizeof pp_exefs, c->exefs);
-    c->romfs = portable_path(exe, "NX2NAVI_ROMFS", "romfs", "romfs.bin", pp_romfs, sizeof pp_romfs, c->romfs);
-    c->profile = portable_path(exe, "NX2NAVI_PROFILE_DIR", "profile", NULL, pp_profile, sizeof pp_profile, c->profile);
+    c->exefs = portable_path(exe, "OOTPC_EXEFS", "exefs", "main.npdm", pp_exefs, sizeof pp_exefs, c->exefs);
+    c->romfs = portable_path(exe, "OOTPC_ROMFS", "romfs", "romfs.bin", pp_romfs, sizeof pp_romfs, c->romfs);
+    c->profile = portable_path(exe, "OOTPC_PROFILE_DIR", "profile", NULL, pp_profile, sizeof pp_profile, c->profile);
 }
 
 static int main_run(int argc, char **argv);
@@ -649,9 +651,9 @@ int main(int argc, char **argv) {
 }
 
 static int main_run(int argc, char **argv) {
-    mem_init();   // first: claim the guest address space before anything else can land there; reads nx2navi.ini
+    mem_init();   // first: claim the guest address space before anything else can land there; reads OOT-PC.ini
     // The build that wrote the log, at its top: an attached log from another install or version shows at a glance.
-    rt_log("version: NX2navi %s, game %d.%d.%d", rt_port_version, rt_game_version / 100, rt_game_version / 10 % 10,
+    rt_log("version: OOT-PC %s, game %d.%d.%d", rt_port_version, rt_game_version / 100, rt_game_version / 10 % 10,
            rt_game_version % 10);
     // A restart from the settings menu (gfx_present.c gfx_window_closed) starts this process while the one it replaces
     // is still exiting: its log, RomFS and saves are free once it is gone.
@@ -662,8 +664,8 @@ static int main_run(int argc, char **argv) {
     parse_trace();
     prof_start();
     // Timed guest waits (kernel.c block_inner) sleep in whole milliseconds; at the default 15.6 ms tick a 1 ms wait
-    // costs a full tick. NX2NAVI_TIMER_1MS=0 keeps the default for comparison.
-    if (cfg_bool("NX2NAVI_TIMER_1MS")) plat_timer_1ms();
+    // costs a full tick. OOTPC_TIMER_1MS=0 keeps the default for comparison.
+    if (cfg_bool("OOTPC_TIMER_1MS")) plat_timer_1ms();
     // Before any thread pool counts the usable processors. Not in the shader preparation modes: they translate and
     // build on every processor the process was given, and the placement (perf.c cpu_placement) is for the game's own
     // threads, so narrowing them to one die would only make the preparation take longer.
@@ -672,8 +674,8 @@ static int main_run(int argc, char **argv) {
         if (!strcmp(argv[i], "--prepare-shaders") || !strcmp(argv[i], "--warm-shaders") ||
             !strcmp(argv[i], "--prepare-pipelines")) prepare = 1;
     if (!prepare) perf_cpu_start();
-    {   // NX2NAVI_POWER_FULL=0 leaves Windows' power throttling of an unfocused window in place (A/B runs)
-        const char *pf = cfg_get("NX2NAVI_POWER_FULL");
+    {   // OOTPC_POWER_FULL=0 leaves Windows' power throttling of an unfocused window in place (A/B runs)
+        const char *pf = cfg_get("OOTPC_POWER_FULL");
         if (!(pf && !strcmp(pf, "0"))) {
             int got = plat_power_full();
             rt_log("power: %s", got == 2 ? "full speed and the 1 ms timer kept when the window is not in front"
@@ -682,10 +684,10 @@ static int main_run(int argc, char **argv) {
         }
     }
     cfg = (RtConfig){.exefs = rt_default_exefs, .romfs = rt_default_romfs, .profile = rt_default_profile,
-                     .gpu = cfg_get("NX2NAVI_GPU")};
+                     .gpu = cfg_get("OOTPC_GPU")};
     portable_paths(&cfg);   // command-line paths below still win
     if (cfg.gpu && strcmp(cfg.gpu, "null") && strcmp(cfg.gpu, "vulkan")) {
-        rt_logf("NX2NAVI_GPU must be null or vulkan, not '%s'\n", cfg.gpu);
+        rt_logf("OOTPC_GPU must be null or vulkan, not '%s'\n", cfg.gpu);
         return 2;
     }
     const char *mode = NULL;
@@ -696,18 +698,18 @@ static int main_run(int argc, char **argv) {
             if (++i == argc) return usage(argv[0]);
             *path = argv[i];
         } else if (!strcmp(argv[i], "--audio-device")) {
-            // Same approach as every setting: NX2NAVI_AUDIO_DEVICE is read from the environment first (cfg.c raw_get).
+            // Same approach as every setting: OOTPC_AUDIO_DEVICE is read from the environment first (cfg.c raw_get).
             // cfg_init has read the settings by now, so the variable goes in through cfg_setenv, which makes the lookups
             // read again. An empty value would remove the variable (plat_setenv) and hand the choice back to
-            // nx2navi.ini, so "default" is the spelling for the system default.
+            // OOT-PC.ini, so "default" is the spelling for the system default.
             if (++i == argc || !*argv[i]) return usage(argv[0]);
-            cfg_setenv("NX2NAVI_AUDIO_DEVICE", argv[i]);
+            cfg_setenv("OOTPC_AUDIO_DEVICE", argv[i]);
         } else if (!strcmp(argv[i], "--monitor")) {
-            // The settings read NX2NAVI_MONITOR from the environment first (cfg.c raw_get); cfg_setenv as above. An empty
-            // value would remove the variable (plat_setenv) and hand the choice back to nx2navi.ini, so "auto" is the
+            // The settings read OOTPC_MONITOR from the environment first (cfg.c raw_get); cfg_setenv as above. An empty
+            // value would remove the variable (plat_setenv) and hand the choice back to OOT-PC.ini, so "auto" is the
             // spelling for "no monitor choice" on the command line.
             if (++i == argc || !*argv[i]) return usage(argv[0]);
-            cfg_setenv("NX2NAVI_MONITOR", argv[i]);
+            cfg_setenv("OOTPC_MONITOR", argv[i]);
         } else if (!strcmp(argv[i], "--seconds")) {
             char *end;
             if (++i == argc) return usage(argv[0]);
@@ -733,7 +735,9 @@ static int main_run(int argc, char **argv) {
         mem_start_note(0);   // memory.c: a warning when the machine has less memory free than the game takes
         cfg.boot = cfg.seconds > 0;   // --seconds starts the game like --boot, with its checkpoints
         vk_driver_cache_env();   // before the threads below and rt_boot's, any of which may load the Vulkan driver
-        discord_init();   // the Rich Presence thread (discord_rpc.c); it reads nx2navi.ini itself and idles while off
+        discord_init();   // the Rich Presence thread (discord_rpc.c); it reads OOT-PC.ini itself and idles while off
+        coop_game_init(); // co-op's game side (coop_game.c), before the thread that hands it messages
+        coop_init();      // the co-op thread (coop.c); idle unless the Steam Co-op mod is on
         rt_boot();
         return 0;
     }
@@ -746,7 +750,7 @@ static int main_run(int argc, char **argv) {
     if (!strcmp(mode, "--probe-crash-exit")) return probe_crash_exit();
     if (!strcmp(mode, "--probe-cfg")) return probe_cfg();
 #ifdef _WIN32
-    if (!strcmp(mode, "--probe-dpi")) return probe_dpi();   // the Win32 DPI awareness of nx2navi.manifest
+    if (!strcmp(mode, "--probe-dpi")) return probe_dpi();   // the Win32 DPI awareness of ootpc.manifest
 #endif
     if (!strcmp(mode, "--probe-mods")) return probe_mods();
     if (!strcmp(mode, "--probe-discord")) return probe_discord();

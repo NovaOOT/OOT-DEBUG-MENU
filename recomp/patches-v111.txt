@@ -11,19 +11,19 @@
 # written without branches or flags, as the generator's patch sites need. The set names differ from the other patch
 # files' (output, scene, aspect), whose page layout runtime/resolution.c owns.
 
-set wide_out    NX2NAVI_PATCH_WIDE_OUT    0
-set wide_scene  NX2NAVI_PATCH_WIDE_SCENE  0
-set wide_aspect NX2NAVI_PATCH_WIDE_ASPECT 0
-set wide_hud    NX2NAVI_PATCH_WIDE_HUD    0
-set wide_movie  NX2NAVI_PATCH_WIDE_MOVIE  0
-set res_fixed   NX2NAVI_PATCH_RES_FIXED   0
-set ostep       NX2NAVI_OCARINA_REALTIME  1
-set zstd        NX2NAVI_ZSTD_NATIVE       1
-set osolver     NX2NAVI_PHYSICS_STEPS     1
-set dbgframe    NX2NAVI_DEBUG_FRAME       1
-set opickup     NX2NAVI_PICKUP_COUNT      1
-set dbgage      NX2NAVI_DEBUG_AGE         1
-set omovie      NX2NAVI_MOVIE_PTS         1
+set wide_out    OOTPC_PATCH_WIDE_OUT    0
+set wide_scene  OOTPC_PATCH_WIDE_SCENE  0
+set wide_aspect OOTPC_PATCH_WIDE_ASPECT 0
+set wide_hud    OOTPC_PATCH_WIDE_HUD    0
+set wide_movie  OOTPC_PATCH_WIDE_MOVIE  0
+set res_fixed   OOTPC_PATCH_RES_FIXED   0
+set ostep       OOTPC_OCARINA_REALTIME  1
+set zstd        OOTPC_ZSTD_NATIVE       1
+set osolver     OOTPC_PHYSICS_STEPS     1
+set dbgframe    OOTPC_DEBUG_FRAME       1
+set opickup     OOTPC_PICKUP_COUNT      1
+set dbgage      OOTPC_DEBUG_AGE         1
+set omovie      OOTPC_MOVIE_PTS         1
 
 # Real-time step: the framework's per-frame update (main+0x6e6be0) gives the time manager **[main+0x4c7e890] its
 # nominal frame through main+0x3b4e300 (+0x10 frames per update, +0x14 the inverse, +0x18 seconds, +0x1c the rate),
@@ -73,7 +73,7 @@ site ostep main 475f8 1e380009 95396656   # fcvtzs w9, s0 -> bl page+0xf50
 # s1 (s1 the count, made a float by the scvtf before the fmadd) and the round up, so w1 = max(ceil(s0), count). s0
 # and s1 are not read before the call's callee (the world's main+0x3a24c20) and the code after it write them, and
 # none of the words reads or writes the flags.
-set osolverfull NX2NAVI_PHYSICS_STEPS_FULL 0
+set osolverfull OOTPC_PHYSICS_STEPS_FULL 0
 site osolverfull main 38aebe4 bd440d02 1e2a1002            # ldr s2, [x8, #0x40c] (0.001) -> fmov s2, #0.25
 site osolverfull main 38aebf0 1f010800 1f218800            # fmadd s0, s0, s1, s2 -> fnmsub s0, s0, s1, s2
 site osolverfull main 38aebf4 1e380001 1e214800 1e280001   # fcvtzs w1, s0 -> fmax s0, s0, s1; fcvtps w1, s0
@@ -122,7 +122,7 @@ site osolver main 38afd20 1e380001 1e280001
 # written again before any read, or reaches only calls that take no float argument (getters such as main+0xacd430 and
 # those behind vtable +0x68 and +0x210, nn::os::LockMutex and UnlockMutex, GetTlsValue, memset) and returns whose
 # caller (main+0x3890a80) reads no float result. No word reads or writes the flags.
-set ofollow NX2NAVI_FLOOR_CARRY 1
+set ofollow OOTPC_FLOOR_CARRY 1
 site ofollow main 13d704 52a85908 @page:x8   # CharacterUpdateFollowSurface: mov w8, #0x42c80000 (100.0) -> adrp x8, page
 site ofollow main 13d708 1e270101 bd410501   # fmov s1, w8 -> ldr s1, [x8, #260]
 site ofollow main 13a064 52a85908 @page:x8   # the same two in CharacterUpdateFollowSurfaceExtension
@@ -150,7 +150,7 @@ site ofollow main 389ac24 1e270101 bd410501
 # writes only s0's low lane, which the division wrote; x30 is the function's own, saved by its prologue
 # (main+0x3875f2c, main+0x388266c, main+0x632cbc) and read only by its return after the epilogue reloads it; nothing
 # reads or writes the flags.
-set owater NX2NAVI_WATER_STEPS 1
+set owater OOTPC_WATER_STEPS 1
 site owater main 3876014 1e201900 1e201900 9458abc3   # fdiv s0, s8, s0 -> fdiv s0, s8, s0; bl page+0xf20 (InteractiveWaterMgr)
 site owater main 38827f8 1e201900 1e201900 945879ca   # the same at ResponsiveWaterMgr's
 site owater main 632cfc 1e201900 1e201900 9521b889    # the same at the interactive floors'
@@ -165,7 +165,7 @@ site owater main 632cfc 1e201900 1e201900 9521b889    # the same at the interact
 # to its own epilogue; after phase 0's load of the step (ldr s0, [x8, #0x10]) the page's +0xf00 makes a fraction one
 # whole step. At a step of one or more the job runs every frame with the game's step. x30 was saved by the prologue
 # (stp x29, x30, [sp, #0x20]) and is reloaded by every way out; no word reads or writes the flags.
-set osound NX2NAVI_SOUND_STEPS 1
+set osound OOTPC_SOUND_STEPS 1
 site osound main 41531c 910083fd 910083fd 952a2efd   # add x29, sp, #0x20 -> add x29, sp, #0x20; bl page+0xf10
 site osound main 415334 bd401100 bd401100 952a2ef3   # ldr s0, [x8, #0x10] -> ldr s0, [x8, #0x10]; bl page+0xf00
 
@@ -182,7 +182,7 @@ site osound main 415334 bd401100 bd401100 952a2ef3   # ldr s0, [x8, #0x10] -> ld
 # which plays on its own; this count waits with the picture and goes on with it, a step of 2 or more when the decoder
 # drops a picture. main+0x3b3ec10 hands the counter out as a float frame (scvtf) through a virtual call, and its
 # readers were not traced, so whether they compare frames as ranges or exact values is not known: if exactly, a cue
-# on a dropped picture's tick would be missed. NX2NAVI_MOVIE_PTS=0 (movie_pts in nx2navi.ini) gives the old count.
+# on a dropped picture's tick would be missed. OOTPC_MOVIE_PTS=0 (movie_pts in OOT-PC.ini) gives the old count.
 site omovie main 3b5c7c4 b942fa88 f9400a88 f9400108 f940f508 f9406108 8aa8fd08 d2800789 9b097d08 528ca009 72a3b9a9 8b090108 d37ff929 9ac90908
 site omovie main 3b5c908 b942fa88 f9400a88 f9400108 f940f508 f9406108 8aa8fd08 d2800789 9b097d08 528ca009 72a3b9a9 8b090108 d37ff929 9ac90908
 
@@ -206,7 +206,7 @@ site opickup main a68300 1e38000c 1e38000c 5ac0118d 53057dad 0b0d018c   # fcvtzs
 # `str w8, [x20, #0x530]`, w8 holds the flags: a second callback clears the idle bit for an update the mouse moved in
 # (camera_activity_oot). x30 is the function's own saved one at both sites. The callbacks' addresses are page +0xfd0
 # and +0xfc0; the page is main+0x4ea0000 on this build.
-set mouse_direct NX2NAVI_MOUSE_DIRECT_PATCH 1
+set mouse_direct OOTPC_MOUSE_DIRECT_PATCH 1
 site mouse_direct main 37c45c bd053a81 952c92dd   # str s1, [x20, #0x538] -> bl page+0xfd0
 site mouse_direct main 37c4f0 6d4123e9 952c92b4   # ldp d9, d8, [sp, #0x10] -> bl page+0xfc0
 
@@ -285,7 +285,7 @@ site wide_movie main 3b5c758 a941a269 d100a3b0 bd400a10 bd401211 1e303a32 @page:
 # together, clz >> 5 of that is 1 only when there is none, and madd adds the page's two numbers times it. x9..x12 and
 # x16 are free: the call takes x0..x4, and the helper reads none of them after it. The set is on only for a picture
 # wider than 16:9.
-set wide_save NX2NAVI_PATCH_WIDE_SAVE 0
+set wide_save OOTPC_PATCH_WIDE_SAVE 0
 site wide_save main 284824 f9400108 f9400108 @page:x16 295c2e0a 51087c69 5104c88c 2a0c0129 2a010129 2a020129 5ac01129 53057d29 1b0a0521 1b0b0d23   # ldr x8, [x8]; ldp w10, w11, [x16, #224]; sub w9, w3, #543; sub w12, w4, #306; orr w9, w9, w12; orr w9, w9, w1; orr w9, w9, w2; clz w9, w9; lsr w9, w9, #5; madd w1, w9, w10, w1; madd w3, w9, w11, w3
 
 # The game's zstd decoder (BSD zstd, statically linked into main) through the host's libzstd (runtime/ov_zstd.c): the
@@ -335,6 +335,12 @@ site dbgframe main 31e4634 b9403038 9472f1fb   # ldr w24, [x1, #0x30] -> bl page
 # saved x30; that store calls page+0xe10, which stores 0 and leaves 0 in w8 while No void-out is on.
 site dbgframe main 82c690 b9191e68 9519d1e0   # str w8, [x19, #0x191c] -> bl page+0xe10
 
+# N64 Graphics' sword walls (runtime/debug_game.c n64_sword_wall, n64sword.c): the player's reaction scheduler
+# (main+0x82bbb0) picks the AttackCollide reaction when the hit state at [[player+0x270]+0x2b8] holds 8 at +0xf0 or
+# +0xf4. Its ldp of the two, after the function has saved x30, calls page+0xe80, which makes the load and gives 8 in w9
+# for a weapon that has just struck a wall.
+site dbgframe main 82bdf0 295e2508 9519d424   # ldp w8, w9, [x8, #0xf0] -> bl page+0xe80
+
 # Bomb T-Pose (runtime/debug_game.c debug_bomb_layers, debug_move.c dbg_bomb_layers; docs/bomb-t-pose.md): the player's
 # animation owner's update (main+0x29d740, the owner's layer list in x19: their number at +0x18, the array at +0x20, 0x48
 # apart) first updates each of its layers (main+0x7310d0, or main+0x7361e0 for a layer that follows another), then, from
@@ -362,7 +368,7 @@ site dbgframe main 3009934 910a8008 947a5d4b   # add x8, x0, #0x2a0 -> bl page+0
 # tested. What that costs and saves in play has not been measured, hence the default. Left as they are: the function's
 # mode 2, which only answers whether one option differs from its parameter (the compare every option shares,
 # main+0x11c8be0) and so answers yes for these two wherever the parameter is set, and the listing at main+0x35727d0.
-set occlusion_off NX2NAVI_PATCH_OCCLUSION_OFF 0
+set occlusion_off OOTPC_PATCH_OCCLUSION_OFF 0
 site occlusion_off main 11ace68 39400008 2a1f03e8   # ldrb w8, [x0] -> mov w8, wzr: the z-pre-pass query's first write
 site occlusion_off main 11b828c 39400008 2a1f03e8   # its update's compare
 site occlusion_off main 11b82a4 39400008 2a1f03e8   # its update's store
@@ -379,7 +385,7 @@ site occlusion_off main 11b82f4 39400008 2a1f03e8   # its update's store
 # runtime/patches.c, mouse_direct.c and ov_zstd.c), which ORs bit 4 into x10 or w8 while
 # the sprint button's sprint is on for Link (sprint_link, sprint_stance); x19 is Link at both. x30 is the function's
 # own saved one at both sites: both functions call others before and after, and restore x30 from their frames.
-set sprint NX2NAVI_SPRINT_BUTTON_PATCH 1
+set sprint OOTPC_SPRINT_BUTTON_PATCH 1
 site sprint main 4ae798 f940014a f940014a 9527c9ea   # ldr x10, [x10] -> ldr x10, [x10]; bl page+0xf40
 site sprint main c07f3c 39400108 39400108 950a63fd   # ldrb w8, [x8] -> ldrb w8, [x8]; bl page+0xf30
 
@@ -402,6 +408,6 @@ site sprint main c07f3c 39400108 39400108 950a63fd   # ldrb w8, [x8] -> ldrb w8,
 # factor less one, so only a skippable message window types faster; its waits keep their length. x22, x27, s2 and s8
 # are written by the next words of the step before anything reads them (d8 is saved by its prologue), and no word
 # writes the flags. The set runs only while text_speed is not normal.
-set text_speed NX2NAVI_TEXT_SPEED_PATCH 1
+set text_speed OOTPC_TEXT_SPEED_PATCH 1
 site text_speed main 774b74 36000074 @page:x9 394d2a6a d100054a 8a0a010a f901012a 39483129 2a140129 36000069   # tbz w20, #0, #0x774b80 -> adrp x9, page; ldrb w10, [x19, #0x34a]; sub x10, x10, #1; and x10, x8, x10; str x10, [x9, #0x200]; ldrb w9, [x9, #0x20c]; orr w9, w9, w20; tbz w9, #0, #0x774b80
 site text_speed main afe1d8 bd404e61 bd404e61 @page:x22 f94102db cb13037b dac0137b d346ff7b 9e220362 bd420ac8 1e280842 1f020421   # ldr s1, [x19, #0x4c]; adrp x22, page; ldr x27, [x22, #0x200]; sub x27, x27, x19; clz x27, x27; lsr x27, x27, #6; scvtf s2, x27; ldr s8, [x22, #0x208]; fmul s2, s2, s8; fmadd s1, s1, s2, s1

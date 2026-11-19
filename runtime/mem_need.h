@@ -10,7 +10,7 @@
 // commit_is_low) or loses the device.
 #pragma once
 
-// NX2NAVI_MEM_NEED_MB's default: the commit the game took in the sessions above, as 24 GiB.
+// OOTPC_MEM_NEED_MB's default: the commit the game took in the sessions above, as 24 GiB.
 #define MEM_NEED_DEFAULT_MB 24576.0
 
 // The commit in MB the game can still get: what is free, and what this process already holds of its need.

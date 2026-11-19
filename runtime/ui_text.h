@@ -5,7 +5,7 @@
 typedef enum {
     // Software keyboard
     UI_SWKBD_TITLE,          // caption of the text-entry window
-    UI_SWKBD_PROMPT,         // prompt when the game gives no header, guide or sub text (OOT-DEBUG-MENU names a horse)
+    UI_SWKBD_PROMPT,         // prompt when the game gives no header, guide or sub text (OOT-PC names a horse)
     UI_SWKBD_DEFAULT_NAME,   // text the entry starts with when the game gives none, so a controller can confirm it
     UI_SWKBD_OK,
     UI_SWKBD_CANCEL,
@@ -15,15 +15,17 @@ typedef enum {
     // Simplified Chinese texts.
     UI_MENU_FIRST,
     UI_MENU_TITLE = UI_MENU_FIRST,
-    UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_MODS, UI_MENU_TAB_SOUND, UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO,
+    UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_PERFORMANCE, UI_MENU_TAB_MODS, UI_MENU_TAB_SOUND, UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO,
     UI_MENU_TAB_MENU, UI_MENU_TAB_ADVANCED, UI_MENU_TAB_DEBUG, UI_MENU_TAB_RANDOMIZER,
     UI_MENU_CONTINUE, UI_MENU_QUIT,
+    UI_MENU_SAVED, UI_MENU_SAVING, UI_MENU_NAV_HINT, UI_MENU_DEV_NAV_HINT,
+    UI_MENU_SCREEN_GROUP, UI_MENU_SCREEN_SUBTITLE,
     UI_MENU_ON, UI_MENU_OFF, UI_MENU_AUTO, UI_MENU_DEFAULT_MARK,      // "default" beside the default value
     UI_MENU_AFTER_RESTART,    // note on a setting that is read at start
     UI_MENU_SET_BY_ENV,       // note on a setting an environment variable fixes
     UI_MENU_SAVE_FAILED,
-    UI_MENU_INI_UNKNOWN,      // "...: %s": the keys of nx2navi.ini that are no settings of this version (cfg_unknown_keys)
-    UI_MENU_VERSION,          // "OOT-DEBUG-MENU %s, game %s": the port version and the game update, beside the title
+    UI_MENU_INI_UNKNOWN,      // "...: %s": the keys of OOT-PC.ini that are no settings of this version (cfg_unknown_keys)
+    UI_MENU_VERSION,          // "OOT-PC %s, game %s": the port version and the game update, beside the title
 
     // Screen
     UI_MENU_FULLSCREEN, UI_MENU_FULLSCREEN_DESC,
@@ -175,7 +177,8 @@ typedef enum {
 
     // Menu tab
     UI_MENU_MENU_LANG, UI_MENU_MENU_LANG_DESC, UI_MENU_MENU_LANG_AUTO,
-    UI_MENU_DISCORD_RPC, UI_MENU_DISCORD_RPC_DESC, UI_MENU_LOW_END_GPU, UI_MENU_LOW_END_GPU_DESC,
+    UI_MENU_DISCORD_RPC, UI_MENU_DISCORD_RPC_DESC, UI_MENU_DISCORD_LOCATION, UI_MENU_DISCORD_LOCATION_DESC,
+    UI_MENU_DISCORD_LOCATION_OFF, UI_MENU_LOW_END_GPU, UI_MENU_LOW_END_GPU_DESC,
     // the Game tab's Testing rows (ui/menu.cpp tab_game), English only
     UI_MENU_REPLAY_WORKERS, UI_MENU_REPLAY_WORKERS_DESC, UI_MENU_REPLAY_PIPE, UI_MENU_REPLAY_PIPE_DESC,
     UI_MENU_REPLAY_SMALL, UI_MENU_REPLAY_SMALL_DESC, UI_MENU_TAIL_EARLY, UI_MENU_TAIL_EARLY_DESC,
@@ -196,6 +199,12 @@ typedef enum {
     UI_MENU_REPLAY_ASYNC, UI_MENU_REPLAY_ASYNC_DESC,
     UI_MENU_PERF_CORES, UI_MENU_PERF_CORES_DESC, UI_MENU_PERF_CORES_ALL, UI_MENU_PERF_CLIPS, UI_MENU_PERF_CLIPS_DESC,
     UI_MENU_TIMER_1MS, UI_MENU_TIMER_1MS_DESC,
+    UI_MENU_OCCLUSION_OFF, UI_MENU_OCCLUSION_OFF_DESC, UI_MENU_FRAME_OVERLAP, UI_MENU_FRAME_OVERLAP_DESC,
+    UI_MENU_FG_TARGET, UI_MENU_FG_TARGET_DESC, UI_MENU_FG_TARGET_DISPLAY, UI_MENU_PERF_PRESET_RECOMMEND_LOW,
+    UI_MENU_DYN_RES, UI_MENU_DYN_RES_DESC, UI_MENU_DYN_RES_TARGET, UI_MENU_DYN_RES_TARGET_DESC, UI_MENU_NEEDS_DYN_RES,
+    UI_MENU_LEAF_SHADOW_CULL, UI_MENU_LEAF_SHADOW_CULL_DESC, UI_MENU_LEAF_SHADOW_VRS, UI_MENU_LEAF_SHADOW_VRS_DESC,
+    UI_MENU_CASCADES_ALL, UI_MENU_CASCADES_MID, UI_MENU_CASCADES_FAR, UI_MENU_EDGE_FILL, UI_MENU_EDGE_FILL_DESC, UI_MENU_SPV_OPT, UI_MENU_SPV_OPT_DESC,
+    UI_MENU_PACE_SMOOTH, UI_MENU_PACE_SMOOTH_DESC, UI_MENU_PERF_GROUP_GPU, UI_MENU_PERF_GROUP_CPU,
     UI_MENU_PIPE_WAIT, UI_MENU_PIPE_WAIT_DESC, UI_MENU_PIPE_WAIT_DEFAULT, UI_MENU_PIPE_WAIT_DRAW,
     UI_MENU_PIPE_SKIP, UI_MENU_PIPE_SKIP_DESC, UI_MENU_PIPE_SKIP_STRICT, UI_MENU_PIPE_SKIP_ANY,
     UI_MENU_PIPE_SKIP_FULLSCREEN,
@@ -225,6 +234,9 @@ typedef enum {
     UI_MENU_VK_SUBGROUP_PIN, UI_MENU_VK_SUBGROUP_PIN_DESC,
     UI_MENU_TRACE, UI_MENU_TRACE_DESC,
     UI_MENU_FLIGHT, UI_MENU_FLIGHT_DESC,
+    UI_MENU_TEX_COMPACT, UI_MENU_TEX_COMPACT_DESC,
+    UI_MENU_GAME_AO, UI_MENU_GAME_AO_DESC,
+    UI_MENU_DISCORD_FIGHT, UI_MENU_DISCORD_FIGHT_DESC, UI_MENU_DISCORD_FIGHT_OFF,
     UI_MENU_FLIGHT_SPIKE_MS, UI_MENU_FLIGHT_SPIKE_MS_DESC,
     UI_MENU_PASS_CRUMBS, UI_MENU_PASS_CRUMBS_DESC,
     UI_MENU_INPUT_RECORD, UI_MENU_INPUT_RECORD_DESC,
@@ -261,7 +273,7 @@ typedef enum {
     UI_MENU_CHEAT_REBUILD, UI_MENU_CHEAT_REBUILD_DESC, UI_MENU_CHEAT_UNSUPPORTED, UI_MENU_CHEAT_UNSUPPORTED_DESC,
     // the Game tab's Saves group (ui/menu.cpp rows_saves, save_share.c): export the save into a zip, import a shared
     // one at the next start. UI_MENU_SAVE_EXPORTED to UI_MENU_SAVE_E_UNSAFE are printf formats with at most one "%s"
-    // (a path, or the zip's OOT-DEBUG-MENU version and date)
+    // (a path, or the zip's OOT-PC version and date)
     UI_MENU_SAVES,
     UI_MENU_SAVE_EXPORT, UI_MENU_SAVE_EXPORT_DESC, UI_MENU_SAVE_EXPORT_BUG, UI_MENU_SAVE_EXPORT_BUG_DESC,
     UI_MENU_SAVE_IMPORT, UI_MENU_SAVE_IMPORT_DESC,
@@ -269,7 +281,7 @@ typedef enum {
     UI_MENU_SAVE_IMPORT_CANCEL, UI_MENU_SAVE_IMPORT_CANCEL_DESC,
     UI_MENU_SAVE_BUSY,               // note on the rows while an export or import runs
     UI_MENU_SAVE_EXPORTED,           // "%s": the zip's path
-    UI_MENU_SAVE_IMPORT_READY,       // "%s": "<OOT-DEBUG-MENU version>, <export date>" of the zip
+    UI_MENU_SAVE_IMPORT_READY,       // "%s": "<OOT-PC version>, <export date>" of the zip
     UI_MENU_SAVE_IMPORT_CANCELLED,
     UI_MENU_SAVE_IMPORTED,           // "%s": the folder the replaced save was copied to, at this start
     UI_MENU_SAVE_IMPORTED_NEW,       // the same with no save to replace
@@ -279,6 +291,26 @@ typedef enum {
     UI_MENU_SAVE_E_STAGE,
     UI_MENU_SAVE_E_NOT_SAVE, UI_MENU_SAVE_E_OTHER_GAME, UI_MENU_SAVE_E_NEWER, UI_MENU_SAVE_E_DAMAGED,
     UI_MENU_SAVE_E_UNSAFE,
+    // the Co-op tab and what co-op draws over the game (ui/coop_page.cpp, docs/coop.md)
+    UI_MENU_TAB_COOP, UI_MENU_COOP_ON, UI_MENU_COOP_ON_DESC, UI_MENU_COOP_NO_LIBRARY, UI_MENU_COOP_OLD_LIBRARY,
+    UI_MENU_COOP_NO_CLIENT, UI_MENU_COOP_RETRY, UI_MENU_COOP_RETRY_DESC, UI_MENU_COOP_CREATE,
+    UI_MENU_COOP_CREATE_DESC, UI_MENU_COOP_JOIN, UI_MENU_COOP_JOIN_DESC, UI_MENU_COOP_ROOM_ID,
+    UI_MENU_COOP_ROOM_ID_DESC, UI_MENU_COOP_ROOM_ID_HINT, UI_MENU_COOP_ROOM_ID_BAD, UI_MENU_COOP_PASTE,
+    UI_MENU_COOP_PASTE_EMPTY, UI_MENU_COOP_COPIED, UI_MENU_COOP_OK, UI_MENU_COOP_JOINING, UI_MENU_COOP_STOP,
+    UI_MENU_COOP_STOP_DESC, UI_MENU_COOP_INVITE, UI_MENU_COOP_INVITE_DESC, UI_MENU_COOP_INVITE_TITLE,
+    UI_MENU_COOP_INVITE_NONE, UI_MENU_COOP_INVITE_SENT, UI_MENU_COOP_INVITE_IN_GAME, UI_MENU_COOP_INVITE_ONLINE,
+    UI_MENU_COOP_INVITE_OFFLINE, UI_MENU_COOP_INVITE_STEAM, UI_MENU_COOP_INVITE_CLOSE, UI_MENU_COOP_INVITED,
+    UI_MENU_COOP_INVITED_JOIN, UI_MENU_COOP_INVITED_JOIN_DESC, UI_MENU_COOP_INVITED_NO,
+    UI_MENU_COOP_INVITED_NO_DESC, UI_MENU_COOP_PLAYERS, UI_MENU_COOP_YOU, UI_MENU_COOP_HOST,
+    UI_MENU_COOP_PLAYER_DESC, UI_MENU_COOP_PLAYER_REMOVE_DESC, UI_MENU_COOP_PLAYER_AWAY, UI_MENU_COOP_REMOVE,
+    UI_MENU_COOP_REMOVE_CONFIRM, UI_MENU_COOP_LEAVE, UI_MENU_COOP_LEAVE_DESC, UI_MENU_COOP_LEAVE_CONFIRM,
+    UI_MENU_COOP_LEAVE_HOST, UI_MENU_COOP_STAY, UI_MENU_COOP_CHAT, UI_MENU_COOP_CHAT_WRITE,
+    UI_MENU_COOP_CHAT_WRITE_DESC, UI_MENU_COOP_SEND, UI_MENU_COOP_CHAT_JOINED, UI_MENU_COOP_CHAT_LEFT,
+    UI_MENU_COOP_SETTINGS, UI_MENU_COOP_SHARE, UI_MENU_COOP_SHARE_DESC, UI_MENU_COOP_NAMES, UI_MENU_COOP_NAMES_DESC,
+    UI_MENU_COOP_CHAT_SHOW, UI_MENU_COOP_CHAT_SHOW_DESC, UI_MENU_COOP_N_CREATE_FAILED, UI_MENU_COOP_N_NO_ROOM,
+    UI_MENU_COOP_N_FULL, UI_MENU_COOP_N_REFUSED, UI_MENU_COOP_N_NOT_OURS, UI_MENU_COOP_N_OTHER_VERSION,
+    UI_MENU_COOP_N_REMOVED, UI_MENU_COOP_N_HOST_SILENT, UI_MENU_COOP_N_LOST, UI_MENU_COOP_N_LEFT,
+    UI_MENU_COOP_LOCAL, UI_MENU_COOP_TOAST_INVITE, UI_MENU_COOP_MOD_OFF,
     // the note after F8 (bugcap.c, ui/menu.cpp capture_note): "%d" the capture's number, "%s" its folder's name
     UI_MENU_CAPTURE_SAVED, UI_MENU_CAPTURE_FOLDER, UI_MENU_CAPTURE_FAILED,
     UI_MENU_LAST_ID = UI_MENU_CAPTURE_FAILED,
@@ -309,7 +341,7 @@ typedef enum {
     UI_MENU_FG_MULT_DESC, UI_MENU_FG_MULT_DYNAMIC,
     UI_MENU_FRAMEGEN_MULT_RTX50,     // this GPU and driver do 2x only
     UI_MENU_FRAMEGEN_MULT_UPTO,      // printf: "%d", the highest multiplier this GPU and driver allow
-    UI_MENU_FRAMEGEN_MULT_OLD_DLL,   // nx2navi_dlssg.dll is older than multi frame generation
+    UI_MENU_FRAMEGEN_MULT_OLD_DLL,   // ootpc_dlssg.dll is older than multi frame generation
     UI_MENU_FRAMEGEN_UNAVAILABLE, UI_MENU_FRAMEGEN_OFF_FILES,
     // frame generation with any Upscaling choice, an upscaler or none (vk_dlaa.c fg_only_frame); through NGX (every
     // build but the Windows one) NVIDIA's needs DLSS upscaling on at the start, its note and description there
@@ -335,6 +367,14 @@ typedef enum {
     UI_MENU_LOWEND_GUEST_OPT, UI_MENU_LOWEND_GUEST_OPT_DESC, UI_MENU_LOWEND_GUEST_OPT_NOTE,
     UI_MENU_LOWEND_PASS_TIMES, UI_MENU_LOWEND_PASS_TIMES_DESC,
     UI_MENU_LOWEND_DUMP_KEY, UI_MENU_LOWEND_DUMP_KEY_DESC,
+    // the Game tab's performance preset and the rows for optional work it sets (ui/menu.cpp row_perf_preset,
+    // rows_perf_extras), English only
+    UI_MENU_PERF_PRESET, UI_MENU_PERF_PRESET_DESC, UI_MENU_PERF_PRESET_DEFAULT, UI_MENU_PERF_PRESET_LOW,
+    UI_MENU_PERF_PRESET_VERY_LOW, UI_MENU_PERF_PRESET_CUSTOM,
+    UI_MENU_PERF_FOG, UI_MENU_PERF_FOG_DESC,
+    UI_MENU_PERF_PLANT_DISTANCE, UI_MENU_PERF_PLANT_DISTANCE_DESC,
+    UI_MENU_TEX_LOD_BIAS, UI_MENU_TEX_LOD_BIAS_DESC,
+    UI_MENU_AUDIO_REVERB, UI_MENU_AUDIO_REVERB_DESC,
     UI_TEXT_COUNT
 } UiTextId;
 
@@ -357,7 +397,7 @@ int ui_text_defined(const char *lang, UiTextId id);
 const char *ui_text_lang(const char *switch_code);
 
 // The game languages the F1 menu offers for a game build (rt_game_version): one entry per Mals language file the build
-// ships, each with the Switch code NX2NAVI_LANG takes and the id of its name. 1.4.3 adds Brazilian Portuguese (USpt).
+// ships, each with the Switch code OOTPC_LANG takes and the id of its name. 1.4.3 adds Brazilian Portuguese (USpt).
 // Fills out (room for max entries) and returns the count.
 typedef struct { const char *code; UiTextId name; } UiGameLang;
 int ui_text_game_langs(int game_version, UiGameLang *out, int max);
@@ -366,7 +406,7 @@ int ui_text_game_langs(int game_version, UiGameLang *out, int max);
 // not used. Returns the count.
 int ui_text_game_langs_in(const char *const *regions, int nregions, UiGameLang *out, int max);
 
-// Menu text: ui_text_in(menu language, id). The menu language is NX2NAVI_MENU_LANG ("en", "ru", "pt-BR", "zh-Hans");
+// Menu text: ui_text_in(menu language, id). The menu language is OOTPC_MENU_LANG ("en", "ru", "pt-BR", "zh-Hans");
 // unset, the system UI language when the catalog has menu text for it (English, Russian, Brazilian Portuguese,
 // Simplified Chinese), else English. Follows a live change of the setting.
 const char *menu_text(UiTextId id);

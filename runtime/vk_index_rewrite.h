@@ -1,5 +1,5 @@
 // Index lists for the NVN primitives Vulkan has no topology for, made from an indexed draw's own indices
-// (vk_exec_draw.c op_draw_idx, NX2NAVI_QUAD_INDEX). Header only, so that tests/index_rewrite_check.c checks it without a
+// (vk_exec_draw.c op_draw_idx, OOTPC_QUAD_INDEX). Header only, so that tests/index_rewrite_check.c checks it without a
 // device.
 //
 // The replay draws a quad list as a triangle list and a line loop as a line strip (vk_pipeline.c vk_pipeline_topology).

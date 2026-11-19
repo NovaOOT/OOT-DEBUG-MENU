@@ -3,7 +3,7 @@
 // skip site's typewriter word and decide bit, for a message the window lets the player skip and one it does not; the
 // speed site's scaled speed for the window's typewriter and for any other; and that both sites change nothing else.
 // Built by tests/text_speed_check.py, which lifts the words into sites.c. With the argument kept-off the set starts
-// off (NX2NAVI_TEXT_SPEED_PATCH=0 or a mod on its sites), and no setting may switch it on or touch the page.
+// off (OOTPC_TEXT_SPEED_PATCH=0 or a mod on its sites), and no setting may switch it on or touch the page.
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
@@ -16,7 +16,7 @@ void site_skip(Cpu *c);    // main+0x774b74 without its adrp (x9 = the page) and
 void site_speed(Cpu *c);   // main+0xafe1d8 without its adrp (x22 = the page)
 
 static const char *speed = "normal";
-const char *cfg_value(const char *key) { return strcmp(key, "NX2NAVI_TEXT_SPEED") ? "" : speed; }
+const char *cfg_value(const char *key) { return strcmp(key, "OOTPC_TEXT_SPEED") ? "" : speed; }
 static int set_on = 1;   // the patch set text_speed, on at the start as its default
 int rt_patch_set(const char *name) { return strcmp(name, "text_speed") ? -1 : 7; }
 int rt_patch_enabled(int set) { return set == 7 && set_on; }

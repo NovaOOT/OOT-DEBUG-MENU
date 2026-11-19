@@ -1,5 +1,5 @@
 // The Randomizer tab's work: runs tools/randomizer.py, which reads the game's stage files and writes the Randomizer mod
-// (mods/Randomizer), with the options of nx2navi.ini [randomizer] (the NX2NAVI_RANDO_* keys of cfg.c).
+// (mods/Randomizer), with the options of OOT-PC.ini [randomizer] (the OOTPC_RANDO_* keys of cfg.c).
 //
 // The game indexes its mods' files once, at start (romfs.c), so a running game must not see a new seed's files: the
 // tool runs with --pending and leaves them in mods/Randomizer/romfs.new and spoiler.new, and rando_apply_pending, called
@@ -24,19 +24,19 @@
 #define RUN_TIMEOUT_MS (15u * 60u * 1000u)   // a run takes about a minute; one quiet this long has died
 
 const RandoOption rando_options[] = {
-    {"NX2NAVI_RANDO_LOGIC", "--logic", {"glitchless", "none"}, 2},
-    {"NX2NAVI_RANDO_CHESTS", "--chests", {"on", "off"}, 2},
-    {"NX2NAVI_RANDO_DROPS", "--drops", {"off", "own_pool", "with_chests"}, 3},
-    {"NX2NAVI_RANDO_MAPS", "--maps-compasses", {"own_dungeon", "vanilla"}, 2},
-    {"NX2NAVI_RANDO_SHOPS", "--shops", {"off", "shuffle"}, 2},
-    {"NX2NAVI_RANDO_SCRUBS", "--scrubs", {"off", "shuffle"}, 2},
-    {"NX2NAVI_RANDO_SONGS", "--songs", {"off", "shuffle"}, 2},
-    {"NX2NAVI_RANDO_GIFTS", "--gifts", {"off", "shuffle"}, 2},
-    {"NX2NAVI_RANDO_REWARDS", "--rewards", {"off", "shuffle"}, 2},
-    {"NX2NAVI_RANDO_ENEMIES", "--enemies", {"off", "same_kind", "any_kind"}, 3},
-    {"NX2NAVI_RANDO_ENTRANCES", "--entrances", {"off", "dungeons", "bosses", "overworld", "all"}, 5},
-    {"NX2NAVI_RANDO_ENTRANCE_POOLS", "--entrance-pools", {"separate", "mixed"}, 2},
-    {"NX2NAVI_RANDO_DUNGEON_AGES", "--dungeon-ages", {"same", "any"}, 2},
+    {"OOTPC_RANDO_LOGIC", "--logic", {"glitchless", "none"}, 2},
+    {"OOTPC_RANDO_CHESTS", "--chests", {"on", "off"}, 2},
+    {"OOTPC_RANDO_DROPS", "--drops", {"off", "own_pool", "with_chests"}, 3},
+    {"OOTPC_RANDO_MAPS", "--maps-compasses", {"own_dungeon", "vanilla"}, 2},
+    {"OOTPC_RANDO_SHOPS", "--shops", {"off", "shuffle"}, 2},
+    {"OOTPC_RANDO_SCRUBS", "--scrubs", {"off", "shuffle"}, 2},
+    {"OOTPC_RANDO_SONGS", "--songs", {"off", "shuffle"}, 2},
+    {"OOTPC_RANDO_GIFTS", "--gifts", {"off", "shuffle"}, 2},
+    {"OOTPC_RANDO_REWARDS", "--rewards", {"off", "shuffle"}, 2},
+    {"OOTPC_RANDO_ENEMIES", "--enemies", {"off", "same_kind", "any_kind"}, 3},
+    {"OOTPC_RANDO_ENTRANCES", "--entrances", {"off", "dungeons", "bosses", "overworld", "all"}, 5},
+    {"OOTPC_RANDO_ENTRANCE_POOLS", "--entrance-pools", {"separate", "mixed"}, 2},
+    {"OOTPC_RANDO_DUNGEON_AGES", "--dungeon-ages", {"same", "any"}, 2},
 };
 const int rando_noptions = (int)(sizeof rando_options / sizeof rando_options[0]);
 
@@ -63,7 +63,7 @@ int rando_option_index(int i) {
 }
 
 const char *rando_seed(void) {
-    const char *s = cfg_get("NX2NAVI_RANDO_SEED");
+    const char *s = cfg_get("OOTPC_RANDO_SEED");
     return s ? s : "";
 }
 
@@ -77,7 +77,7 @@ void rando_new_seed(void) {
     for (int k = 0; k < 5; k++) v = v << 8 | r[k];
     char s[16];
     snprintf(s, sizeof s, "%010llu", (unsigned long long)(v % 10000000000ull));
-    cfg_set("NX2NAVI_RANDO_SEED", s);
+    cfg_set("OOTPC_RANDO_SEED", s);
 }
 
 int rando_state(void) { return state; }
@@ -150,11 +150,11 @@ void rando_apply_pending(const char *mods) {
 
 // ---- a run
 
-// The Python that runs the tool: NX2NAVI_RANDO_PYTHON, else the setup's (the first line of build-cache/rebuild.txt,
+// The Python that runs the tool: OOTPC_RANDO_PYTHON, else the setup's (the first line of build-cache/rebuild.txt,
 // which the setup writes; installer/steps.py rebuild_command), else the launcher's beside the game or in its usual
 // folder. pythonw where there is one, so no console window opens.
 static int find_python(const char *dir, char *out, size_t cap) {
-    const char *set = cfg_get("NX2NAVI_RANDO_PYTHON");
+    const char *set = cfg_get("OOTPC_RANDO_PYTHON");
     if (set && *set) {
         snprintf(out, cap, "%s", set);
         return plat_file_exists(out);
@@ -179,7 +179,7 @@ static int find_python(const char *dir, char *out, size_t cap) {
     if (*local) {
         const char *leaf[] = {"pythonw.exe", "python.exe"};
         for (int k = 0; k < 2; k++) {
-            snprintf(out, cap, "%s" SEP "Programs" SEP "OOT-DEBUG-MENU" SEP "python" SEP "%s", local, leaf[k]);
+            snprintf(out, cap, "%s" SEP "Programs" SEP "OOT-PC" SEP "python" SEP "%s", local, leaf[k]);
             if (plat_file_exists(out)) return 1;
         }
     }
@@ -192,12 +192,12 @@ static int find_tool(const char *dir, char *out, size_t cap) {
     if (plat_file_exists(out)) return 1;
     char local[PLAT_PATH_MAX] = "", cur[PLAT_PATH_MAX + 64];
     if (!plat_getenv("LOCALAPPDATA", local, sizeof local) || !*local) return 0;
-    snprintf(cur, sizeof cur, "%s" SEP "Programs" SEP "OOT-DEBUG-MENU" SEP "app" SEP "current.txt", local);
+    snprintf(cur, sizeof cur, "%s" SEP "Programs" SEP "OOT-PC" SEP "app" SEP "current.txt", local);
     uint64_t n = 0;
     char *v = (char *)plat_file_read(cur, &n);
     if (!v) return 0;
     v[strcspn(v, "\r\n \t")] = 0;
-    snprintf(out, cap, "%s" SEP "Programs" SEP "OOT-DEBUG-MENU" SEP "app" SEP "%s" SEP "tools" SEP "randomizer.py",
+    snprintf(out, cap, "%s" SEP "Programs" SEP "OOT-PC" SEP "app" SEP "%s" SEP "tools" SEP "randomizer.py",
              local, v);
     free(v);
     return plat_file_exists(out);
@@ -213,7 +213,7 @@ int rando_generate(void) {
     }
     if (!find_python(dir, python, sizeof python)) {
         snprintf(note, sizeof note, "Cannot find Python: install the game with the launcher, or set rando_python in "
-                                    "nx2navi.ini to a python.exe that has the zstandard package.");
+                                    "OOT-PC.ini to a python.exe that has the zstandard package.");
         state = RANDO_FAILED;
         return 0;
     }
@@ -255,7 +255,7 @@ int rando_generate(void) {
         argv[argc++] = rando_options[i].arg;
         argv[argc++] = rando_options[i].values[rando_option_index(i)];
     }
-    const char *sp = cfg_get("NX2NAVI_RANDO_SPOILER");
+    const char *sp = cfg_get("OOTPC_RANDO_SPOILER");
     if (sp && !strcmp(sp, "0")) argv[argc++] = "--no-spoiler";
     argv[argc++] = "--pending";
     argv[argc++] = "--status";
@@ -283,8 +283,8 @@ static void put_first(void) {
         return;
     }
     // not there at the scan (the first seed): first in the order, out of the switched-off list
-    const char *order = cfg_get("NX2NAVI_MODS_ORDER");
-    const char *off = cfg_get("NX2NAVI_MODS_DISABLED");
+    const char *order = cfg_get("OOTPC_MODS_ORDER");
+    const char *off = cfg_get("OOTPC_MODS_DISABLED");
     size_t n = (order ? strlen(order) : 0) + sizeof RANDO_MOD + 2;
     char *o = calloc(n, 1), *d = calloc((off ? strlen(off) : 0) + 1, 1);
     if (!o || !d) {
@@ -303,8 +303,8 @@ static void put_first(void) {
             strcat(d, s);
         }
     free(copy);
-    cfg_set("NX2NAVI_MODS_ORDER", o);
-    cfg_set("NX2NAVI_MODS_DISABLED", d);
+    cfg_set("OOTPC_MODS_ORDER", o);
+    cfg_set("OOTPC_MODS_DISABLED", d);
     free(o), free(d);
 }
 

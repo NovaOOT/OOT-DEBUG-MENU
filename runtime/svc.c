@@ -1,10 +1,11 @@
 // Contains code Copyright (c) 2026 MacNativeGames contributors (MIT; see THIRD_PARTY_NOTICES.md).
 // The SVC entry of the lifted code: preemption checkpoint, trace, then the thread and
 // synchronization SVCs (kernel.c), IPC (ipc.c), memory (memory.c), Break, OutputDebugString, GetInfo and ExitProcess. The 21 SVCs
-// NX2navi has but never reaches on its boot path stop with a named fatal, the caller and the guest backtrace.
+// OOT-PC has but never reaches on its boot path stop with a named fatal, the caller and the guest backtrace.
 #include <stdio.h>
 #include <string.h>
 
+#include "coop.h"
 #include "fs.h"
 #include "host.h"
 #include "kernel.h"
@@ -15,7 +16,7 @@
 #define ST_FREE 0u
 #define ST_STACK 0xBu
 #define PERM_RW 3u
-#define PROGRAM_ID 0x0400486024dec000ull   // the game's title id (GetInfo 18); fs_host.c NX2NAVI_APPLICATION_ID is the same
+#define PROGRAM_ID 0x0400486024dec000ull   // the game's title id (GetInfo 18); fs_host.c OOTPC_APPLICATION_ID is the same
 
 static uint64_t g_svcs;
 void (*volatile svc_test_exit_hook)(unsigned code);
@@ -243,6 +244,7 @@ static void svc_body(Cpu *c, uint32_t imm, uint64_t pc) {
                    // profile saved, logs flushed, exit code 0
         char at[160];
         rt_log("guest ExitProcess at %s; exiting", ldr_describe(pc, at, sizeof at));
+        coop_shutdown();   // leaves the room, before the process ends
         fs_save_flush();
         vk_pipeline_prewarm_marker_clear();   // as the window's close (gfx_present.c gfx_window_closed)
         vk_mem_exit_log();

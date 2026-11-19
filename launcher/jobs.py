@@ -67,7 +67,7 @@ STEPS = {
     'scan': ('Check the Game Files', 'Decompressing every game file once to find damage, and standing in for damaged '
                                      'textures so the world still loads.'),
     'ready': ('Ready to Play', 'The game is built.'),
-    'download': ('Download {ver}', 'Downloading the new version of OOT-DEBUG-MENU.'),
+    'download': ('Download {ver}', 'Downloading the new version of OOT-PC.'),
     'verify': ('Verify the Download', 'Checking the download against its checksum.'),
     'swap': ('Swap In the New Build', 'Linking the new build. It replaces the old one only once it is complete.'),
 }

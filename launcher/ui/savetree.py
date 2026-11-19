@@ -759,7 +759,7 @@ class SaveTreeWindow:
                                    'The slot\'s current save is copied to the saves folder first. Start the game and '
                                    'load that slot to play it.', parent=self.win):
             return
-        stage = tempfile.mkdtemp(prefix='nx2navi-tree-')
+        stage = tempfile.mkdtemp(prefix='ootpc-tree-')
         try:
             folder = savetree.stage_slot(self.game, n.id, stage)
             r = saves.import_save(self.game, folder=folder, log=self.app.ctx.log)

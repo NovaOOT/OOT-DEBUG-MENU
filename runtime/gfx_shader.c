@@ -1,7 +1,7 @@
 // Shader service client: turns an NVN program (control section, code, c1 constants and the
-// translator's answers) into SPIR-V plus reflection through `nx2navi_xlate.exe --serve` children, started lazily with
-// pipes and kept for the life of the process (a pool: NX2NAVI_XLATE_PROCS at run time, more for the boot prewarm).
-// Results are cached in memory and on disk (shader-cache/<key>.spv and <key>.res.json next to nx2navi.exe), so a shader
+// translator's answers) into SPIR-V plus reflection through `ootpc_xlate.exe --serve` children, started lazily with
+// pipes and kept for the life of the process (a pool: OOTPC_XLATE_PROCS at run time, more for the boot prewarm).
+// Results are cached in memory and on disk (shader-cache/<key>.spv and <key>.res.json next to ocarina.exe), so a shader
 // is translated once per machine and translator.
 //
 // Keys. The code hash is sha256 over stage (u32), the 0x880-byte control section, code_size (u64), the code, the c1
@@ -13,12 +13,12 @@
 // key is sha256 over "TKSK", KEY_VERSION, the translator identity and the input id. A code hash without a known mask is
 // translated under a provisional key ("TKSP", full answers); its files are renamed to the cache key and the mask stored.
 //
-// Translator identity: build/xlate/nx2navi_xlate.id, sha256 hex that tools/build_xlate.py writes over the sources it
-// builds from (Program.cs, the csproj, the patches, the vendor tree); without it the sha256 of the exe. NX2NAVI_XLATE_ID
+// Translator identity: build/xlate/ootpc_xlate.id, sha256 hex that tools/build_xlate.py writes over the sources it
+// builds from (Program.cs, the csproj, the patches, the vendor tree); without it the sha256 of the exe. OOTPC_XLATE_ID
 // (64 hex digits) overrides it. A translator change therefore changes every cache key without a hand-made KEY_VERSION
 // bump; KEY_VERSION is for changes on this side (key layout, how the output is used).
 //
-// Carry (NX2NAVI_SHADER_CARRY, default 1; section "carry"). Since every cache key names the translator, a release with a
+// Carry (OOTPC_SHADER_CARRY, default 1; section "carry"). Since every cache key names the translator, a release with a
 // new translator would otherwise translate every shader again, before play or while the game waits. <cache>/identities.txt
 // lists the translator identities the cache holds translations of, newest first: base identities, before
 // gfx_shader_set_host mixes the host options in. The current one goes first once a translation under it is stored or
@@ -69,9 +69,9 @@
 // scanned for interface Locations, the workgroup size and its Binding decorations (gfx.h accessors at the end of the
 // file).
 //
-// SPIR-V at rest (NX2NAVI_SHADER_COMPRESS, default 1; section "SPIR-V at rest"): the memory cache keeps every shader
+// SPIR-V at rest (OOTPC_SHADER_COMPRESS, default 1; section "SPIR-V at rest"): the memory cache keeps every shader
 // for the life of the process, but its SPIR-V is read only while modules are made of it. A background thread keeps the
-// SPIR-V of a shader nobody read for NX2NAVI_SHADER_COMPRESS_IDLE_S seconds (fewer while the system memory is tight,
+// SPIR-V of a shader nobody read for OOTPC_SHADER_COMPRESS_IDLE_S seconds (fewer while the system memory is tight,
 // mem_budget.h) as a zstd frame alone, and a reader that pins it (gfx_shader_spirv_pin) gets it decoded back
 // (runtime/spv_store.h).
 //
@@ -190,7 +190,7 @@ static PlatOnce paths_once = PLAT_ONCE_INIT;
 // Carry state (see "Carry" at the top). prev and prev_eff are written before ready is set and never change after it.
 #define IDS_MAX 8                                          // identities.txt holds at most this many identities
 static struct {
-    int on;                                                // NX2NAVI_SHADER_CARRY, read in init_paths
+    int on;                                                // OOTPC_SHADER_CARRY, read in init_paths
     int n_prev;                                            // previous identities in identities.txt, newest first
     uint8_t prev[IDS_MAX][32];                             // their base identities
     uint8_t prev_eff[IDS_MAX][32];                         // mixed with this machine's host options: their cache keys
@@ -331,12 +331,12 @@ static int hex32(const char *h, uint8_t out[32]) {        // 64 hex digits, then
     return 1;
 }
 
-// NX2NAVI_XLATE_ID (64 hex digits, or any other text, which is hashed), else <translator>.id next to the exe
+// OOTPC_XLATE_ID (64 hex digits, or any other text, which is hashed), else <translator>.id next to the exe
 // (tools/build_xlate.py), else the sha256 of the exe.
 static void xlate_identity(void) {
     char text[256] = "";
-    const char *how = "NX2NAVI_XLATE_ID";
-    const char *id_env = cfg_get("NX2NAVI_XLATE_ID");
+    const char *how = "OOTPC_XLATE_ID";
+    const char *id_env = cfg_get("OOTPC_XLATE_ID");
     if (id_env && *id_env && strlen(id_env) < sizeof text) {
         strcpy(text, id_env);
         if (!hex32(text, xlate_id)) rt_sha256(text, strlen(text), xlate_id);
@@ -348,10 +348,10 @@ static void xlate_identity(void) {
         strcat(p, ".id");
         uint64_t size = 0;
         char *f = (char *)read_file(p, &size);
-        how = "nx2navi_xlate.id";
+        how = "ootpc_xlate.id";
         if (!f || !hex32(f, xlate_id)) {
             uint8_t *exe = read_file(xlate_exe, &size);
-            how = exe ? "sha256 of the exe; tools/build_xlate.py writes nx2navi_xlate.id" : "none: no translator";
+            how = exe ? "sha256 of the exe; tools/build_xlate.py writes ootpc_xlate.id" : "none: no translator";
             if (exe) rt_sha256(exe, (size_t)size, xlate_id);
             free(exe);
         }
@@ -365,8 +365,8 @@ static void xlate_identity(void) {
 static void ids_load(void);
 static void pack_swap_pruned(void);
 
-// The repository root is the nearest parent of nx2navi.exe that holds build/xlate/nx2navi_xlate.exe. The shader cache lives
-// next to nx2navi.exe, so every build dir has its own (as the pipeline cache, vk_pipeline.c cache_path_init).
+// The repository root is the nearest parent of ocarina.exe that holds build/xlate/ootpc_xlate.exe. The shader cache lives
+// next to ocarina.exe, so every build dir has its own (as the pipeline cache, vk_pipeline.c cache_path_init).
 static void use_preload_start(void);
 
 static void init_paths(void *param) {
@@ -378,23 +378,23 @@ static void init_paths(void *param) {
         for (char *cut = plat_last_sep(exe); cut; cut = plat_last_sep(exe)) {
             *cut = 0;
             char probe[PATH_CAP + 32];
-            snprintf(probe, sizeof probe, "%s/build/xlate/nx2navi_xlate" PLAT_EXE_SUFFIX, exe);
+            snprintf(probe, sizeof probe, "%s/build/xlate/ootpc_xlate" PLAT_EXE_SUFFIX, exe);
             if (file_exists(probe)) {
                 strcpy(root, exe);
                 break;
             }
         }
     }
-    const char *xlate_cfg = cfg_get("NX2NAVI_XLATE"), *cache_cfg = cfg_get("NX2NAVI_SHADER_CACHE");
-    char beside[PATH_CAP + 32];   // a packaged folder (tools/package_build.py) keeps the translator next to nx2navi.exe
-    if (exe_dir[0]) snprintf(beside, sizeof beside, "%s/nx2navi_xlate" PLAT_EXE_SUFFIX, exe_dir);
+    const char *xlate_cfg = cfg_get("OOTPC_XLATE"), *cache_cfg = cfg_get("OOTPC_SHADER_CACHE");
+    char beside[PATH_CAP + 32];   // a packaged folder (tools/package_build.py) keeps the translator next to ocarina.exe
+    if (exe_dir[0]) snprintf(beside, sizeof beside, "%s/ootpc_xlate" PLAT_EXE_SUFFIX, exe_dir);
     if (xlate_cfg && *xlate_cfg && strlen(xlate_cfg) < sizeof xlate_exe) strcpy(xlate_exe, xlate_cfg);
     else if (exe_dir[0] && file_exists(beside)) strcpy(xlate_exe, beside);
-    else if (root[0]) snprintf(xlate_exe, sizeof xlate_exe, "%s/build/xlate/nx2navi_xlate" PLAT_EXE_SUFFIX, root);
+    else if (root[0]) snprintf(xlate_exe, sizeof xlate_exe, "%s/build/xlate/ootpc_xlate" PLAT_EXE_SUFFIX, root);
     if (cache_cfg && *cache_cfg && strlen(cache_cfg) < sizeof cache_dir) strcpy(cache_dir, cache_cfg);
     else if (exe_dir[0]) snprintf(cache_dir, sizeof cache_dir, "%s/shader-cache", exe_dir);
     xlate_identity();
-    C.on = cfg_bool("NX2NAVI_SHADER_CARRY");
+    C.on = cfg_bool("OOTPC_SHADER_CARRY");
     if (cache_dir[0] && C.on) ids_load(), pack_swap_pruned();   // the swap before the pack is opened
     if (cache_dir[0]) pack_open();
     use_preload_start();
@@ -546,7 +546,7 @@ static void child_stop(Svc *v) {
 static int child_start(Svc *v) {
     paths();
     if (!xlate_exe[0] || !file_exists(xlate_exe)) {
-        rt_log("gfx_shader: translator not found (%s); set NX2NAVI_XLATE", xlate_exe[0] ? xlate_exe : "<none>");
+        rt_log("gfx_shader: translator not found (%s); set OOTPC_XLATE", xlate_exe[0] ? xlate_exe : "<none>");
         return 0;
     }
     uint32_t err = 0;
@@ -585,17 +585,17 @@ static int child_exchange_raw(Svc *v, const char *line, char *reply, size_t repl
 }
 
 static int child_exchange(Svc *v, const char *line, char *reply, size_t reply_size) {
-    uint64_t p0 = perf_begin();   // NX2NAVI_TRACE=perf: render-thread time spent translating
+    uint64_t p0 = perf_begin();   // OOTPC_TRACE=perf: render-thread time spent translating
     int ok = child_exchange_raw(v, line, reply, reply_size);
     perf_end(PERF_XLATE, p0);
     return ok;
 }
 
-// Children allowed at run time: NX2NAVI_XLATE_PROCS, default 2.
+// Children allowed at run time: OOTPC_XLATE_PROCS, default 2.
 static int svc_runtime_limit(void) {
     static volatile int32_t n;
     if (!n) {
-        const char *e = cfg_get("NX2NAVI_XLATE_PROCS");
+        const char *e = cfg_get("OOTPC_XLATE_PROCS");
         int v = e && *e ? atoi(e) : 2;
         plat_xchg32(&n, v < 1 ? 1 : v > MAX_SVC ? MAX_SVC : v);
     }
@@ -1068,21 +1068,21 @@ out:
 
 // Every gradient sample (OpImageSampleExplicitLod with Grad) whose two gradients are each built from two components gets
 // them transposed, dx = (a, c) and dy = (b, d) from dx = (a, b) and dy = (c, d), by two new OpCompositeConstruct before
-// it. NX2navi's shaders fill a TXD's gradient registers per coordinate (du/dx, du/dy, dv/dx, dv/dy), and the translator
+// it. OOT-PC's shaders fill a TXD's gradient registers per coordinate (du/dx, du/dy, dv/dx, dv/dy), and the translator
 // builds dx = (first two registers), dy = (last two) = (du/dx, du/dy) and
 // (dv/dx, dv/dy): a mip level chosen from the wrong derivatives, too sharp on terrain faces turned across the screen,
-// which crawled in patches that followed the faces. NX2NAVI_TXD_TRANSPOSE=0 turns it off.
+// which crawled in patches that followed the faces. OOTPC_TXD_TRANSPOSE=0 turns it off.
 // Applied to the SPIR-V after it is loaded, so the shader cache is untouched. Not for a Switch 2 title (NVN 200 and up):
 // its SM86 programs are lowered by tools/xlate/AmpereLowering.cs (Txd), which puts SM86's interleaved derivatives
 // (dx.x, dy.x, dx.y, dy.y) in the translator's order already, so transposing again here swapped them back and chose
-// Ocarina's mip levels from the wrong derivatives. NX2NAVI_TXD_TRANSPOSE=1 forces it on.
+// Ocarina's mip levels from the wrong derivatives. OOTPC_TXD_TRANSPOSE=1 forces it on.
 enum { OP_COMPOSITE_CONSTRUCT = 80, OP_SAMPLE_EXPLICIT = 88, IO_GRAD = 4 };
 
 static void patch_txd_transpose(GfxShader *s) {
     static int on = -1;
     static volatile int32_t n_logged;
     if (on < 0) {
-        const char *e = cfg_get("NX2NAVI_TXD_TRANSPOSE");
+        const char *e = cfg_get("OOTPC_TXD_TRANSPOSE");
         on = e && *e ? *e != '0' : rt_nvn_api_version[0] < 200;
     }
     uint32_t *w = s->spv.plain;
@@ -1231,7 +1231,7 @@ out:
 // wanted picked with OpSelect. AMD's Windows drivers can read the wrong component through such an access chain, the bug
 // Ryujinx works around with HasVectorIndexingBug (VectorComponentSelect). The volumetric fog's per-volume
 // extinction reads its colour this way. It did not change the fog's teal blotches on an RX 580 (23.10.01.14), so it is
-// off by default. NX2NAVI_VEC_INDEX_FIX: 1 everywhere, auto on AMD's own drivers, unset or 0 off. In memory only.
+// off by default. OOTPC_VEC_INDEX_FIX: 1 everywhere, auto on AMD's own drivers, unset or 0 off. In memory only.
 int vk_caps_vec_index_bug(void);   // vk_caps.c
 
 enum { VX_TYPE_BOOL = 20, VX_TYPE_INT = 21, VX_TYPE_FLOAT = 22, VX_TYPE_VECTOR = 23, VX_TYPE_ARRAY = 28,
@@ -1243,10 +1243,10 @@ static void patch_vec_index(GfxShader *s) {
     static int on = -1;
     static volatile int32_t n_logged;
     if (on < 0) {
-        const char *e = cfg_get("NX2NAVI_VEC_INDEX_FIX");
+        const char *e = cfg_get("OOTPC_VEC_INDEX_FIX");
         on = e && *e ? (strcmp(e, "auto") ? *e != '0' : vk_caps_vec_index_bug()) : 0;
         if (on) rt_log("gfx_shader: uniform vector components at computed indices are read whole and selected "
-                       "(NX2NAVI_VEC_INDEX_FIX=0 turns it off)");
+                       "(OOTPC_VEC_INDEX_FIX=0 turns it off)");
     }
     uint32_t *w = s->spv.plain;
     uint64_t n = s->spv.words;
@@ -1735,7 +1735,7 @@ static int use_find(const uint8_t h[32], UseMask *m) {
     return known;
 }
 
-// NX2NAVI_SHADER_CACHE_FLUSH (default 0): 1 flushes the .spv, .res.json and .use files to the disk too, as the cache
+// OOTPC_SHADER_CACHE_FLUSH (default 0): 1 flushes the .spv, .res.json and .use files to the disk too, as the cache
 // did before (see "Durability" at the top), for a drive or setup where a torn file was seen.
 static int cache_flush(void) {
     static int on = -1;
@@ -2026,7 +2026,7 @@ static int carry_has_iid(const uint8_t iid[32]) {
     return 0;
 }
 
-// ---- SPIR-V at rest (NX2NAVI_SHADER_COMPRESS, default 1)
+// ---- SPIR-V at rest (OOTPC_SHADER_COMPRESS, default 1)
 // The memory cache keeps every shader for the life of the process: 7115 shaders and 777 MiB of the C runtime heap in
 // a session of 2026-11-13, nearly all of it SPIR-V (a .res.json averages 1.8 KB). The SPIR-V is read where modules
 // are made of it: the pipeline workers and the boot's builds (vk_pipeline.c create_graphics, lib_create, emu_get), a
@@ -2034,11 +2034,11 @@ static int carry_has_iid(const uint8_t iid[32]) {
 // its first pipeline key (mesh_outs), the mesh fallback's workers (vk_exec_draw.c mfb_module), an emulated mesh draw's
 // primitive (mesh_emu_draw_prim), the shader preparation (gfx_shader_guess.c) and the diagnostics (vk_dump.c,
 // gfx_shader_probe.c). What the drawing thread compares at every pipeline miss or draw comes from values kept apart:
-// the module's FNV-1a (gfx_shader_spirv_fnv: vk_dlaa.c, vk_crumbs.c, the water corrections, NX2NAVI_SKIP_SHADERS) and
+// the module's FNV-1a (gfx_shader_spirv_fnv: vk_dlaa.c, vk_crumbs.c, the water corrections, OOTPC_SKIP_SHADERS) and
 // its Binding decorations (gfx_shader_bindings: vk_pipeline.c module_binding_missing), so those decode nothing.
 // Every reader pins the SPIR-V (gfx_shader_spirv_pin, gfx_shader_spirv_unpin; spv_store.h has the lock rules). One
 // background thread (zpass_main) walks the cache every ZPASS_PERIOD_MS and compresses the SPIR-V of each shader no
-// reader pinned for NX2NAVI_SHADER_COMPRESS_IDLE_S seconds (zstd level ZPASS_LEVEL, checked by decoding it before the
+// reader pinned for OOTPC_SHADER_COMPRESS_IDLE_S seconds (zstd level ZPASS_LEVEL, checked by decoding it before the
 // plain copy goes), then frees the plain copy. The frame stays with the shader, so a shader read again keeps its
 // decoded copy until it is idle once more, and then only loses that copy. The thread takes spv_lock for a few loads
 // and stores per shader at normal priority, so that no reader waits for the scheduler to run a lowered thread inside
@@ -2054,8 +2054,8 @@ static int carry_has_iid(const uint8_t iid[32]) {
 static struct {
     PlatOnce once;
     PlatMutex pass;                        // held over a pass; gfx_shader_drop_memory takes it before it frees entries
-    volatile int32_t state;                // 0 no shader yet, 1 compressing, -1 off (NX2NAVI_SHADER_COMPRESS=0)
-    uint32_t idle_s;                       // NX2NAVI_SHADER_COMPRESS_IDLE_S
+    volatile int32_t state;                // 0 no shader yet, 1 compressing, -1 off (OOTPC_SHADER_COMPRESS=0)
+    uint32_t idle_s;                       // OOTPC_SHADER_COMPRESS_IDLE_S
     volatile int64_t frames, frame_fail;   // frames made, frames the encoder or its check refused
     volatile int64_t dec, dec_ns;          // decodes in pins (gfx_shader_spirv_pin, gfx_shader_spirv_fnv)
     volatile int64_t dec_draw, dec_draw_ns, dec_draw_max_ns;   // those on the drawing threads (prof.h)
@@ -2079,7 +2079,7 @@ static void spv_held(const GfxShader *g, uint64_t *plain, uint64_t *z) {
     *z = __atomic_load_n(&g->spv.zsize, __ATOMIC_RELAXED);
 }
 
-// How long a shader goes unpinned before its SPIR-V is compressed: NX2NAVI_SHADER_COMPRESS_IDLE_S, at most 5 s while
+// How long a shader goes unpinned before its SPIR-V is compressed: OOTPC_SHADER_COMPRESS_IDLE_S, at most 5 s while
 // the system memory is tight and 1 s while it is critical (mem_budget.h). Every level compresses losslessly; a shorter
 // wait only means that a shader read again soon after is decoded once more.
 static uint64_t zpass_idle_ms(void) {
@@ -2130,7 +2130,7 @@ static void zpass_main(void *arg) {
         if (made && !logged) {
             logged = 1;
             rt_log("gfx_shader: SPIR-V at rest: the first pass compressed %u shaders unused for %u s, %.1f MiB to %.1f MiB "
-                   "(%.1f%%), and freed %.1f MiB of plain SPIR-V in %u shaders, in %.0f ms (NX2NAVI_SHADER_COMPRESS=0 keeps "
+                   "(%.1f%%), and freed %.1f MiB of plain SPIR-V in %u shaders, in %.0f ms (OOTPC_SHADER_COMPRESS=0 keeps "
                    "it plain)", made, (unsigned)(idle_ms / 1000), raw / 1048576.0, packed / 1048576.0,
                    raw ? 100.0 * (double)packed / (double)raw : 0.0, freed / 1048576.0, dropped,
                    (double)(plat_now_ns() - t0) / 1e6);
@@ -2140,12 +2140,12 @@ static void zpass_main(void *arg) {
 
 static void zpass_start(void *arg) {
     (void)arg;
-    if (!cfg_bool("NX2NAVI_SHADER_COMPRESS")) {
+    if (!cfg_bool("OOTPC_SHADER_COMPRESS")) {
         __atomic_store_n(&Z.state, -1, __ATOMIC_RELEASE);
-        rt_log("gfx_shader: SPIR-V at rest: off (NX2NAVI_SHADER_COMPRESS=0): every shader keeps its SPIR-V plain");
+        rt_log("gfx_shader: SPIR-V at rest: off (OOTPC_SHADER_COMPRESS=0): every shader keeps its SPIR-V plain");
         return;
     }
-    int idle = cfg_int("NX2NAVI_SHADER_COMPRESS_IDLE_S");
+    int idle = cfg_int("OOTPC_SHADER_COMPRESS_IDLE_S");
     Z.idle_s = idle < 1 ? 1 : (uint32_t)idle;
     if (!plat_thread_spawn(zpass_main, NULL, "shader compress", 0)) {
         __atomic_store_n(&Z.state, -1, __ATOMIC_RELEASE);
@@ -2505,10 +2505,10 @@ static const GfxShader *translate_one(const Req *r, int stage, const uint8_t *co
     size_t cap = 2 * PATH_CAP * 6 + 2 * (size_t)r->c1_len + 8192;
     char *req = malloc(cap), reply[LINE_MAX_LEN];
     if (!req) return fail("out of memory", hex);
-    // NX2NAVI_XLATE_KEEP=1: a last-frame variant's job stays as <key>.job (one request line) with its code, to run the
-    // translator on by hand (nx2navi_xlate --serve < <key>.job); 2 keeps every job translated in this run (delete a
+    // OOTPC_XLATE_KEEP=1: a last-frame variant's job stays as <key>.job (one request line) with its code, to run the
+    // translator on by hand (ootpc_xlate --serve < <key>.job); 2 keeps every job translated in this run (delete a
     // key's .res.json and .spv from the cache to have it translated, and kept, again)
-    const char *k = cfg_get("NX2NAVI_XLATE_KEEP");
+    const char *k = cfg_get("OOTPC_XLATE_KEEP");
     int keep = k && *k ? atoi(k) : 0;
     uint8_t options[32];
     int share = preparing && !keep;
@@ -2722,7 +2722,7 @@ static void start_workers(void) {
             if (plat_thread_spawn(xlate_worker, NULL, "xlate", 0)) n++;
         }
         X.started = n ? 1 : -1;
-        if (n) rt_log("gfx_shader: graphics shaders are translated by %d background workers (NX2NAVI_XLATE_PROCS)", n);
+        if (n) rt_log("gfx_shader: graphics shaders are translated by %d background workers (OOTPC_XLATE_PROCS)", n);
         else rt_log("gfx_shader: cannot start the translation workers; translating synchronously");
         for (int i = 0; n && i < LOADERS; i++) {
             if (plat_thread_spawn(load_worker, NULL, "shload", 0)) __atomic_add_fetch(&X.loaders, 1, __ATOMIC_RELAXED);
@@ -3047,8 +3047,8 @@ uint32_t gfx_shader_bindings(const GfxShader *s, const uint32_t **b) {
 const char *gfx_shader_res_json(const GfxShader *s) { return s->reflection; }
 
 // The guest program a shader was translated from, as its stored inputs hold it (the whole program: NVN2 code from its
-// first byte), written to path for a disassembler (NX2NAVI_DUMP's sh_<hash>.code), and next to it <path>.job, the
-// translator request that translates it (one line for nx2navi_xlate --serve; its "out" names the shader cache, and
+// first byte), written to path for a disassembler (OOTPC_DUMP's sh_<hash>.code), and next to it <path>.job, the
+// translator request that translates it (one line for ootpc_xlate --serve; its "out" names the shader cache, and
 // "glsl_out" or "lowered_out" added to the job write the GLSL or the lowered Maxwell code). 0: no stored inputs.
 int gfx_shader_write_code(const GfxShader *s, const char *path) {
     Inputs in;
@@ -3107,7 +3107,7 @@ void gfx_shader_local_size(const GfxShader *s, uint32_t local[3]) { memcpy(local
 // ---- answers met in play
 // The translated-shader key includes the answers a draw's state implies, so a translation made without play (the
 // census) does not match the keys play asks for. Every (program, answers) that a gfx_shader_get* call resolves is
-// recorded next to pipeline-keys.bin, so the first-start preparation (Task 2.6, here the NX2NAVI_TEST_PREPARE_SHADERS hook)
+// recorded next to pipeline-keys.bin, so the first-start preparation (Task 2.6, here the OOTPC_TEST_PREPARE_SHADERS hook)
 // translates exactly the variants play needs, from these files alone:
 //   shader-answers.bin  "NX2NSANS", version, record size; records: stage (u32), code hash, input id, pack_answers bytes
 //                       of the full answers, zero padding. One record per input id: answers outside the shader's use
@@ -3334,8 +3334,8 @@ void gfx_shader_record_flush(int force) {
     free(ans.p), free(prg.p);
 }
 
-// ---- preparation from record files: the answers met in play (NX2NAVI_TEST_PREPARE_SHADERS=1) or the seed that
-// tools/prepare_shaders.py writes from its shader list (nx2navi.exe --prepare-shaders). Both use the record
+// ---- preparation from record files: the answers met in play (OOTPC_TEST_PREPARE_SHADERS=1) or the seed that
+// tools/prepare_shaders.py writes from its shader list (ocarina.exe --prepare-shaders). Both use the record
 // layouts above; a seed record has a zero input id (the use mask, hence the id, is the translator's to find) and its
 // pad byte holds the list priority (0 title, 1 warm-up, 2 rest), with SEED_DEFAULT set on a default variant: its
 // answers are read again from its first translation (gfx_shader_guess.c) and the variant it resolves to is the
@@ -3506,7 +3506,7 @@ int gfx_shader_prepare_seed(const char *dir, int threads, int procs) {
     uint64_t fail0 = (uint64_t)n_failures;
     uint8_t *ab = NULL, (*iid)[32] = NULL;
     // What this list is prepared from goes into its head (prp_file.h): the seed as it is on the disk now, and the
-    // translator before the host options are mixed in, which is what nx2navi_xlate.id holds. The list there before
+    // translator before the host options are mixed in, which is what ootpc_xlate.id holds. The list there before
     // is replaced whole at the end; the log says whether it came from this seed.
     paths();
     PrpFrom from = {{0}}, was;
@@ -4042,7 +4042,7 @@ void gfx_shader_ram(GfxShaderRam *r) {
     plat_mutex_unlock(&RC.lock);
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): the shader memory cache's entries with their SPIR-V as held (plain and
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): the shader memory cache's entries with their SPIR-V as held (plain and
 // compressed, gfx_shader_ram) and reflection bytes (kept for the life of the process), the remembered failures, the
 // translation and load queues, and the translator processes. cache_lock is held shared: lookups go on, a translator's
 // insert waits for the walk.

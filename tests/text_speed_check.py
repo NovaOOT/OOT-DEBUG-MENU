@@ -34,7 +34,7 @@ def site_words(table, site, original):
     alternatives = table.sites['main'][site]
     assert len(alternatives) == 1, hex(site)
     key, words, have = alternatives[0]
-    assert table.sets[key] == ('text_speed', 'NX2NAVI_TEXT_SPEED_PATCH', 1), table.sets[key]
+    assert table.sets[key] == ('text_speed', 'OOTPC_TEXT_SPEED_PATCH', 1), table.sets[key]
     assert have == original, (hex(site), hex(have))
     return words
 

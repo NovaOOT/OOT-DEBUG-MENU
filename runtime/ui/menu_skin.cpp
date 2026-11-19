@@ -1,9 +1,5 @@
-// The look of the game's own menus (ui/menu_skin.h). With the game's textures (ui/menu_art.cpp) each piece is those
-// textures tinted and laid over each other in nine slices; until they are decoded, or without them, it is plain shapes
-// whose colours and proportions are sampled from the game: the save menu's Load and Cancel buttons (brown fill, light
-// edge, an inset line about a twentieth of the height in with a diamond and a curl at alternate corners), the options
-// menu's cursor (a 3 px white frame with a soft white-blue glow); without the textures the divider is a plain line with
-// a diamond in its middle and a dot at each end, a shape of its own, not the game's ornament.
+// OOT-PC menu materials and controls: forest-green surfaces, engraved brass plates and warm ivory text.
+// The authored artwork is packed into the font atlas by tools/build_menu_art.py; scalable shapes cover missing art.
 #include <float.h>
 #include <math.h>
 #include <stdlib.h>
@@ -15,6 +11,11 @@
 #include "ui/menu_art.h"
 #include "ui/menu_skin.h"
 
+#if __has_include("../../generated/menu-ui/forest_pixels.h")
+#include "../../generated/menu-ui/forest_pixels.h"
+#define OOTPC_FOREST_ART 1
+#endif
+
 namespace {
 
 // The mottled grain of the game's brown boxes: a tile in the font atlas (skin_atlas_add, skin_atlas_fill), white with
@@ -23,6 +24,12 @@ const int kGrainW = 160, kGrainH = 48;
 int g_grain_rect = -1;
 ImVec2 g_grain_uv0, g_grain_uv1;
 bool g_grain_ok;
+int g_forest_rect = -1;
+ImVec2 g_forest_uv0, g_forest_uv1;
+bool g_forest_ok;
+int g_widgets_rect = -1;
+ImVec2 g_widgets_uv0, g_widgets_uv1;
+bool g_widgets_ok;
 
 ImU32 rgba(int r, int g, int b, float a) { return IM_COL32(r, g, b, (int)(a * 255.0f + 0.5f)); }
 
@@ -66,72 +73,8 @@ void ornament_line(ImDrawList *dl, ImVec2 a, ImVec2 b, float inset, float s, ImU
 
 // The settings menu's colours: a dark umber panel, warm browns for frames and what is selected, gold for the ornaments,
 // accents and the cursor, parchment text. kGreen and kOcarina keep their names for the selected and active controls.
-const ImVec4 kGold(0.93f, 0.76f, 0.38f, 1), kGreen(0.36f, 0.26f, 0.13f, 1), kNavy(0.075f, 0.058f, 0.042f, 0.95f),
-    kOcarina(0.62f, 0.47f, 0.22f, 1);
-
-// Where the art's boxes lie in its textures, in texels (measured from the textures). The button's layers are 489 x 133
-// with the button's box from (20, 19) to (469, 114); the cursor's are 640 x 173 and its box, the button it surrounds,
-// runs from (49, 48) to (591, 125); the panel's box runs from (53, 53) to (1147, 374) in 1200 x 427.
-const float kBtnW = 489, kBtnH = 133, kBtnL = 20, kBtnT = 19, kBtnBoxH = 95, kBtnCut = 60;
-const float kCurW = 640, kCurH = 173, kCurX = 49, kCurY = 48, kCurCut = 70, kCurScale = 0.72f;
-const float kPanelW = 1200, kPanelH = 427, kPanelM = 53;
-const float kTabL = 25, kTabT = 0, kTabR = 336, kTabB = 151;   // the selected tab's plate in its 360 x 173 texture
-
-bool have_art(std::initializer_list<MenuArt> ids) {
-    ImTextureID t;
-    for (MenuArt id : ids)
-        if (!menu_art(id, &t, nullptr, nullptr)) return false;
-    return true;
-}
-
-enum { MAX_COPIES = 15 };
-struct Piece { float p0, p1, t0, t1; };
-
-// One axis of a slice: screen [a, b] from texels [x0, x1] of a texture `size` long, the outer `cut` texels c pixels
-// long. The middle is stretched, or with tile repeated at k pixels per texel: an odd number of copies, every other one
-// mirrored, so each copy meets the next on the same texels and the last meets the far corner. Mottled art stretched
-// across a wide box would turn into streaks.
-int axis(Piece *out, float a, float b, float x0, float x1, float size, float cut, float c, float k, bool tile) {
-    const float m0 = a + c, m1 = b - c, t0 = (x0 + cut) / size, t1 = (x1 - cut) / size, unit = (x1 - x0 - 2 * cut) * k;
-    int copies = 1, n = 0;
-    if (tile && unit > 0) copies = 2 * (int)floorf(((m1 - m0) / unit - 1) * 0.5f + 0.5f) + 1;
-    copies = copies < 1 ? 1 : copies > MAX_COPIES ? MAX_COPIES : copies;
-    out[n++] = {a, m0, x0 / size, t0};
-    for (int i = 0; i < copies; i++) {
-        float w = (m1 - m0) / copies;
-        out[n++] = {m0 + i * w, m0 + (i + 1) * w, i & 1 ? t1 : t0, i & 1 ? t0 : t1};
-    }
-    out[n++] = {m1, b, t1, x1 / size};
-    return n;
-}
-
-// The texels (x0, y0)-(x1, y1) of an art over [a, b] in nine slices: the outer `cut` texels on each side at k screen
-// pixels per texel, so corners keep their shape, the rest stretched or tiled. A box smaller than its two corners shrinks
-// them.
-void slice(ImDrawList *dl, MenuArt id, ImVec2 a, ImVec2 b, float x0, float y0, float x1, float y1, float cut, float k, ImU32 tint,
-           bool tile_x = false, bool tile_y = false) {
-    ImTextureID t;
-    float tw, th;
-    if (!menu_art(id, &t, &tw, &th)) return;
-    Piece xs[MAX_COPIES + 2], ys[MAX_COPIES + 2];
-    int nx = axis(xs, a.x, b.x, x0, x1, tw, cut, fminf(cut * k, (b.x - a.x) * 0.5f), k, tile_x);
-    int ny = axis(ys, a.y, b.y, y0, y1, th, cut, fminf(cut * k, (b.y - a.y) * 0.5f), k, tile_y);
-    for (int j = 0; j < ny; j++)
-        for (int i = 0; i < nx; i++)
-            dl->AddImage(t, ImVec2(xs[i].p0, ys[j].p0), ImVec2(xs[i].p1, ys[j].p1), ImVec2(xs[i].t0, ys[j].t0), ImVec2(xs[i].t1, ys[j].t1), tint);
-}
-
-// A button layer over the box [a, b]: the whole texture, reaching past the box by its margins.
-void btn_layer(ImDrawList *dl, MenuArt id, ImVec2 a, ImVec2 b, float k, ImU32 tint, bool tile_x = false) {
-    const float mx = kBtnL * k, my = kBtnT * k;
-    slice(dl, id, ImVec2(a.x - mx, a.y - my), ImVec2(b.x + mx, b.y + my), 0, 0, kBtnW, kBtnH, kBtnCut, k, tint, tile_x);
-}
-
-// A cursor layer around the box [a, b], at a fixed size so its frame keeps its width on any box.
-void cursor_layer(ImDrawList *dl, MenuArt id, ImVec2 a, ImVec2 b, float s, ImU32 tint) {
-    const float k = kCurScale * s, mx = kCurX * k, my = kCurY * k;
-    slice(dl, id, ImVec2(a.x - mx, a.y - my), ImVec2(b.x + mx, b.y + my), 0, 0, kCurW, kCurH, kCurCut, k, tint);
-}
+const ImVec4 kGold(0.83f, 0.69f, 0.37f, 1), kGreen(0.15f, 0.26f, 0.15f, 1), kNavy(0.025f, 0.065f, 0.043f, 0.98f),
+    kOcarina(0.40f, 0.53f, 0.26f, 1);
 
 }  // namespace
 
@@ -202,7 +145,7 @@ extern "C" int menu_art_draw9_turned(ImDrawList *dl, MenuArt id, ImVec2 a, ImVec
 void skin_style(ImGuiStyle &s) {
     ImGui::StyleColorsDark(&s);
     s.WindowRounding = 10; s.FrameRounding = 6; s.GrabRounding = 6; s.TabRounding = 6; s.ChildRounding = 8;
-    s.WindowPadding = ImVec2(40, 30); s.FramePadding = ImVec2(14, 8); s.ItemSpacing = ImVec2(14, 12);
+    s.WindowPadding = ImVec2(30, 24); s.FramePadding = ImVec2(14, 8); s.ItemSpacing = ImVec2(14, 8);
     s.WindowBorderSize = 2; s.ScrollbarSize = 16;
     ImVec4 *c = s.Colors;
     c[ImGuiCol_WindowBg] = kNavy;
@@ -211,16 +154,16 @@ void skin_style(ImGuiStyle &s) {
     c[ImGuiCol_PopupBg] = kNavy;
     c[ImGuiCol_Text] = ImVec4(0.96f, 0.92f, 0.82f, 1);
     c[ImGuiCol_TextDisabled] = ImVec4(0.62f, 0.56f, 0.46f, 1);
-    c[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.115f, 0.08f, 1);
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.24f, 0.18f, 0.10f, 1);
+    c[ImGuiCol_FrameBg] = ImVec4(0.055f, 0.115f, 0.075f, 1);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.12f, 0.22f, 0.13f, 1);
     c[ImGuiCol_FrameBgActive] = kGreen;
     c[ImGuiCol_SliderGrab] = kOcarina;
     c[ImGuiCol_SliderGrabActive] = kGold;
     c[ImGuiCol_CheckMark] = kGold;
-    c[ImGuiCol_Button] = ImVec4(0.19f, 0.145f, 0.09f, 1);
+    c[ImGuiCol_Button] = ImVec4(0.07f, 0.14f, 0.09f, 1);
     c[ImGuiCol_ButtonHovered] = kGreen;
     c[ImGuiCol_ButtonActive] = kOcarina;
-    c[ImGuiCol_Header] = ImVec4(0.24f, 0.18f, 0.10f, 1);
+    c[ImGuiCol_Header] = ImVec4(0.10f, 0.19f, 0.11f, 1);
     c[ImGuiCol_HeaderHovered] = kGreen;
     c[ImGuiCol_HeaderActive] = kOcarina;
     c[ImGuiCol_Tab] = ImVec4(0.13f, 0.10f, 0.07f, 1);
@@ -229,7 +172,7 @@ void skin_style(ImGuiStyle &s) {
     c[ImGuiCol_TabSelectedOverline] = kGold;
     c[ImGuiCol_NavCursor] = kGold;
     c[ImGuiCol_Separator] = ImVec4(kGold.x, kGold.y, kGold.z, 0.30f);
-    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.36f, 0.28f, 0.16f, 1);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.46f, 0.41f, 0.24f, 1);
     c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0.2f);
 }
 
@@ -252,7 +195,18 @@ static void grain(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, float strength) {
         }
 }
 
-void skin_atlas_add(ImFontAtlas *fa) { g_grain_rect = fa->AddCustomRectRegular(kGrainW, kGrainH), g_grain_ok = false; }
+void skin_atlas_add(ImFontAtlas *fa) {
+    g_grain_rect = fa->AddCustomRectRegular(kGrainW, kGrainH);
+    g_grain_ok = g_forest_ok = false;
+#ifdef OOTPC_FOREST_ART
+    fa->TexDesiredWidth = 4096;
+    g_forest_rect = fa->AddCustomRectRegular(kForestW, kForestH);
+#ifdef OOTPC_WIDGET_ART
+    g_widgets_rect = fa->AddCustomRectRegular(kWidgetsW, kWidgetsH);
+#endif
+#endif
+
+}
 
 void skin_atlas_fill(ImFontAtlas *fa) {
     unsigned char *px;
@@ -288,28 +242,83 @@ void skin_atlas_fill(ImFontAtlas *fa) {
         }
     fa->CalcCustomRectUV(r, &g_grain_uv0, &g_grain_uv1);
     g_grain_ok = true;
+#ifdef OOTPC_FOREST_ART
+    const ImFontAtlasCustomRect *forest = fa->GetCustomRectByIndex(g_forest_rect);
+    if (forest && forest->IsPacked()) {
+        for (int y=0;y<kForestH;y++) for (int x=0;x<kForestW;x++) {
+            unsigned short c=kForestPixels[y*kForestW+x];
+            uint8_t *d=px+4*((size_t)(forest->Y+y)*w+forest->X+x);
+            d[0]=(uint8_t)(((c>>11)&31)*255/31); d[1]=(uint8_t)(((c>>5)&63)*255/63);
+            d[2]=(uint8_t)((c&31)*255/31); d[3]=kForestAlpha[y*kForestW+x];
+        }
+        fa->CalcCustomRectUV(forest,&g_forest_uv0,&g_forest_uv1);
+        g_forest_ok=true;
+    }
+#endif
+#ifdef OOTPC_WIDGET_ART
+    const ImFontAtlasCustomRect *widgets=fa->GetCustomRectByIndex(g_widgets_rect);
+    g_widgets_ok=false;
+    if (widgets && widgets->IsPacked()) {
+        for (int y=0;y<kWidgetsH;y++) for(int x=0;x<kWidgetsW;x++) {
+            unsigned int c=kWidgetsPixels[y*kWidgetsW+x];
+            uint8_t *d=px+4*((size_t)(widgets->Y+y)*w+widgets->X+x);
+            d[0]=(uint8_t)c; d[1]=(uint8_t)(c>>8); d[2]=(uint8_t)(c>>16); d[3]=(uint8_t)(c>>24);
+        }
+        fa->CalcCustomRectUV(widgets,&g_widgets_uv0,&g_widgets_uv1);
+        g_widgets_ok=true;
+    }
+#endif
 }
 
-// The button from the game's layers; false while they are not there. plate: the selected tab's plate under the lines.
-static bool button_art(ImDrawList *dl, ImVec2 a, ImVec2 b, float lift, bool dim, bool plate) {
-    if (!have_art({MENU_ART_BTN_RIM, MENU_ART_BTN_FILL, MENU_ART_BTN_GRAIN, MENU_ART_BTN_EDGE, MENU_ART_BTN_LINE})) return false;
-    static const int fill0[3] = {100, 76, 42}, fill1[3] = {128, 99, 58}, grain0[3] = {150, 118, 76}, grain1[3] = {178, 144, 96};
-    static const int grey_fill[3] = {76, 67, 56}, grey_grain[3] = {128, 116, 100};
-    const float t = (b.y - a.y) / kBtnBoxH;
-    btn_layer(dl, MENU_ART_BTN_RIM, a, b, t, rgba(20, 14, 8, 0.85f));
-    btn_layer(dl, MENU_ART_BTN_FILL, a, b, t, dim ? mix(grey_fill, grey_fill, 0, 1) : mix(fill0, fill1, lift, 1));
-    btn_layer(dl, MENU_ART_BTN_GRAIN, a, b, t, dim ? mix(grey_grain, grey_grain, 0, 0.26f) : mix(grain0, grain1, lift, 0.32f), true);
-    if (plate) slice(dl, MENU_ART_TAB_SELECT, a, b, kTabL, kTabT, kTabR, kTabB, 30, t, rgba(232, 186, 104, 0.55f));
-    btn_layer(dl, MENU_ART_BTN_EDGE, a, b, t, dim ? rgba(98, 88, 74, 1) : rgba(140, 116, 74, 1));
-    btn_layer(dl, MENU_ART_BTN_LINE, a, b, t, dim ? rgba(112, 102, 88, 1) : rgba(150 + (int)(24 * lift), 124 + (int)(20 * lift), 80 + (int)(12 * lift), 1));
+bool skin_forest_art(ImDrawList *dl, ImVec2 a, ImVec2 b) {
+    if (!g_forest_ok) return false;
+    dl->AddImage(ImGui::GetIO().Fonts->TexID,a,b,g_forest_uv0,g_forest_uv1);
     return true;
 }
 
+bool skin_widget_art(ImDrawList *dl,ImVec2 a,ImVec2 b,int kind,float alpha) {
+#ifdef OOTPC_WIDGET_ART
+    if (!g_widgets_ok) return false;
+    const float rects[][4]={{48,80,2127,232},{640,319,1532,496},{52,550,2120,677}};
+    const float *r=rects[kind];
+    const float sx=(g_widgets_uv1.x-g_widgets_uv0.x)/kWidgetsW;
+    const float sy=(g_widgets_uv1.y-g_widgets_uv0.y)/kWidgetsH;
+    auto piece=[&](float l,float right,float x0,float x1) {
+        dl->AddImage(ImGui::GetIO().Fonts->TexID,ImVec2(l,a.y),ImVec2(right,b.y),
+                      ImVec2(g_widgets_uv0.x+x0*sx,g_widgets_uv0.y+r[1]*sy),
+                      ImVec2(g_widgets_uv0.x+x1*sx,g_widgets_uv0.y+r[3]*sy),IM_COL32(255,255,255,(int)(255*alpha)));
+    };
+    float k=(b.y-a.y)/(r[3]-r[1]);
+    if (kind==2) {
+        float mid=(a.x+b.x)*.5f, half=fminf(300*k,(b.x-a.x)*.3f);
+        piece(a.x,mid-half,r[0],786); piece(mid-half,mid+half,786,1386); piece(mid+half,b.x,1386,r[2]);
+    } else {
+        float cut=kind==0?330.f:210.f, cap=fminf(cut*k,(b.x-a.x)*.35f);
+        piece(a.x,a.x+cap,r[0],r[0]+cut); piece(a.x+cap,b.x-cap,r[0]+cut,r[2]-cut); piece(b.x-cap,b.x,r[2]-cut,r[2]);
+    }
+    return true;
+#else
+    (void)dl; (void)a; (void)b; (void)kind; (void)alpha;
+    return false;
+#endif
+}
+
+bool skin_primary_button(const char *label,ImVec2 size,float s) {
+    ImVec2 a=ImGui::GetCursorScreenPos(),b(a.x+size.x,a.y+size.y);
+    bool pressed=ImGui::InvisibleButton(label,size,ImGuiButtonFlags_EnableNav);
+    bool hot=ImGui::IsItemHovered(),focus=ImGui::IsItemFocused()&&GImGui->NavCursorVisible;
+    ImDrawList *d=ImGui::GetWindowDrawList();
+    if (!skin_widget_art(d,a,b,1)) skin_button(d,a,b,s,hot?1:.6f,false);
+    if (hot || focus) skin_cursor_frame(d,a,b,s,1);
+    ImVec2 text=ImGui::CalcTextSize(label);
+    d->AddText(ImVec2((a.x+b.x-text.x)*.5f,(a.y+b.y-text.y)*.5f),IM_COL32(30,31,13,255),label);
+    return pressed;
+}
+
 void skin_button(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, float lift, bool dim) {
-    static const int top0[3] = {98, 75, 41}, top1[3] = {122, 95, 55}, bot0[3] = {84, 63, 32}, bot1[3] = {106, 81, 44};
+    static const int top0[3] = {18, 37, 24}, top1[3] = {46, 74, 37}, bot0[3] = {10, 25, 17}, bot1[3] = {26, 49, 27};
     static const int grey_top[3] = {66, 58, 48}, grey_bot[3] = {56, 49, 40};
     lift = lift < 0 ? 0 : lift > 1 ? 1 : lift;
-    if (button_art(dl, a, b, lift, dim, false)) return;
     const float k = 1.0f * s;
     dl->AddRectFilled(a, b, rgba(28, 22, 14, 0.92f));   // the dark rim between the button and what is behind it
     ImVec2 ia(a.x + k, a.y + k), ib(b.x - k, b.y - k);
@@ -323,64 +332,36 @@ void skin_button(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, float lift, bool d
                                                                          70 + (int)(8 * lift), 1));
 }
 
-float skin_cursor_reach(float s) { return 3.0f * s + 2.5f * s + 12.0f * s; }
+float skin_cursor_reach(float s) { return 7.0f * s; }
 
 // one slow breath every 1.6 s, as the game's cursor pulses
 static float breath(void) { return 0.5f - 0.5f * cosf((float)ImGui::GetTime() * 6.2831853f / 1.6f); }
 
 void skin_cursor_glow(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, float alpha) {
-    if (have_art({MENU_ART_CURSOR_GLOW})) {
-        cursor_layer(dl, MENU_ART_CURSOR_GLOW, a, b, s, rgba(164, 194, 240, alpha * (0.78f + 0.22f * breath())));
-        return;
-    }
     // filled rounded boxes stacked from the outside in, each faint, so the glow brightens towards the frame; the box
     // drawn over them hides their middle
-    const float ring = 3.0f * s + 1.25f * s, br = breath();
-    const int n = 12;
+    const float ring = 1.0f * s, br = breath();
+    const int n = 5;
     for (int i = n; i >= 1; i--) {
         float o = ring + i * 0.95f * s;
-        dl->AddRectFilled(ImVec2(a.x - o, a.y - o), ImVec2(b.x + o, b.y + o), rgba(160, 190, 236, alpha * (0.055f + 0.03f * br)),
+        dl->AddRectFilled(ImVec2(a.x - o, a.y - o), ImVec2(b.x + o, b.y + o), rgba(202, 169, 81, alpha * (0.025f + 0.01f * br)),
                           2.0f * s + i * 0.9f * s);
     }
 }
 
 void skin_cursor_frame(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, float alpha) {
-    if (have_art({MENU_ART_CURSOR_LINE})) {
-        cursor_layer(dl, MENU_ART_CURSOR_LINE, a, b, s, rgba(240, 242, 245, alpha));
-        return;
-    }
-    const float gap = 3.0f * s, thick = 2.5f * s, ring = gap + thick * 0.5f;
+    const float gap = 1.0f * s, thick = 1.3f * s, ring = gap + thick * 0.5f;
     // a little glow in the gap between the box and the frame, then the white frame
     dl->AddRect(ImVec2(a.x - gap * 0.5f, a.y - gap * 0.5f), ImVec2(b.x + gap * 0.5f, b.y + gap * 0.5f),
-                rgba(190, 210, 240, alpha * (0.30f + 0.15f * breath())), gap * 0.4f, 0, gap);
-    dl->AddRect(ImVec2(a.x - ring, a.y - ring), ImVec2(b.x + ring, b.y + ring), rgba(236, 238, 241, alpha), 2.0f * s, 0, thick);
+                rgba(226, 191, 105, alpha * (0.20f + 0.10f * breath())), gap * 0.4f, 0, gap);
+    dl->AddRect(ImVec2(a.x - ring, a.y - ring), ImVec2(b.x + ring, b.y + ring), rgba(224, 187, 97, alpha), 3.0f * s, 0, thick);
+    dl->AddRect(ImVec2(a.x + 2*s, a.y + 2*s), ImVec2(b.x - 2*s, b.y - 2*s), rgba(122, 106, 55, alpha*.6f), 2*s, 0, .7f*s);
 }
 
 float skin_filigree_height(float s) { return 26.0f * s; }
 
-// The divider from the game's art: the ornament (its ink runs from (28, 24) to (200, 65) in 228 x 80) and on each side
-// the line texture, turned round for the left one: its stroke from x = 38 to 217 stretched, then the dot up to x = 232
-// at its own proportions, the whole on the row y = 23 of 240 x 43.
-static bool filigree_art(ImDrawList *dl, float x0, float x1, float y, float s, float alpha) {
-    ImTextureID mark, stroke;
-    float mw, mh, lw, lh;
-    if (!menu_art(MENU_ART_DIVIDER, &mark, &mw, &mh) || !menu_art(MENU_ART_DIVIDER_LINE, &stroke, &lw, &lh)) return false;
-    const ImU32 orn = rgba(196, 164, 112, alpha), line = rgba(150, 126, 90, alpha);
-    const float orn_w = fminf(84.0f * s, (x1 - x0) * 0.5f), k = orn_w / 172.0f, cx = (x0 + x1) * 0.5f;
-    dl->AddImage(mark, ImVec2(cx - 114 * k, y - 44.5f * k), ImVec2(cx - 114 * k + mw * k, y - 44.5f * k + mh * k), ImVec2(0, 0), ImVec2(1, 1), orn);
-    const float lk = 0.42f * s, top = y - 9 * lk, bot = y + 9 * lk, v0 = 14 / lh, v1 = 32 / lh, dot = (232 - 217) * lk;
-    const float from = cx + orn_w * 0.5f + 5 * s, to = x1 - 4 * s;
-    if (to - dot <= from) return true;
-    const float u0 = 38 / lw, u1 = 217 / lw, u2 = 232 / lw, mirror = 2 * cx;
-    dl->AddImage(stroke, ImVec2(from, top), ImVec2(to - dot, bot), ImVec2(u0, v0), ImVec2(u1, v1), line);
-    dl->AddImage(stroke, ImVec2(to - dot, top), ImVec2(to, bot), ImVec2(u1, v0), ImVec2(u2, v1), line);
-    dl->AddImage(stroke, ImVec2(mirror - (to - dot), top), ImVec2(mirror - from, bot), ImVec2(u1, v0), ImVec2(u0, v1), line);
-    dl->AddImage(stroke, ImVec2(mirror - to, top), ImVec2(mirror - (to - dot), bot), ImVec2(u2, v0), ImVec2(u1, v1), line);
-    return true;
-}
-
 void skin_filigree(ImDrawList *dl, float x0, float x1, float y, float s, float alpha) {
-    if (filigree_art(dl, x0, x1, y, s, alpha)) return;
+    if (skin_widget_art(dl,ImVec2(x0,y-15*s),ImVec2(x1,y+15*s),2,alpha)) return;
     const ImU32 line = rgba(96, 80, 56, alpha), dot = rgba(110, 92, 64, alpha), orn = rgba(138, 114, 76, alpha);
     float orn_w = fminf(78.0f * s, (x1 - x0) * 0.5f), k = orn_w / 108.0f, cx = (x0 + x1) * 0.5f;
     float dot_r = 1.5f * s, gap = 5.0f * s;
@@ -397,18 +378,10 @@ void skin_filigree(ImDrawList *dl, float x0, float x1, float y, float s, float a
 }
 
 void skin_panel(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, float alpha) {
-    if (have_art({MENU_ART_PANEL_FILL, MENU_ART_BTN_EDGE, MENU_ART_BTN_LINE})) {
-        // the panel's own texture inside its box, with the button's edge and inset line at a size that suits a large box
-        const float k = 0.62f * s;
-        slice(dl, MENU_ART_PANEL_FILL, a, b, kPanelM, kPanelM, kPanelW - kPanelM, kPanelH - kPanelM, 40, k, rgba(255, 255, 255, alpha), true, true);
-        btn_layer(dl, MENU_ART_BTN_EDGE, a, b, k, rgba(126, 104, 68, 1));
-        btn_layer(dl, MENU_ART_BTN_LINE, a, b, k, rgba(150, 124, 80, 1));
-        return;
-    }
-    dl->AddRectFilled(a, b, rgba(20, 15, 10, 0.85f * alpha));
+    dl->AddRectFilled(a, b, rgba(6, 18, 12, 0.96f * alpha));
     ImVec2 ia(a.x + 1.0f * s, a.y + 1.0f * s), ib(b.x - 1.0f * s, b.y - 1.0f * s);
-    dl->AddRectFilledMultiColor(ia, ib, rgba(44, 35, 25, alpha), rgba(44, 35, 25, alpha), rgba(33, 26, 19, alpha),
-                                rgba(33, 26, 19, alpha));
+    dl->AddRectFilledMultiColor(ia, ib, rgba(20, 37, 24, alpha), rgba(20, 37, 24, alpha), rgba(10, 25, 17, alpha),
+                                rgba(10, 25, 17, alpha));
     grain(dl, ia, ib, s, 0.6f * alpha);
     dl->AddRect(ia, ib, rgba(110, 90, 58, 1), 0, 0, 1.4f * s);
     ornament_line(dl, a, b, 7.0f * s, s, rgba(122, 101, 66, 1));
@@ -451,7 +424,7 @@ bool skin_tab_item(const char *id, const char *text, int flags, float s, ImFont 
         ImDrawList *dl = ImGui::GetWindowDrawList();
         if (foc) skin_cursor_glow(dl, a, b, s, 1.0f);
         const float lift = shown ? 1.0f : hov ? 0.6f : 0.0f;
-        if (!button_art(dl, a, b, lift, false, shown)) skin_button(dl, a, b, s, lift, false);
+        skin_button(dl, a, b, s, lift, false);
         const ImVec2 ts = ImGui::CalcTextSize(text, nullptr, true);
         dl->AddText(ImVec2(floorf((a.x + b.x - ts.x) * 0.5f), floorf((a.y + b.y - ts.y) * 0.5f)), shown ? SKIN_GOLD : SKIN_TEXT, text);
         if (foc) skin_cursor_frame(dl, a, b, s, 1.0f);

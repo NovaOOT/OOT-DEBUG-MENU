@@ -1,14 +1,14 @@
-"""Report for a NX2NAVI_PROFILE sampling profile (runtime/prof_win.c): top functions and the guest/runtime/outside split.
+"""Report for a OOTPC_PROFILE sampling profile (runtime/prof_win.c): top functions and the guest/runtime/outside split.
 
-usage: prof_report.py <profile> <nx2navi.map | nm -n output> [--top 40] [--chains 30]
+usage: prof_report.py <profile> <ootpc.map | nm -n output> [--top 40] [--chains 30]
 
-The map is the one from the link (build/<version>/nx2navi.map from lld, whose addresses are RVAs, or a GNU ld map such
+The map is the one from the link (build/<version>/ootpc.map from lld, whose addresses are RVAs, or a GNU ld map such
 as the launcher's build-cache/ocarina.map, whose addresses include the image base); the profile header carries the
 runtime image base, so ASLR does not matter. Symbols in the map are labels without sizes: a Rip belongs to the nearest
 symbol at or below it. A map lists global symbols only, so a static function's time lands on the global function before
 it: the output of `nm -n <exe>` in the map's place names the static functions too.
 
-A profile taken with NX2NAVI_PROFILE_RENDER=1 or NX2NAVI_PROFILE_CHAINS=1 also has call chains: the report then adds the inclusive time per
+A profile taken with OOTPC_PROFILE_RENDER=1 or OOTPC_PROFILE_CHAINS=1 also has call chains: the report then adds the inclusive time per
 function (a function counted once per chain), and for each module outside the exe the exe functions that call into it
 and the longest common chains down to it.
 """
@@ -61,7 +61,7 @@ def load_profile(path):
 def report_chains(prof, name_of, in_exe, top):
     stacks = prof['stacks']
     total = sum(n for n, _ in stacks) or 1
-    print(f'\ncall chains: {total} samples in {len(stacks)} chains (render thread, or every thread with NX2NAVI_PROFILE_CHAINS)')
+    print(f'\ncall chains: {total} samples in {len(stacks)} chains (render thread, or every thread with OOTPC_PROFILE_CHAINS)')
     incl = collections.Counter()
     for n, chain in stacks:
         for f in set(name_of(r) for r in chain):

@@ -2,7 +2,7 @@
 // each stream reads the default recording device through audio_capture.c, which SDL converts to the format the game
 // asks for. The calls are overridden in the game (HOST_OVERRIDE) because the audio service refuses input streams. A
 // stream that failed to open is unknown to every call here, so purging or closing it is safe; before, the game purged
-// a stream that never opened and crashed. NX2NAVI_MICROPHONE=0 refuses every input stream, as the game saw before.
+// a stream that never opened and crashed. OOTPC_MICROPHONE=0 refuses every input stream, as the game saw before.
 #include "audio_capture.h"
 #include "host.h"
 #include "ipc.h"
@@ -20,11 +20,11 @@ typedef struct {
 } Input;
 static Input inputs[8];
 static const char input_name[] = "DefaultMicrophone";   // the name the game is given for the default device
-static int mic_on(void) {   // NX2NAVI_MICROPHONE (default 1)
+static int mic_on(void) {   // OOTPC_MICROPHONE (default 1)
     static int on = -1;
     if (on < 0) {
         on = rt_knob("MICROPHONE", "1") != 0;
-        if (!on) rt_log("mic: input streams refused (NX2NAVI_MICROPHONE=0)");
+        if (!on) rt_log("mic: input streams refused (OOTPC_MICROPHONE=0)");
     }
     return on;
 }

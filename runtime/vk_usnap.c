@@ -2,7 +2,7 @@
 // constants soon after; here the replay records for several milliseconds, and the GPU reads a pool's bytes when it
 // runs the part that uses them (the VRAM mirror's sync copies run then, vk_memory.c "VRAM mirror"). Meanwhile the game,
 // having handed the frame over, rewrites per-object uniform blocks on other threads with no fence: late draws read
-// another object's matrix (phantom rocks, a flat far field; NX2navi 1.2.1's producer f_70008c6460, 14-24 ms after the
+// another object's matrix (phantom rocks, a flat far field; OOT-PC 1.2.1's producer f_70008c6460, 14-24 ms after the
 // submit). So at the start of a submission's recording every uniform range it binds is copied into an arena of its own,
 // and the uniform bindings of the replay use the copy.
 // - Only ranges of imported pools (memory the CPU writes) are copied, aligned out to 256 bytes (the largest
@@ -13,11 +13,11 @@
 //   an image-to-buffer copy: vk_usnap_drop) drops the copies it touches from then on, so later draws read the result.
 // - The arena goes back to a free list once the submission's fence is done (completion thread).
 // The copy is taken at the submit call: where vk_exec_record starts when the replay runs on the submitting thread, and
-// by the submitting thread itself with NX2NAVI_REPLAY_ASYNC (vk_usnap_take), where the record starts up to a frame
+// by the submitting thread itself with OOTPC_REPLAY_ASYNC (vk_usnap_take), where the record starts up to a frame
 // later on the replay thread. Taken only there, it held whatever the game had put into those bytes by then: in a
 // graveyard the block of the shadow pass came out with another block's values in the frame its allocator moved on to
 // the next stretch of memory, about every 364 frames, and that frame's sunlight was all in shadow (a dark frame with
-// the interface intact). NX2NAVI_UBO_SNAPSHOT=0 binds live memory as before; =ab alternates (NX2NAVI_AB).
+// the interface intact). OOTPC_UBO_SNAPSHOT=0 binds live memory as before; =ab alternates (OOTPC_AB).
 #include <stdlib.h>
 #include <string.h>
 
@@ -305,7 +305,7 @@ static void copy_regions(Arena *a, const Reg *reg, int nreg, uint64_t total, int
     vmaFlushAllocation(vk_ctx()->vma, a->alloc, 0, total);   // a no-op on coherent memory
 }
 
-// NX2NAVI_REPLAY_ASYNC, the submitting thread before the submission is queued for the replay: the uniform ranges it
+// OOTPC_REPLAY_ASYNC, the submitting thread before the submission is queued for the replay: the uniform ranges it
 // binds are copied now, while they hold what the game submitted. vk_usnap_begin takes the copy over when the replay
 // reaches the submission, and leaves out there what GPU writes in flight touch (the replay knows them only then).
 void vk_usnap_take(const uint64_t *handles, int n) {
@@ -476,7 +476,7 @@ int vk_usnap_find(uint64_t addr, uint64_t n, uint64_t align, VkDescriptorBufferI
 
 static PlatMutex drop_lock = PLAT_MUTEX_INIT;   // the replay workers' shaders write storage at once
 
-// The replay workers (vk_exec.c NX2NAVI_REPLAY_PIPE) record a group's draws while the submitting thread goes on past
+// The replay workers (vk_exec.c OOTPC_REPLAY_PIPE) record a group's draws while the submitting thread goes on past
 // it: a drop holds from its place in the stream on (vk_exec_epoch), so a chunk does not see the drops of ops after its
 // group, and the submitting thread sees every one.
 void vk_usnap_drop(uint64_t addr, uint64_t n) {
@@ -554,7 +554,7 @@ void vk_usnap_shutdown(void) {
     plat_mutex_unlock(&free_lock);
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): the free uniform snapshot arenas (the free list is never trimmed) and the
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): the free uniform snapshot arenas (the free list is never trimmed) and the
 // GPU-write list (the replay thread's; read without a lock, a line may be one write behind).
 void vk_usnap_sizes(PerfSizes *s) {
     uint64_t n = 0, b = 0;

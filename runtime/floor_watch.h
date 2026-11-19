@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-// NX2NAVI_FLOOR_WATCH (floor_watch.c): which code reads and writes the floor under Link, from hardware watchpoints on
+// OOTPC_FLOOR_WATCH (floor_watch.c): which code reads and writes the floor under Link, from hardware watchpoints on
 // the addresses frame_rate.c's floor scan found. Diagnosis, 1.1.1, Windows; off by default.
 int floor_watch_wanted(void);   // the setting, read once: 1 on
 // The scan's survivors once it has them (frame_rate.c floor_scan): n addresses of float triplets, their values at

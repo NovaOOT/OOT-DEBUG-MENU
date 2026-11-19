@@ -8,7 +8,9 @@ layout(location = 0) in uvec2 q;
 
 layout(location = 0) out vec3 rel;   // from the eye, in steps
 layout(location = 1) out float vw;
-layout(location = 2) noperspective out vec3 bary;
+// perspective-correct: a face that reaches behind the eye is clipped, and only perspective interpolation keeps the
+// clipped corners' weights true to the whole face (screen-space weights there made every pixel read as an edge)
+layout(location = 2) out vec3 bary;
 layout(location = 4) flat out int edges;
 
 invariant gl_Position;   // the depth pass and the colour pass must give the same depth

@@ -16,6 +16,8 @@
 #include "host.h"
 #include "input.h"
 #include "layout.h"
+#include "midi_ocarina.h"
+#include "perfmon.h"
 #include "platform/platform.h"
 #include "randomizer.h"
 #include "save_slots.h"
@@ -295,6 +297,23 @@ static void run_command(char *line) {
         rest = rest ? rest + 5 : "";
         if (a1) out_put("queued %d input events\n", input_script_live(rest));
         else out_put("%d input events pending\n", input_script_live_busy());
+    } else if (!strcmp(cmd, "walkto") && a1 && a2) {   // walkto X Z [FRAMES]: hold the left stick toward a point, as the camera sees it
+        float me[3], vp[16], asp = 0;
+        if (!dbg_player_pos(me) || !vk_dbgcam_vp(vp, &asp)) {
+            out_put("no player or camera\n");
+            return;
+        }
+        // the view-projection's w row points where the camera looks, its x row to the screen's right
+        float dx = strtof(a1, NULL) - me[0], dz = strtof(a2, NULL) - me[2], dl = hypotf(dx, dz);
+        float fx = vp[12], fz = vp[14], fl = hypotf(fx, fz), rx = vp[0], rz = vp[2], rl = hypotf(rx, rz);
+        if (dl < 1e-4f || fl < 1e-6f || rl < 1e-6f) {
+            out_put("no direction\n");
+            return;
+        }
+        float sx = (dx * rx + dz * rz) / (dl * rl), sy = (dx * fx + dz * fz) / (dl * fl), sl = hypotf(sx, sy);
+        char line[96];
+        snprintf(line, sizeof line, " 0 LSTICK %d %d %d", (int)(32767 * sx / sl), (int)(32767 * sy / sl), a3 ? atoi(a3) : 60);
+        out_put("stick%s: queued %d input events\n", line + 9, input_script_live(line));
     } else if (!strcmp(cmd, "menu") && a1) {   // menu BUTTON [BUTTON ...]: presses for the in-game menu (input.h)
         const char *rest = strstr(whole, "menu");
         out_put("queued %d menu presses\n", input_menu_press(rest ? rest + 4 : ""));
@@ -494,6 +513,35 @@ static void run_command(char *line) {
         out_put("pool %llu MiB, in use %llu, peak %llu, free %lld\n", (unsigned long long)(pool >> 20),
                 (unsigned long long)(used >> 20), (unsigned long long)(mem_used_peak() >> 20),
                 (long long)(pool >> 20) - (long long)(used >> 20));
+    } else if (!strcmp(cmd, "bsa")) {   // bsa: the player actor, its behaviour state object ([[actor+0x270]+0x188])
+        uint64_t actor = dbg_player_actor(), comp = 0, bsa = 0;
+        uint8_t b[0x40] = {0};
+        if (actor && plat_mem_read(actor + 0x270, &comp, 8) && comp && plat_mem_read(comp + 0x188, &bsa, 8) && bsa)
+            plat_mem_read(bsa + 0x20, b, sizeof b);
+        out_put("actor 0x%llx comp 0x%llx bsa 0x%llx\n", (unsigned long long)actor, (unsigned long long)comp,
+                (unsigned long long)bsa);
+        for (int i = 0; i < 0x40; i++) out_put("%02x%s", b[i], i % 16 == 15 ? "\n" : " ");
+    } else if (!strcmp(cmd, "verb") && a1) {
+        // verb ID [SLOT]: ask the player's behaviour state object for an action verb (ids in the player
+        // scheduler's order: 0 None, 1 PreAbyss, ... 22 AttackCollide) in an action slot (default 0), with the request
+        // the AINB node ExecuteBSASetActionVerb builds (1.1.1: 0x700262c160, 1.0.0: 0x70025dc2c0): +0x48 the slot, +0x4c
+        // the verb, +0x50 the result policy, sent through 0x70000c08f0 (1.0.0: 0x7000093440)(bsa, request, 1) on the
+        // game thread.
+        uint64_t actor = dbg_player_actor(), comp = 0, bsa = 0;
+        if (!actor || !plat_mem_read(actor + 0x270, &comp, 8) || !comp || !plat_mem_read(comp + 0x188, &bsa, 8) || !bsa) {
+            out_put("no player state object\n");
+        } else {
+            uint8_t *r = (uint8_t *)(uintptr_t)dbg_guest_scratch();
+            const uint32_t nan = 0x7fc00000u, sixteen = 0x10, verb = (uint32_t)num(a1), slot = a2 ? (uint32_t)num(a2) : 0;
+            const uint64_t kind = 0x0000011a00000004ull;
+            memset(r, 0, 0x60);
+            memcpy(r + 0x00, &nan, 4), memcpy(r + 0x0c, &nan, 4), memcpy(r + 0x18, &nan, 4);
+            memcpy(r + 0x24, &kind, 8), memcpy(r + 0x2c, &nan, 4), memcpy(r + 0x30, &nan, 4), memcpy(r + 0x34, &sixteen, 4);
+            memcpy(r + 0x48, &slot, 4), memcpy(r + 0x4c, &verb, 4);
+            uint64_t a[8] = {bsa, (uint64_t)(uintptr_t)r, 1}, old;
+            dbg_guest_result(&old);   // a finished earlier call would keep this one from queueing
+            out_put("verb %u in slot %u: %s\n", verb, slot, dbg_guest_call(RT_OOT_ADDR(0x70000c08f0ull, 0x7000093440ull), a) ? "queued" : "busy");
+        }
     } else if (!strcmp(cmd, "player")) {
         float p[3];
         if (dbg_player_pos(p)) out_put("player %.3f %.3f %.3f speed %.2f vert %.2f\n", p[0], p[1], p[2], dbg_ground_speed(), dbg_vertical_speed());
@@ -503,6 +551,18 @@ static void run_command(char *line) {
         char *fx = strtok(NULL, " \t\r\n"), *fz = fx ? strtok(NULL, " \t\r\n") : NULL;
         float f[3] = {fx ? strtof(fx, NULL) : 0, 0, fz ? strtof(fz, NULL) : 0};
         out_put("%s\n", (fz ? dbg_player_teleport_face(p, f) : dbg_player_set_pos(p)) ? "moved" : "failed");
+    } else if (!strcmp(cmd, "turn") && a1 && a2) {   // turn FX FZ: face a direction where he stands
+        float p[3], f[3] = {strtof(a1, NULL), 0, strtof(a2, NULL)};
+        out_put("%s\n", dbg_player_pos(p) && dbg_player_teleport_face(p, f) ? "turned" : "failed");
+    } else if (!strcmp(cmd, "facecam")) {   // facecam [DEGREES]: face the camera, turned DEGREES to his left
+        float p[3], vp[16], asp = 0;
+        if (!dbg_player_pos(p) || !vk_dbgcam_vp(vp, &asp) || hypotf(vp[12], vp[14]) < 1e-6f) {
+            out_put("no player or camera\n");
+            return;
+        }
+        float a = (a1 ? strtof(a1, NULL) : 0) * 3.14159265f / 180, fx = -vp[12], fz = -vp[14];
+        float f[3] = {fx * cosf(a) - fz * sinf(a), 0, fx * sinf(a) + fz * cosf(a)};
+        out_put("%s\n", dbg_player_teleport_face(p, f) ? "turned" : "failed");
     } else if (!strcmp(cmd, "colldump") && a1 && a2) {
         // colldump RANGE FILE: the collision polygons within RANGE of the player, one a line ("n x y z ..."), to FILE
         static DbgHookPoly cp[200000];
@@ -678,10 +738,10 @@ static void run_command(char *line) {
         out_put("mask powers %d\n", dbg_mask_powers_on());
     } else if (!strcmp(cmd, "rando")) {   // rando [gen | seed TEXT | KEY VALUE]: the Randomizer tab's generator
         if (a1 && !strcmp(a1, "gen")) rando_generate();
-        else if (a1 && !strcmp(a1, "seed") && a2) cfg_set("NX2NAVI_RANDO_SEED", a2);
+        else if (a1 && !strcmp(a1, "seed") && a2) cfg_set("OOTPC_RANDO_SEED", a2);
         else if (a1 && a2) {
             char key[64];
-            snprintf(key, sizeof key, "NX2NAVI_RANDO_%s", a1);
+            snprintf(key, sizeof key, "OOTPC_RANDO_%s", a1);
             for (char *c = key; *c; c++) *c = (char)toupper((unsigned char)*c);
             cfg_set(key, a2);
         }
@@ -692,6 +752,12 @@ static void run_command(char *line) {
     } else if (!strcmp(cmd, "novoid")) {   // novoid [0|1]: no void-out
         if (a1) dbg_no_void_out(atoi(a1));
         out_put("novoid %d\n", dbg_no_void_out_on());
+        uint32_t cause;
+        float at[3];
+        uint64_t age;
+        if (dbg_abyss_last(&cause, at, &age))
+            out_put("last void-out cause %s %u at %.2f %.2f %.2f, %.1f s ago\n", cause == DBG_ABYSS_ZONE ? "zone" : "type",
+                    cause == DBG_ABYSS_ZONE ? 0 : cause, at[0], at[1], at[2], age / 1e9);
     } else if (!strcmp(cmd, "named") && a1) {   // named NAME [MAX]: objects of any actor-like class by name (dbg_find_named)
         uint64_t o[64];
         int max = a2 ? atoi(a2) : 16;
@@ -736,12 +802,25 @@ static void run_command(char *line) {
             out_put("spawn: %s, actor %#llx, error %u\n", st >= 0 && st < 5 ? kState[st] : "?",
                     (unsigned long long)actor, err);
         }
+    } else if (!strcmp(cmd, "summon")) {   // summon [NAME COUNT | stop]: COUNT actors around the player; alone: progress
+        DbgSummon s;
+        if (a1 && !strcmp(a1, "stop")) {
+            dbg_summon_stop();
+            out_put("summon stopped\n");
+        } else if (a1) {
+            long long n = a2 ? strtoll(a2, NULL, 10) : 1;
+            out_put(dbg_summon_request(a1, n) ? "summon queued\n" : "summon refused\n");
+        } else {
+            int on = dbg_summon_status(&s);
+            out_put("summon: %s %s, %lld of %lld made, %lld failed, %lld to send, %d loading\n", on ? "running" : "idle",
+                    s.name, (long long)s.made, (long long)s.total, (long long)s.failed, (long long)s.left, s.loading);
+        }
     } else if (!strcmp(cmd, "bombs")) {   // bombs [on|off|clear]: the bomb paths, newest first
         if (a1 && !strcmp(a1, "clear")) dbg_bomb_paths_clear();
-        else if (a1) cfg_set("NX2NAVI_DEBUG_VIEW_BOMBS", strcmp(a1, "off") ? "1" : "0");
+        else if (a1) cfg_set("OOTPC_DEBUG_VIEW_BOMBS", strcmp(a1, "off") ? "1" : "0");
         static DbgBombPath bp[DBG_BOMB_PATHS];
         int n = dbg_bomb_paths(bp, DBG_BOMB_PATHS);
-        out_put("bomb paths %s, %d kept\n", cfg_bool("NX2NAVI_DEBUG_VIEW_BOMBS") ? "on" : "off", n);
+        out_put("bomb paths %s, %d kept\n", cfg_bool("OOTPC_DEBUG_VIEW_BOMBS") ? "on" : "off", n);
         for (int i = 0; i < n; i++) {
             const DbgBombPath *p = &bp[i];
             out_put("#%u: %d points, from %.2f %.2f %.2f", p->serial, p->n, p->pt[0][0], p->pt[0][1], p->pt[0][2]);
@@ -751,26 +830,46 @@ static void run_command(char *line) {
             for (int k = 0; k < p->bounces; k++)
                 out_put("    bounce %d at %.2f %.2f %.2f\n", k + 1, p->bounce[k][0], p->bounce[k][1], p->bounce[k][2]);
         }
-    } else if (!strcmp(cmd, "ragdoll")) {   // ragdoll [0|1]: end or start the player's ragdoll; no argument: the other one
+    } else if (!strcmp(cmd, "ragdoll")) {   // ragdoll [0|1 [KIND]]: end or start the player's ragdoll (KIND: debug_tools.h RD_*); no argument: the other one
+        if (a2) dbg_ragdoll_kind(atoi(a2));
         int ok = dbg_ragdoll(a1 ? atoi(a1) != 0 : -1);
         plat_sleep_ns(100000000ull);
-        out_put("ragdoll %s, now %d\n", ok ? "asked" : "no player", dbg_ragdoll_on());
+        out_put("ragdoll %s, now %d, kind %d, state %u\n", ok ? "asked" : "no player", dbg_ragdoll_on(), dbg_ragdoll_kind(-1),
+                dbg_ragdoll_state());
     } else if (!strcmp(cmd, "bombbug")) {   // bombbug [0|1]: every lifted bomb is held out to the side
         if (a1) dbg_bomb_bug(atoi(a1));
         out_put("bombbug %d\n", dbg_bomb_bug_on());
-    } else if (!strcmp(cmd, "hook") || !strcmp(cmd, "walls")) {   // hook|walls [RANGE]: the hookshot or wall overlay's state and what is near
+    } else if (!strcmp(cmd, "hook") || !strcmp(cmd, "walls") || !strcmp(cmd, "solids")) {   // hook|walls|solids [RANGE [N]]: the overlay's state and its N (8) nearest hookshot, air wall or collision polygons, corners in full
         static DbgHookPoly hp[4096];
         static DbgHookLabel hl[64];
         char st[160];
         dbg_hook_status(st, sizeof st);
         float range = a1 ? strtof(a1, NULL) : 30.0f;
-        int walls = cmd[0] == 'w';
-        int n = dbg_hook_polys(hp, 4096, range, walls), t = 0, m = walls ? 0 : dbg_hook_labels(hl, 64, range);
+        int walls = cmd[0] == 'w';   // solids: the collision polygons (the collision overlay's)
+        if (cmd[0] == 's') dbg_view_kinds();
+        int n = dbg_hook_polys(hp, 4096, range, cmd[0] == 's' ? DBG_POLY_COLLISION : walls), t = 0, m = walls ? 0 : dbg_hook_labels(hl, 64, range);
         for (int i = 0; i < n; i++) t += hp[i].target;
         out_put("%s\n%d polygons within %.0f m (%d of target objects)\n", st, n, range, t);
-        for (int i = 0; i < n && i < 8; i++)
-            out_put("  %s %.1f %.1f %.1f\n", walls ? "wall" : hp[i].target ? "target" : "surface", hp[i].p[0][0], hp[i].p[0][1],
-                    hp[i].p[0][2]);
+        // the nearest first (by the middle of their corners), with all their corners
+        float me[3] = {0};
+        dbg_player_pos(me);
+        int shown = a2 ? atoi(a2) : 8;
+        for (int i = 0; i < n && i < shown; i++) {
+            int best = i;
+            float bd = 1e30f;
+            for (int j = i; j < n; j++) {
+                float c[3] = {0}, d = 0;
+                for (int q = 0; q < hp[j].n; q++)
+                    for (int k = 0; k < 3; k++) c[k] += hp[j].p[q][k] / (float)hp[j].n;
+                for (int k = 0; k < 3; k++) d += (c[k] - me[k]) * (c[k] - me[k]);
+                if (d < bd) bd = d, best = j;
+            }
+            DbgHookPoly t = hp[i];
+            hp[i] = hp[best], hp[best] = t;
+            out_put("  %s %.1f m:", walls ? "wall" : hp[i].target ? "target" : "surface", sqrtf(bd));
+            for (int q = 0; q < hp[i].n; q++) out_put(" (%.1f %.1f %.1f)", hp[i].p[q][0], hp[i].p[q][1], hp[i].p[q][2]);
+            out_put("\n");
+        }
         for (int i = 0; i < m; i++)
             out_put("  object %s at %.1f %.1f %.1f%s\n", hl[i].name, hl[i].pos[0], hl[i].pos[1], hl[i].pos[2],
                     hl[i].shaped ? "" : " (no shape)");
@@ -824,8 +923,8 @@ static void run_command(char *line) {
             if (dbg_watch_line(i, line, sizeof line)) out_put("%s\n", line);
     } else if (!strcmp(cmd, "collision") || !strcmp(cmd, "hidemeshes") || !strcmp(cmd, "hideplayer")) {
         // collision|hidemeshes|hideplayer [0|1]: the settings
-        const char *key = cmd[0] == 'c' ? "NX2NAVI_DEBUG_VIEW_COLLISION"
-                          : !strcmp(cmd, "hidemeshes") ? "NX2NAVI_DEBUG_HIDE_MESHES" : "NX2NAVI_DEBUG_HIDE_PLAYER";
+        const char *key = cmd[0] == 'c' ? "OOTPC_DEBUG_VIEW_COLLISION"
+                          : !strcmp(cmd, "hidemeshes") ? "OOTPC_DEBUG_HIDE_MESHES" : "OOTPC_DEBUG_HIDE_PLAYER";
         if (a1) cfg_set(key, atoi(a1) ? "1" : "0");
         out_put("%s %d\n", cmd, cfg_bool(key));
     } else if (!strcmp(cmd, "coll")) {   // coll [RANGE]: the collision polygons near the player, by the way they face
@@ -857,6 +956,76 @@ static void run_command(char *line) {
         for (int i = 1; i < n; i++) dup += mid[i] == mid[i - 1];
         out_put("%s\n%d polygons: %d ground, %d slope, %d wall, %d ceiling (by their corners' turn); %d repeat another's "
                 "middle\n", st, n, kind[0], kind[1], kind[2], kind[3], dup);
+    } else if (!strcmp(cmd, "wallgap")) {   // wallgap [RANGE [1]]: invisible walls on walkable ground on both sides (1: either)
+        static DbgHookPoly wp[4096], cp[40000];
+        float me[3] = {0, 0, 0}, range = a1 ? strtof(a1, NULL) : 30.0f;
+        dbg_view_kinds();
+        if (!dbg_player_pos(me)) {
+            out_put("no player\n");
+            return;
+        }
+        int nw = dbg_hook_polys(wp, 4096, range, DBG_POLY_WALL), nc = dbg_hook_polys(cp, 40000, range, DBG_POLY_COLLISION);
+        int found = 0;
+        out_put("%d wall and %d collision polygons within %.0f m\n", nw, nc, range);
+        for (int i = 0; i < nw && found < 12; i++) {
+            const DbgHookPoly *w = &wp[i];
+            float e1[3], e2[3], nm[3], c[3] = {0}, lo = 1e30f;
+            for (int k = 0; k < 3; k++) e1[k] = w->p[1][k] - w->p[0][k], e2[k] = w->p[2][k] - w->p[0][k];
+            nm[0] = e1[1] * e2[2] - e1[2] * e2[1], nm[1] = e1[2] * e2[0] - e1[0] * e2[2], nm[2] = e1[0] * e2[1] - e1[1] * e2[0];
+            float len = sqrtf(nm[0] * nm[0] + nm[1] * nm[1] + nm[2] * nm[2]), h = sqrtf(nm[0] * nm[0] + nm[2] * nm[2]);
+            if (len < 1e-6f || fabsf(nm[1]) / len > 0.2f || h < 1e-6f) continue;   // upright walls only
+            for (int q = 0; q < w->n; q++) {
+                for (int k = 0; k < 3; k++) c[k] += w->p[q][k] / (float)w->n;
+                if (w->p[q][1] < lo) lo = w->p[q][1];
+            }
+            float g[2];
+            int ok = 1;
+            for (int side = 0; side < 2 && ok; side++) {   // ground a metre out on each side, near the wall's foot
+                float sx = c[0] + (side ? 1.0f : -1.0f) * nm[0] / h, sz = c[2] + (side ? 1.0f : -1.0f) * nm[2] / h;
+                g[side] = -1e30f;
+                for (int j = 0; j < nc; j++) {
+                    const DbgHookPoly *q = &cp[j];
+                    int in = 0;
+                    for (int k = 0, l = q->n - 1; k < q->n; l = k++)
+                        if ((q->p[k][2] > sz) != (q->p[l][2] > sz) &&
+                            sx < (q->p[l][0] - q->p[k][0]) * (sz - q->p[k][2]) / (q->p[l][2] - q->p[k][2]) + q->p[k][0])
+                            in = !in;
+                    if (!in) continue;
+                    float f1[3], f2[3], fn[3];
+                    for (int k = 0; k < 3; k++) f1[k] = q->p[1][k] - q->p[0][k], f2[k] = q->p[2][k] - q->p[0][k];
+                    fn[0] = f1[1] * f2[2] - f1[2] * f2[1], fn[1] = f1[2] * f2[0] - f1[0] * f2[2], fn[2] = f1[0] * f2[1] - f1[1] * f2[0];
+                    float fl = sqrtf(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
+                    if (fl < 1e-6f || fabsf(fn[1]) / fl < 0.8f) continue;   // floors
+                    float y = q->p[0][1] - (fn[0] * (sx - q->p[0][0]) + fn[2] * (sz - q->p[0][2])) / fn[1];
+                    if (y > lo - 1.0f && y < lo + 1.0f && y > g[side]) g[side] = y;
+                }
+                ok = 1;
+            }
+            int one = a2 && atoi(a2) == 1;   // wallgap RANGE 1: ground on one side is enough (walls at ledges)
+            if (one ? g[0] < -1e29f && g[1] < -1e29f : g[0] < -1e29f || g[1] < -1e29f || fabsf(g[0] - g[1]) > 0.4f) continue;
+            int backed = 0;   // a solid face of another material alongside: the air wall alone does not stop anyone there
+            for (int j = 0; j < nc && !backed; j++) {
+                const DbgHookPoly *q = &cp[j];
+                if (q->air) continue;
+                float f1[3], f2[3], fn[3], qc[3] = {0};
+                for (int k = 0; k < 3; k++) f1[k] = q->p[1][k] - q->p[0][k], f2[k] = q->p[2][k] - q->p[0][k];
+                fn[0] = f1[1] * f2[2] - f1[2] * f2[1], fn[1] = f1[2] * f2[0] - f1[0] * f2[2], fn[2] = f1[0] * f2[1] - f1[1] * f2[0];
+                float fl = sqrtf(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
+                if (fl < 1e-6f || fabsf(fn[1]) / fl > 0.5f) continue;   // upright faces only
+                if (fabsf((fn[0] * nm[0] + fn[2] * nm[2]) / (fl * h)) < 0.8f) continue;   // and about parallel
+                for (int q2 = 0; q2 < q->n; q2++)
+                    for (int k = 0; k < 3; k++) qc[k] += q->p[q2][k] / (float)q->n;
+                float d = ((qc[0] - c[0]) * nm[0] + (qc[2] - c[2]) * nm[2]) / h, along = hypotf(qc[0] - c[0], qc[2] - c[2]);
+                float top = -1e30f, bot = 1e30f;
+                for (int q2 = 0; q2 < q->n; q2++) top = fmaxf(top, q->p[q2][1]), bot = fminf(bot, q->p[q2][1]);
+                backed = fabsf(d) < 0.6f && along < 3.0f && top > lo + 0.3f && bot < lo + 1.5f;
+            }
+            if (backed) continue;
+            found++;
+            out_put("  wall at %.1f %.1f %.1f facing %.2f %.2f, ground %.2f and %.2f either side\n", c[0], lo, c[2],
+                    nm[0] / h, nm[2] / h, g[0], g[1]);
+        }
+        out_put("%d found\n", found);
     } else if (!strcmp(cmd, "under")) {   // under [X Z]: the collision polygons straight above or below a point (the player's)
         static DbgHookPoly cp[40000];
         float me[3] = {0, 0, 0}, at[2];
@@ -900,12 +1069,12 @@ static void run_command(char *line) {
             else out_put("state %d: empty\n", i + 1);
         }
         out_put("loading %d; %s\n", dbg_state_loading(), dbg_state_note());
-    } else if (!strcmp(cmd, "fog")) {   // fog [0|1]: 1 shows the volumetric fog, 0 removes it (NX2NAVI_DEBUG_FOG_OFF)
-        if (a1) cfg_set("NX2NAVI_DEBUG_FOG_OFF", atoi(a1) ? "0" : "1");
-        out_put("fog %s\n", cfg_bool("NX2NAVI_DEBUG_FOG_OFF") ? "off" : "on");
+    } else if (!strcmp(cmd, "fog")) {   // fog [0|1]: 1 shows the volumetric fog, 0 removes it (OOTPC_DEBUG_FOG_OFF)
+        if (a1) cfg_set("OOTPC_DEBUG_FOG_OFF", atoi(a1) ? "0" : "1");
+        out_put("fog %s\n", cfg_bool("OOTPC_DEBUG_FOG_OFF") ? "off" : "on");
     } else if (!strcmp(cmd, "view")) {   // view [RANGE]: the volume overlay's list near the player (kinds as set)
         static DbgVolume v[256];
-        static const char *const kind[] = {"", "wall", "load", "", "trigger", "", "", "", "hidden", "death"};
+        static const char *const kind[] = {"", "wall", "load", "", "trigger", "", "", "", "hidden", "death", "void"};
         int n = dbg_view_volumes(v, 256, a1 ? (float)atof(a1) : 60.0f);
         float vp[16], asp = 0;
         int cam = vk_dbgcam_vp(vp, &asp);
@@ -915,13 +1084,31 @@ static void run_command(char *line) {
             float c[4] = {0, 0, 0, 1};
             for (int r = 0; cam && r < 4; r++)
                 c[r] = vp[r * 4] * v[i].pos[0] + vp[r * 4 + 1] * v[i].pos[1] + vp[r * 4 + 2] * v[i].pos[2] + vp[r * 4 + 3];
-            out_put("%-7s %-40s pos %.1f %.1f %.1f scale %.2f %.2f %.2f ndc %.2f %.2f w %.1f%s%s\n", kind[v[i].kind == DBG_VOL_DEATH ? 9 : v[i].kind & 15],
+            out_put("%-7s %-40s pos %.1f %.1f %.1f scale %.2f %.2f %.2f ndc %.2f %.2f w %.1f%s%s\n", kind[v[i].kind == DBG_VOL_DEATH ? 9 : v[i].kind == DBG_VOL_VOID ? 10 : v[i].kind & 15],
                     v[i].name, v[i].pos[0], v[i].pos[1], v[i].pos[2], v[i].scale[0], v[i].scale[1], v[i].scale[2],
                     c[0] / c[3], c[1] / c[3], c[3], v[i].target[0] ? " > " : "", v[i].target);
         }
-    } else if (!strcmp(cmd, "cfg") && a1) {   // cfg KEY [VALUE]: a setting (KEY without NX2NAVI_), set for this run
+    } else if (!strcmp(cmd, "midi")) {   // midi [load PATH|play|stop|track N|transpose N|speed N]: the ocarina MIDI player
+        if (a1 && !strcmp(a1, "load")) {
+            const char *path = strstr(whole, "load") + 4;
+            char p[1024], err[160];
+            while (*path == ' ') path++;
+            snprintf(p, sizeof p, "%.*s", (int)strcspn(path, "\r\n"), path);
+            if (!midi_oc_load(p, err, sizeof err)) out_put("cannot load: %s\n", err);
+        } else if (a1 && !strcmp(a1, "play")) midi_oc_play();
+        else if (a1 && !strcmp(a1, "stop")) midi_oc_stop();
+        else if (a1 && a2 && !strcmp(a1, "track")) midi_oc_set_track(atoi(a2));
+        else if (a1 && a2 && !strcmp(a1, "transpose")) midi_oc_set_transpose(atoi(a2));
+        else if (a1 && a2 && !strcmp(a1, "speed")) midi_oc_set_speed(atoi(a2));
+        double at, len;
+        midi_oc_progress(&at, &len);
+        static const char *const st[] = {"idle", "waiting for the ocarina", "playing", "finished"};
+        out_put("midi %s: %s, %.1f / %.1f s, %d notes (%d moved), track %d, transpose %+d%+d, speed %d%%\n",
+                midi_oc_loaded() ? midi_oc_file() : "(none)", st[midi_oc_state()], at, len, midi_oc_notes(), midi_oc_bent(),
+                midi_oc_track(), midi_oc_transpose_auto(), midi_oc_transpose(), midi_oc_speed());
+    } else if (!strcmp(cmd, "cfg") && a1) {   // cfg KEY [VALUE]: a setting (KEY without OOTPC_), set for this run
         char k[96];
-        snprintf(k, sizeof k, "NX2NAVI_%s", a1);
+        snprintf(k, sizeof k, "OOTPC_%s", a1);
         for (char *q = k; *q; q++) *q = (char)toupper((unsigned char)*q);
         if (a2) cfg_set(k, a2);
         const char *v = cfg_get(k);
@@ -956,6 +1143,18 @@ static void run_command(char *line) {
         char s[64] = "";
         dbg_current_area(s);
         out_put("area %s, child %d, warp armed %d, %s\n", s, dbg_is_child(), dbg_warp_armed(), dbg_warp_note());
+    } else if (!strcmp(cmd, "fps")) {
+        // fps: the performance overlay's figures (perfmon.h). Frame time, GPU time and the waits need the overlay on full.
+        PerfStats p;
+        perfmon_snapshot(&p);
+        out_put("fps %.1f avg %.2f ms max %.2f ms low1 %.1f low01 %.1f | replay %.2f ms gpu %.2f ms pipe_wait %.2f xlate %.2f "
+                "tex %.2f ms uploads %.1f | cpu total %.0f%% game %.0f%% | gpu %.0f%% %.0f MHz %.0f W | vram %.0f/%.0f MB game %.0f\n",
+                p.fps, p.frame_ms_avg, p.frame_ms_max, p.low1_fps, p.low01_fps, p.replay_ms, p.gpu_ms, p.pipe_wait_ms,
+                p.xlate_ms, p.tex_ms, p.tex_uploads, p.cpu_total_pct, p.cpu_game_pct, p.gpu_pct, p.gpu_clock_mhz,
+                p.gpu_power_w, p.vram_used_mb, p.vram_total_mb, p.vram_game_mb);
+        out_put("frames");
+        for (int i = PERF_HISTORY - 30; i < PERF_HISTORY; i++) out_put(" %.1f", p.frame_ms[i]);
+        out_put("\n");
     } else if (!strcmp(cmd, "perf")) {   // the player actor and its event performer
         out_put("player 0x%llx performer 0x%llx\n", (unsigned long long)dbg_player_actor(), (unsigned long long)dbg_player_performer());
     } else if (!strcmp(cmd, "gcall") && a1) {
@@ -1129,7 +1328,7 @@ static void remote_thread(void *arg) {
 
 void dbg_remote_set(int on) {   // kept as debug_remote (debug_tools.c dbg_keep)
     enabled = on != 0;
-    dbg_keep("NX2NAVI_DEBUG_REMOTE", on ? "1" : "0");
+    dbg_keep("OOTPC_DEBUG_REMOTE", on ? "1" : "0");
     if (on && !started) {
         started = 1;
         plat_thread_spawn(remote_thread, NULL, "debug-remote", 0);

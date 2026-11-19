@@ -52,7 +52,7 @@ static void *other_thread(void *arg) {
 
 int main(void) {
     const char *out = getenv(OUT);
-    if (getenv("NX2NAVI_RESTART_WAIT") && out) {   // the copy plat_restart started
+    if (getenv("OOTPC_RESTART_WAIT") && out) {   // the copy plat_restart started
         FILE *f = fopen(out, "w");
         if (f) fprintf(f, "%d\n", allowed()), fclose(f);
         return 0;

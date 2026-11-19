@@ -1,4 +1,4 @@
-// The mouse pointer in NX2navi 1.4.3's own menus (the title, the inventory, the System tab, Options, shops, dialogue
+// The mouse pointer in OOT-PC 1.4.3's own menus (the title, the inventory, the System tab, Options, shops, dialogue
 // choices): while a menu screen has the game's focus box (eui's BoxCursor, the frame the d-pad moves), the Windows
 // pointer is released from the mouse camera and shown, the item under it takes the focus as if the d-pad had moved
 // there (highlight, sound and description included), a left click on an item is A on it and a right click is B.
@@ -14,11 +14,11 @@
 //    0x450 bytes with the same field stores, so its layout is 1.0.0's);
 //  - the screen's reserved node (+0x150) and request bits (+0x175, bit 2) and its draw target byte (+0x16c): the same
 //    stores at 1.4.3 main+0x87903c.
-// The other fields are 1.0.0's; menu_cursor logs what it reads the first time a menu opens (NX2NAVI_MENU_CURSOR_LOG=1:
+// The other fields are 1.0.0's; menu_cursor logs what it reads the first time a menu opens (OOTPC_MENU_CURSOR_LOG=1:
 // every screen change), so a field that moved shows as a menu with no nodes or boxes off the layout.
 //
 // Only while keyboard and mouse are the device used last (input_kbm_last): a gamepad player sees the menus unchanged.
-// NX2NAVI_MENU_CURSOR (live, default 1): 0 leaves the menus to the keys and the pad.
+// OOTPC_MENU_CURSOR (live, default 1): 0 leaves the menus to the keys and the pad.
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -189,7 +189,7 @@ static uint64_t root_pane(uint64_t btn) {
     uint64_t blyt = rd64(btn + BTN_LAYOUT);
     return ok_at(blyt, LYT_ROOT + 8) ? rd64(blyt + LYT_ROOT) : 0;
 }
-// Every usable node's shown hit pane lies off the visible layout: the hit panes are stale (NX2navi never uses touch;
+// Every usable node's shown hit pane lies off the visible layout: the hit panes are stale (OOT-PC never uses touch;
 // the dialogue choices' sit far from where the choices are drawn), so the buttons' own parts panes stand for them
 static int stale_hit_panes(int n, const uint64_t *btn, float lw, float lh, const Xf *t) {
     int seen = 0;
@@ -249,7 +249,7 @@ int menu_cursor_pointer(void) { return __atomic_load_n(&g_pointer, __ATOMIC_RELA
 
 static int enabled(void) {
     if (!RT_V143) return 0;
-    const char *v = cfg_get("NX2NAVI_MENU_CURSOR"), *in = cfg_get("NX2NAVI_INPUT");
+    const char *v = cfg_get("OOTPC_MENU_CURSOR"), *in = cfg_get("OOTPC_INPUT");
     return !(v && !strcmp(v, "0")) && !(in && !strcmp(in, "none"));
 }
 
@@ -270,7 +270,7 @@ static int picture_pos(float *px, float *py) {
 static void log_screen(const Focus *f, const char *nm, int n, float lw, float lh, const Xf *t, int stale) {
     static uint64_t last;
     static int lines;
-    const char *e = cfg_get("NX2NAVI_MENU_CURSOR_LOG");
+    const char *e = cfg_get("OOTPC_MENU_CURSOR_LOG");
     int verbose = e && !strcmp(e, "1");
     if (f->screen == last || (!verbose && lines >= 6)) return;
     last = f->screen, lines++;
@@ -286,7 +286,7 @@ void menu_cursor_poll(uint64_t *buttons) {
     if (!inited) {
         inited = 1;
         main_lo = MOD_MAIN_BASE, main_hi = MOD_MAIN_BASE + MAIN_SIZE;
-        if (RT_V143) rt_log("menu_cursor: on for 1.4.3 (NX2NAVI_MENU_CURSOR=0 turns it off)");
+        if (RT_V143) rt_log("menu_cursor: on for 1.4.3 (OOTPC_MENU_CURSOR=0 turns it off)");
     }
     if (!enabled()) { set_pointer(0); return; }
     Focus f = focus_now();

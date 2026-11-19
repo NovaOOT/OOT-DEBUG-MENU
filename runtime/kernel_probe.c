@@ -464,19 +464,19 @@ static void test_cores(Cpu *c) {
     int now, held_max;
     kern_core_stats(&now, &held_max);
     uint32_t cpus = plat_cpu_usable();
-    int gate = !cfg_bool("NX2NAVI_FREE_CORES");   // the kernel's own switch
+    int gate = !cfg_bool("OOTPC_FREE_CORES");   // the kernel's own switch
     int ncore = kern_cores();   // as many threads run guest code at once as there are virtual cores, where the host
                                 // has more CPUs than that
     int ok = g_run_max <= ncore && held_max <= ncore && !g_core_clash && ((int)cpus <= ncore || g_run_max == ncore);
     printf("virtual cores: %d threads x %d runs on %u host CPUs: at most %d running guest code at once, at most %d "
            "core holders (kernel count), %d core-number clashes: %s\n", CORE_WORKERS, CORE_RUNS, cpus, g_run_max,
-           held_max, g_core_clash, !gate ? "not checked (NX2NAVI_FREE_CORES is set)" : ok ? "ok" : "FAIL");
+           held_max, g_core_clash, !gate ? "not checked (OOTPC_FREE_CORES is set)" : ok ? "ok" : "FAIL");
     CHECK(ok || !gate, "virtual cores");
 }
 
-// ---- pinned threads: each sees the number of the core it is pinned to, also where NX2NAVI_CORES folds that core
+// ---- pinned threads: each sees the number of the core it is pinned to, also where OOTPC_CORES folds that core
 // onto another one (kernel.c core_seen), and no two that run guest code at once see the same number. Run the probe
-// with NX2NAVI_CORES=4 (the Steam Deck profile's value) to check the folded case; with all cores it holds trivially.
+// with OOTPC_CORES=4 (the Steam Deck profile's value) to check the folded case; with all cores it holds trivially.
 #define PIN_CORES 6   // kernel.c NCORE
 static volatile int32_t g_pin_wrong, g_pin_clash, g_pin_use[PROBE_CORES];
 static uint64_t a_pin_worker;
@@ -506,11 +506,11 @@ static void test_pinned_cores(Cpu *c) {
         start(c, h[i]);
     }
     for (int i = 0; i < 2 * PIN_CORES; i++) join(c, h[i]);
-    int gate = !cfg_bool("NX2NAVI_FREE_CORES");
+    int gate = !cfg_bool("OOTPC_FREE_CORES");
     int ok = !g_pin_wrong && !g_pin_clash;
     printf("pinned cores: %d threads on %d cores (%d virtual cores run threads) x %d runs: %d saw another core's "
            "number, %d core-number clashes: %s\n", 2 * PIN_CORES, PIN_CORES, kern_cores(), CORE_RUNS, g_pin_wrong,
-           g_pin_clash, !gate ? "not checked (NX2NAVI_FREE_CORES is set)" : ok ? "ok" : "FAIL");
+           g_pin_clash, !gate ? "not checked (OOTPC_FREE_CORES is set)" : ok ? "ok" : "FAIL");
     CHECK(ok || !gate, "pinned cores");
 }
 

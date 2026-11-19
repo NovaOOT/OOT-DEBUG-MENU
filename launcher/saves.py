@@ -18,7 +18,7 @@ report, and whoever fixes it imports it to reach the same place in the game. The
 imports the same zip; its import waits in <game>/profile/save-import for the game's next start.
 
 A save folder can come from a Switch save backup (the save's files), an emulator (nested folders named by user and
-title ids, gone down while each holds only one folder), another OOT-DEBUG-MENU game folder or its profile folder (the
+title ids, gone down while each holds only one folder), another OOT-PC game folder or its profile folder (the
 account folder inside).
 
 A whole save is account.sav, option.sav and the folders slot_00 to slot_05, each with progress.sav and caption.sav. A
@@ -49,18 +49,18 @@ def _rmtree(path):
     if Path(path).exists():
         shutil.rmtree(path, onexc=writable)
 
-README = '''OOT-DEBUG-MENU saves folder
+README = '''OOT-PC saves folder
 
-To import a save, put it into the "import" folder here and select Saves, then Import a Save, in the OOT-DEBUG-MENU
+To import a save, put it into the "import" folder here and select Saves, then Import a Save, in the OOT-PC
 launcher:
-- a save someone shared: the OOT-DEBUG-MENU-save-....zip that OOT-DEBUG-MENU exported
+- a save someone shared: the OOT-PC-save-....zip that OOT-PC exported
 - the files of a Switch save backup, or the folder that holds them
 - one save slot (a folder such as slot_00): only that slot is replaced
 - an emulator's save folder for the game
-- the profile folder (or the whole game folder) of another OOT-DEBUG-MENU install
+- the profile folder (or the whole game folder) of another OOT-PC install
 
 You can also select Import a Save and choose the zip or the folder instead. Only the import folder is looked in:
-the other folders here are written by OOT-DEBUG-MENU and the game.
+the other folders here are written by OOT-PC and the game.
 
 Before a save is imported, the game's current save is copied here into a folder named "backup" and the date. An
 imported save moves into a folder named "imported" and the date. The game itself keeps its save in profile\\save.
@@ -419,13 +419,16 @@ def _replace_held(game, src, files, slot, stamp, log):
 
 # ---- sharing a save: one zip with the save and a manifest (export_save, import_zip)
 #
-# OOT-DEBUG-MENU-save-<date>_<time>[-bug-report].zip:
-#   manifest.json         FORMAT, FORMAT_VERSION, the game's title id and version, the OOT-DEBUG-MENU version, the export time
+# OOT-PC-save-<date>_<time>[-bug-report].zip:
+#   manifest.json         FORMAT, FORMAT_VERSION, the game's title id and version, the OOT-PC version, the export time
 #   save/...              the save's files as the game keeps them (account.sav, option.sav, slot_00/progress.sav, ...)
-#   bug-report/...        with bug_report: the game's latest log and nx2navi.ini; an import leaves them out
+#   bug-report/...        with bug_report: the game's latest log and OOT-PC.ini; an import leaves them out
 # The game's own menu writes and reads the same zip (runtime/save_share.c), with the same manifest keys.
 
-FORMAT, FORMAT_VERSION = 'nx2navi-save', 1
+FORMAT, FORMAT_VERSION = 'ootpc-save', 1
+# The format and version key of a save exported before the project was renamed to OOT-PC: check_manifest takes it and
+# gives the manifest the new ones.
+LEGACY_FORMAT, LEGACY_VERSION_KEY = 'nx2navi-save', 'nx2navi'
 MANIFEST, SAVE_DIR, REPORT_DIR = 'manifest.json', 'save/', 'bug-report/'
 GAME, GAME_VERSION = 'The Legend of Zelda: Ocarina of Time', '1.1.1'
 PENDING = 'save-import'   # profile/save-import: what the game's menu took from a zip, imported at the game's next start
@@ -465,13 +468,13 @@ NO_SAVE = 'the game has no save yet: play until it saves, then export'
 
 
 # Settings whose values stay on the player's PC (runtime/cfg_private.h has the same list): the menu's test hook, and
-# what the co-op of versions up to 0.9.2 kept in nx2navi.ini, which a player's file may still hold.
+# what the co-op of versions up to 0.9.2 kept in OOT-PC.ini, which a player's file may still hold.
 PRIVATE_SETTINGS = ('coop_room', 'coop_server', 'coop_name', 'coop_accept', 'coop_remove', 'menu_test_set')
 PRIVATE_SHOWN = b'(set, not shown)'
 
 
 def scrub_settings(data):
-    """The bytes of an nx2navi.ini for a bug report: every private setting that has a value reads
+    """The bytes of an OOT-PC.ini for a bug report: every private setting that has a value reads
     "key = (set, not shown)"; everything else, comments and line ends included, byte for byte (cfg_ini_scrub in
     runtime/cfg_private.h does the same for the game's own export)."""
     out = []
@@ -488,25 +491,25 @@ def scrub_settings(data):
 
 
 def _add_report_file(z, f):
-    """One file of a bug report into the zip: nx2navi.ini without its private values, anything else as it is."""
-    if f.name == 'nx2navi.ini':
+    """One file of a bug report into the zip: OOT-PC.ini without its private values, anything else as it is."""
+    if f.name == 'OOT-PC.ini':
         z.writestr(REPORT_DIR + f.name, scrub_settings(f.read_bytes()))
     else:
         z.write(f, REPORT_DIR + f.name)
 
 
 def _export_log(game, dest, version, log):
-    """The bug report of a game without a save (it stopped before its first one): OOT-DEBUG-MENU-log-<date>_<time>-bug-report.zip
-    with the game's latest log, nx2navi.ini and a manifest that counts no save files; import_zip refuses it as a zip
+    """The bug report of a game without a save (it stopped before its first one): OOT-PC-log-<date>_<time>-bug-report.zip
+    with the game's latest log, OOT-PC.ini and a manifest that counts no save files; import_zip refuses it as a zip
     without a save. SaveError when the game has written no log either: then there is nothing to report with."""
-    extras = [f for f in (game / 'logs' / 'nx2navi.log', game / 'nx2navi.ini') if f.is_file()]
-    if not extras or extras[0].name != 'nx2navi.log':
+    extras = [f for f in (game / 'logs' / 'ootpc.log', game / 'OOT-PC.ini') if f.is_file()]
+    if not extras or extras[0].name != 'ootpc.log':
         raise SaveError(NO_SAVE)
     dest.mkdir(parents=True, exist_ok=True)
-    out = _fresh_file(dest, time.strftime('OOT-DEBUG-MENU-log-%Y-%m-%d_%H-%M-%S') + '-bug-report', '.zip')
+    out = _fresh_file(dest, time.strftime('OOT-PC-log-%Y-%m-%d_%H-%M-%S') + '-bug-report', '.zip')
     tmp = out.with_name(out.name + '.part')
     manifest = {'format': FORMAT, 'format_version': FORMAT_VERSION, 'game': GAME, 'title_id': _title_hex(),
-                'game_version': GAME_VERSION, 'nx2navi': version,
+                'game_version': GAME_VERSION, 'ootpc': version,
                 'exported': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'exported_by': 'launcher',
                 'files': 0, 'bug_report': True}
     try:
@@ -524,7 +527,7 @@ def _export_log(game, dest, version, log):
 
 def export_save(game, dest=None, bug_report=False, version='', log=print):
     """Write the save the game would load now into one zip in dest (default_export_dir when None), for a bug report
-    or another player. bug_report adds the game's latest log and nx2navi.ini, and still writes those two when the game
+    or another player. bug_report adds the game's latest log and OOT-PC.ini, and still writes those two when the game
     has no save yet (_export_log): a game that stops before its first save is the one its player wants to report.
     Never a key file. Returns {'path', 'files', 'extras'} (files 0: no save; extras: the names of the bug report files
     that were there)."""
@@ -536,8 +539,8 @@ def export_save(game, dest=None, bug_report=False, version='', log=print):
         raise SaveError(NO_SAVE)
     account = account_dir(game)
     dest.mkdir(parents=True, exist_ok=True)
-    stem = time.strftime('OOT-DEBUG-MENU-save-%Y-%m-%d_%H-%M-%S') + ('-bug-report' if bug_report else '')
-    extras = [f for f in (game / 'logs' / 'nx2navi.log', game / 'nx2navi.ini') if bug_report and f.is_file()]
+    stem = time.strftime('OOT-PC-save-%Y-%m-%d_%H-%M-%S') + ('-bug-report' if bug_report else '')
+    extras = [f for f in (game / 'logs' / 'ootpc.log', game / 'OOT-PC.ini') if bug_report and f.is_file()]
     for attempt in range(3):
         # a running game may swap a commit in while its files are read (runtime/fs_host.c swap_in): read again
         current = _newest(game, account)
@@ -549,7 +552,7 @@ def export_save(game, dest=None, bug_report=False, version='', log=print):
         out = _fresh_file(dest, stem, '.zip')
         tmp = out.with_name(out.name + '.part')
         manifest = {'format': FORMAT, 'format_version': FORMAT_VERSION, 'game': GAME, 'title_id': _title_hex(),
-                    'game_version': GAME_VERSION, 'nx2navi': version,
+                    'game_version': GAME_VERSION, 'ootpc': version,
                     'exported': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'exported_by': 'launcher',
                     'files': len(files), 'bug_report': bool(bug_report)}
         try:
@@ -583,14 +586,17 @@ def _member_path(name):
 
 
 def check_manifest(m):
-    """SaveError unless m is the manifest of an OOT-DEBUG-MENU save of this game that this version can read."""
+    """SaveError unless m is the manifest of an OOT-PC save of this game that this version can read."""
+    if isinstance(m, dict) and m.get('format') == LEGACY_FORMAT:
+        m['format'] = FORMAT
+        m.setdefault('ootpc', m.get(LEGACY_VERSION_KEY))
     if not isinstance(m, dict) or m.get('format') != FORMAT:
-        raise SaveError(f'its {MANIFEST} is not an OOT-DEBUG-MENU save manifest')
+        raise SaveError(f'its {MANIFEST} is not an OOT-PC save manifest')
     v = m.get('format_version')
     if type(v) is not int or v < 1:
         raise SaveError(f'its {MANIFEST} has no format version')
     if v > FORMAT_VERSION:
-        raise SaveError(f'it was made by a newer OOT-DEBUG-MENU ({m.get("nx2navi") or "format " + str(v)}): update OOT-DEBUG-MENU '
+        raise SaveError(f'it was made by a newer OOT-PC ({m.get("ootpc") or "format " + str(v)}): update OOT-PC '
                         'first')
     if str(m.get('title_id', '')).lower() != _title_hex():
         raise SaveError(f'it is a save of another game ({m.get("game") or m.get("title_id") or "not named"})')
@@ -609,7 +615,7 @@ def read_zip(path):
         try:
             info = z.getinfo(MANIFEST)
         except KeyError:
-            raise SaveError(f'{name} is not a save exported by OOT-DEBUG-MENU (it has no {MANIFEST}); to import a save '
+            raise SaveError(f'{name} is not a save exported by OOT-PC (it has no {MANIFEST}); to import a save '
                             'folder, unpack the zip and choose the folder') from None
         try:
             if info.file_size > 1 << 16:
@@ -641,7 +647,7 @@ def import_zip(game, path, log=print, stamp=None):
     import_save does. Returns import_save's dict with the zip's manifest under 'manifest'."""
     game = Path(game)
     m, members = read_zip(path)
-    stage = Path(tempfile.mkdtemp(prefix='nx2navi-save-'))
+    stage = Path(tempfile.mkdtemp(prefix='ootpc-save-'))
     try:
         try:
             with zipfile.ZipFile(path) as z:
@@ -656,7 +662,7 @@ def import_zip(game, path, log=print, stamp=None):
         account, backup = _replace(game, stage, files, None, stamp or time.strftime('%Y-%m-%d %H.%M.%S'), log)
     finally:
         _rmtree(stage)
-    log(f'saves: imported {len(files)} files from {path} (exported {m.get("exported", "?")} by OOT-DEBUG-MENU '
-        f'{m.get("nx2navi") or "?"}, game {m.get("game_version", "?")}) into {account}' +
+    log(f'saves: imported {len(files)} files from {path} (exported {m.get("exported", "?")} by OOT-PC '
+        f'{m.get("ootpc") or "?"}, game {m.get("game_version", "?")}) into {account}' +
         (f'; the old save is in {backup}' if backup else ''))
     return {'files': len(files), 'source': Path(path), 'backup': backup, 'slot': None, 'manifest': m}

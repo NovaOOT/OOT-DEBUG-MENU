@@ -7,7 +7,7 @@ extern volatile uint32_t prof_main_tid;     // the guest main thread (perf_main_
 extern volatile uint32_t prof_replay_tid;   // the asynchronous replay (perf_replay_thread): its waits hold up the frame too
 
 // The sampler; perf.c's weak versions do nothing.
-int prof_sampler_start(void);               // NX2NAVI_PROFILE: starts sampling; 1 when it runs
+int prof_sampler_start(void);               // OOTPC_PROFILE: starts sampling; 1 when it runs
 void prof_sampler_write(void);              // writes the profile once (prof_write)
 void prof_sampler_frame(uint64_t frame, uint64_t now, uint64_t d);   // every present; d: the interval, 0 on the first
-void prof_commit_census(uint64_t frame);    // NX2NAVI_TRACE=perf: logs where the process's committed memory lies
+void prof_commit_census(uint64_t frame);    // OOTPC_TRACE=perf: logs where the process's committed memory lies

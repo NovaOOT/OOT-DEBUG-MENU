@@ -60,7 +60,7 @@ def main():
                           ', a shader translated in play'),
     ]
     with tempfile.TemporaryDirectory() as d:
-        log = Path(d) / 'nx2navi.log'
+        log = Path(d) / 'ootpc.log'
         log.write_text('\n'.join(lines) + '\n', encoding='utf-8')
         block, hitches = stutter_map.read_log(log)
         assert block and block['head'][0] == 'exit' and block['head'][3] == '3', block and block['head']

@@ -16,7 +16,7 @@ DEFAULTS = {
     'keep_cache': True,           # keep build-cache/ (the lift and objects) so an update recompiles only changes
     'desktop_shortcut': True,
     'save_export_dir': '',        # where Saves > Export Save writes its zip; empty: the Downloads folder
-    'export_with_log': True,      # Export Save adds the game's latest log and nx2navi.ini (for a bug report)
+    'export_with_log': True,      # Export Save adds the game's latest log and OOT-PC.ini (for a bug report)
     'theme': 'forest',            # the colour scheme (launcher/ui/art.py THEMES)
     'custom_background': '',      # the Custom scheme's backdrop colour, #rrggbb; empty: the first scheme's
     'custom_panel': '',           # the Custom scheme's colour of the panels and the title band

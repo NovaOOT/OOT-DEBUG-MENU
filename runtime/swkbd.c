@@ -2,7 +2,7 @@
 // The text entry is a window of the host (swkbd.h text_entry_run: swkbd_win.c with Win32, swkbd_sdl.c with SDL).
 //
 // nn::swkbd::ShowKeyboard: text entry for the game. On the Switch the call starts the keyboard library applet, which
-// takes the screen until the player confirms or cancels. NX2navi calls it in one place, naming a horse at a stable
+// takes the screen until the player confirms or cancels. OOT-PC calls it in one place, naming a horse at a stable
 // (main+0x1ecbf64 -> main+0x1b2b3a0: UserName preset, at most 9 characters, '@' '%' '\' disabled, UTF-16 out, no
 // header, guide or initial text; an empty answer counts as not named).
 //
@@ -13,9 +13,9 @@
 // input (input_block). text_entry_run is the only front-end seam: an overlay (ImGui) can replace it.
 //
 // Environment:
-//   NX2NAVI_SWKBD_ANSWER=<text>|<cancel>|<initial>   answer without a window (probes, scripted runs); <initial> keeps the
+//   OOTPC_SWKBD_ANSWER=<text>|<cancel>|<initial>   answer without a window (probes, scripted runs); <initial> keeps the
 //                                                 starting text (the game's, else the default name)
-//   NX2NAVI_SWKBD_TEST=ok|cancel                     open the window, then press OK / Cancel on the first timer tick
+//   OOTPC_SWKBD_TEST=ok|cancel                     open the window, then press OK / Cancel on the first timer tick
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,7 +163,7 @@ static void ov_show_keyboard(Cpu *c) {
     uint16_t u[KB_LIMIT * 2 + 1];
     size_t n = 0;
     int confirmed;
-    const char *forced = cfg_get("NX2NAVI_SWKBD_ANSWER");
+    const char *forced = cfg_get("OOTPC_SWKBD_ANSWER");
     int away = kern_core_away();
     plat_mutex_lock(&one);
     request_from(arg, &req);
@@ -196,7 +196,7 @@ static void ov_show_keyboard(Cpu *c) {
     if (req.password) snprintf(shown, sizeof shown, "(password, %zu units, not logged)", n);
     rt_log("swkbd: from %s: \"%s\" (%d-%d units, disabled keys %#x, %s out, %s start)%s -> %s%s%s",
            ldr_describe(c->x[30] - 4, lr, sizeof lr), prompt, req.min_len, req.max_len, req.disabled,
-           utf8 ? "UTF-8" : "UTF-16", req.game_initial ? "game" : "default", forced && *forced ? " [NX2NAVI_SWKBD_ANSWER]" : "",
+           utf8 ? "UTF-8" : "UTF-16", req.game_initial ? "game" : "default", forced && *forced ? " [OOTPC_SWKBD_ANSWER]" : "",
            confirmed ? "\"" : "cancelled", confirmed ? shown : "", confirmed ? "\"" : "");
     plat_mutex_unlock(&one);
     kern_core_back(&away);

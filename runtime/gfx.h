@@ -7,7 +7,7 @@
 // ---- moved from ov.h
 enum { OE_MSG_FOCUS_STATE_CHANGED = 15, OE_MSG_OPERATION_MODE_CHANGED = 30, OE_MSG_PERFORMANCE_MODE_CHANGED = 31 };
 void oe_push_message(uint32_t message);                   // ov_system.c
-void oe_set_focus(int in_focus);                          // ov_system.c: GetCurrentFocusState; NX2NAVI_ASSUME_FOCUS pins 1
+void oe_set_focus(int in_focus);                          // ov_system.c: GetCurrentFocusState; OOTPC_ASSUME_FOCUS pins 1
 typedef struct { uint64_t alloc, free, realloc, user; } OvNvAllocator;
 typedef struct { OvNvAllocator graphics, devtools; uint64_t memory, memory_size; int initialized; } OvNvState;
 const OvNvState *ov_nv_state(void);                        // ov_gfx.c
@@ -18,7 +18,7 @@ const OvNvState *ov_nv_state(void);                        // ov_gfx.c
 
 // ---- window, vsync, focus (gfx_present.c and the window back end, gfx_wsys.h; vk_device.c). Host threads only; never run guest code.
 void gfx_window_start(void);                               // window thread, Vulkan device, swapchain; idempotent
-// NX2NAVI_GPU_TIMELINE=<frame> (vk_sync.c "frame timeline"): an event of the frames it records, at CPU time t (0: now)
+// OOTPC_GPU_TIMELINE=<frame> (vk_sync.c "frame timeline"): an event of the frames it records, at CPU time t (0: now)
 // with two values; gfx_tl_present counts the presented frames and writes the record to the log when it is complete.
 void gfx_tl_note(int kind, uint64_t t, uint64_t a, uint64_t b);
 void gfx_tl_present(void);
@@ -26,8 +26,9 @@ void gfx_vsync_bind(uint64_t system_event);                // nn::vi vsync event
 uint64_t gfx_vsync_ticks(void);                            // ticks since start
 uint64_t gfx_vsync_time_ns(uint64_t tick);                 // kern_now_ns() time of a tick (pacing)
 double gfx_window_refresh_hz(void);                        // refresh rate of the window's monitor; 0 unknown
+uint64_t gfx_pace_slept_ns(void);   // the frame pacer's sleeps so far (nvn_api_obj.c nvnWindowAcquireTexture), any thread
 int gfx_window_focused(void);
-int vk_hdr_native(void);   // NX2NAVI_HDR = native: the game's own HDR picture (vk_hdr.c)
+int vk_hdr_native(void);   // OOTPC_HDR = native: the game's own HDR picture (vk_hdr.c)
 int gfx_picture_rect(float out[4]);   // where the last present put the picture, fractions of the swapchain (x, y, w, h); 0 before one
 
 // ---- shader service client (gfx_shader.c)
@@ -58,7 +59,7 @@ const GfxShader *gfx_shader_get_async(int stage, const uint8_t *control, const u
 const GfxShader *gfx_shader_await(int stage, const uint8_t *control, const uint8_t *code, uint64_t code_size,
                                   const GfxShaderAnswers *a, uint32_t wait_ms, int *pending);
 uint64_t gfx_shader_async_done(void);                      // translations finished by the background worker
-void gfx_shader_counts(uint64_t *keys, uint64_t *translated);   // distinct keys in memory, translations done (NX2NAVI_TRACE=perf)
+void gfx_shader_counts(uint64_t *keys, uint64_t *translated);   // distinct keys in memory, translations done (OOTPC_TRACE=perf)
 void gfx_shader_disk_counts(uint64_t *sync, uint64_t *sync_ns, uint64_t *bg);   // disk cache reads on the render
                                                      // thread (count, ns) and by the loaders (gfx_shader.c load_budget)
 // The shader caches' host memory for the memory report (vk_memory.c system_log), at report time, in bytes: the memory
@@ -88,7 +89,7 @@ const GfxShader *gfx_shader_load_input(const uint8_t iid[32], int xlate);
 // serves is left to gfx_shader_carry_start's pass). Logs progress and the total.
 void gfx_shader_prewarm(const uint8_t (*iids)[32], size_t n, const GfxShader **out, int threads, int procs);
 // After the boot prewarm of a game run (boot.c): when the shader cache holds translations of a previous translator
-// (NX2NAVI_SHADER_CARRY), starts the background pass that translates them again under the current one for the next
+// (OOTPC_SHADER_CARRY), starts the background pass that translates them again under the current one for the next
 // start and then drops the old ones (gfx_shader.c, "Carry").
 void gfx_shader_carry_start(void);
 // How far the running (or last) gfx_shader_prewarm is: shaders done of total, and how many of them it translated (the
@@ -101,9 +102,9 @@ void gfx_present_boot(void);
 // to shader-answers.bin, and its program to shader-programs.bin, in the directory of `keys_path` (pipeline-keys.bin).
 void gfx_shader_record_at(const char *keys_path);
 void gfx_shader_record_flush(int force);                   // appends pending records; without force at most every 2 s
-// Translates every recorded (program, answers) on `threads` threads with up to `procs` translators (NX2NAVI_TEST_PREPARE_SHADERS).
+// Translates every recorded (program, answers) on `threads` threads with up to `procs` translators (OOTPC_TEST_PREPARE_SHADERS).
 void gfx_shader_prepare_recorded(int threads, int procs);
-// nx2navi.exe --prepare-shaders: translates <dir>/seed-answers.bin + seed-programs.bin (tools/prepare_shaders.py) and
+// ocarina.exe --prepare-shaders: translates <dir>/seed-answers.bin + seed-programs.bin (tools/prepare_shaders.py) and
 // writes <dir>/shader-prepared.bin (stage, priority, input id per variant). 0 on success.
 int gfx_shader_prepare_seed(const char *dir, int threads, int procs);
 // gfx_shader_guess.c: the answers of a prepared default variant, read from its first translation s: vertex inputs the
@@ -122,7 +123,7 @@ const uint32_t *gfx_shader_spirv_pin(const GfxShader *s, uint64_t *words);
 void gfx_shader_spirv_unpin(const GfxShader *s);
 uint64_t gfx_shader_words(const GfxShader *s);              // the SPIR-V's length in words, without reading it
 // FNV-1a (64-bit, over the bytes) of the SPIR-V: worked out once per shader and kept, so it decodes nothing on a
-// compressed shader (NX2NAVI_SKIP_SHADERS, vk_dump.c and vk_dlaa.c name shaders by it).
+// compressed shader (OOTPC_SKIP_SHADERS, vk_dump.c and vk_dlaa.c name shaders by it).
 uint64_t gfx_shader_spirv_fnv(const GfxShader *s);
 // The values of the module's OpDecorate Binding instructions, in module order, in *b (kept with the shader).
 uint32_t gfx_shader_bindings(const GfxShader *s, const uint32_t **b);
@@ -131,7 +132,7 @@ int gfx_shader_write_code(const GfxShader *s, const char *path);   // the guest 
 // A shader of the runtime's own (SPIR-V and a .res.json text as the translator writes them), outside the cache and
 // never freed; its key is the sha256 of both. NULL when the SPIR-V is malformed.
 const GfxShader *gfx_shader_own(const uint32_t *spirv, uint64_t words, const char *res_json);
-// vk_hdr.c: with NX2NAVI_HDR=1, splices the HDR tonemap into a fragment shader's SPIR-V (malloc'd, *words long) when it
+// vk_hdr.c: with OOTPC_HDR=1, splices the HDR tonemap into a fragment shader's SPIR-V (malloc'd, *words long) when it
 // is the game's tonemap, and unclamps the game's FSR pass; gfx_shader.c calls it for every fragment shader entering the cache.
 void vk_hdr_shader_swap(uint32_t **spirv, uint64_t *words);
 uint64_t gfx_shader_failures(void);                         // failed translations; feeds GfxStats.shader_failures
@@ -216,7 +217,7 @@ typedef struct {
     void (*cpu_synced)(uint64_t fence);
 } GfxBackend;
 extern const GfxBackend gfx_null_backend, gfx_vulkan_backend;
-const GfxBackend *gfx_backend(void);                       // NX2NAVI_GPU=null|vulkan (default vulkan)
+const GfxBackend *gfx_backend(void);                       // OOTPC_GPU=null|vulkan (default vulkan)
 
 // ---- NVN front end (nvn_procs.c)
 void nvn_procs_register(void);                             // hostfn_register every proc; before hostfn_seal (ov_gfx.c)

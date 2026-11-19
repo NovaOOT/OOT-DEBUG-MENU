@@ -1,15 +1,15 @@
-// Settings pages in two panes (ui/option_rows.cpp): option rows on the left, the selected (controller) or hovered (mouse)
-// row's description on the right. Each row shows a setting of the cfg table (cfg.h) and changes it through cfg_set: A
+// Settings pages (ui/option_rows.cpp): full-width rows with the selected (controller) or hovered (mouse) row's
+// description below them. Each row shows a setting of the cfg table (cfg.h) and changes it through cfg_set: A
 // steps it (toggle, next value), left and right step it, and the mouse steps it on the two framed arrows beside its
 // value and nowhere else on the row (a click on the row selects it; held on an arrow it repeats). A row marks the
 // default value, says "after restart" while a setting read at start differs from the value the game started with
 // (cfg_pending), and is greyed out with a note when an environment variable fixes it.
 //
 //   opt_begin("##screen", scale);
-//   opt_toggle("NX2NAVI_FULLSCREEN", UI_MENU_FULLSCREEN, UI_MENU_FULLSCREEN_DESC);
+//   opt_toggle("OOTPC_FULLSCREEN", UI_MENU_FULLSCREEN, UI_MENU_FULLSCREEN_DESC);
 //   opt_end();
 //
-// key: the setting's NX2NAVI_ name, which must have a cfg_meta row. Present path only (ImGui).
+// key: the setting's OOTPC_ name, which must have a cfg_meta row. Present path only (ImGui).
 #pragma once
 #include "imgui.h"
 
@@ -21,6 +21,7 @@ void opt_begin(const char *id, float scale);
 void opt_end(void);
 // The height the next pages leave free under their panes (the menu's bottom row).
 void opt_reserve_bottom(float h);
+bool opt_saving(void);
 // The height opt_reserve_bottom keeps free, for a tab that lays out its own panes (ui/amiibo_page.cpp).
 float opt_bottom(void);
 // The next page's first row takes the controller's cursor (opening the menu, switching tabs).
@@ -31,6 +32,8 @@ void opt_focus_first(void);
 void opt_focus_resume(void);
 // The row of key (or button id) takes the cursor, scrolled into view, when it is next drawn.
 void opt_focus_key(const char *key);
+// Jump to the first selectable row of the next (+1) or previous (-1) section, keeping its heading visible.
+void opt_section_step(int step);
 // The next row is greyed out like one the environment fixes, with note under its label and in its description.
 void opt_disable_next(UiTextId note);
 void opt_disable_next_text(const char *note);   // note must outlive the frame
@@ -91,7 +94,7 @@ bool opt_slider(const char *key, UiTextId label, float lo, float hi, UiTextId de
                 const char *fmt = "%g", const char *note = nullptr, const char *fallback = nullptr);
 
 // Binding rows (remapping on the Controls tab): a label and three cells, each selectable on its own (left / right move between them).
-// opt_bind_header: the column titles above them. opt_bind_row: key is the setting's name without NX2NAVI_ (BIND_A; the
+// opt_bind_header: the column titles above them. opt_bind_row: key is the setting's name without OOTPC_ (BIND_A; the
 // description names it when the environment sets it); a disabled cell shows its text greyed and takes no cursor; note
 // (NULL none) follows the description. Returns the cell A / Enter / a click activated (0..2), 10 + the cell cleared
 // (Delete, Backspace or X on the selected cell or, without the cursor shown, on the cell under the mouse; or a
@@ -102,9 +105,9 @@ int opt_bind_row(const char *key, const char *label, UiTextId desc, const char *
 int opt_bind_row(const char *key, const char *label, const char *desc, const char *const cells[3], const bool enabled[3],
                  const char *note = nullptr);   // the description as text (the Debug tab's hotkeys)
 
-// nx2navi.ini is written a moment after the last change (a held slider would rewrite it every frame) and when the menu
+// OOT-PC.ini is written a moment after the last change (a held slider would rewrite it every frame) and when the menu
 // closes. opt_save_tick: on every frame the menu lays out; force: write now if anything is pending. 1 while a write is
 // pending.
 int opt_save_tick(int force);
-// A change made outside a row (Reset, F10): nx2navi.ini is written as after a row's change.
+// A change made outside a row (Reset, F10): OOT-PC.ini is written as after a row's change.
 void opt_save_soon(void);

@@ -1,4 +1,4 @@
-// NX2NAVI_FLIGHT=1 flight recorder (flight.c): the last frames' timing and event counts plus a thumbnail each, written to
+// OOTPC_FLIGHT=1 flight recorder (flight.c): the last frames' timing and event counts plus a thumbnail each, written to
 // disk with a bug capture (F8, bugcap.c), after a slow frame or after a one-frame flash, so a glitch or stutter seen
 // in play can be read after the fact.
 #pragma once
@@ -8,7 +8,7 @@
 #define FLIGHT_THUMB_H 360
 
 extern int flight_on;
-extern int vk_dump_white;   // vk_dump.c, NX2NAVI_DUMP_WHITE   // NX2NAVI_FLIGHT=1, set once by flight_init before the first present
+extern int vk_dump_white;   // vk_dump.c, OOTPC_DUMP_WHITE   // OOTPC_FLIGHT=1, set once by flight_init before the first present
 
 void flight_init(void);   // prof_start calls it
 // Its memory in bytes, for the memory report (vk_memory.c system_log): the records and texture events in process memory,

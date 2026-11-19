@@ -37,9 +37,9 @@ typedef struct {
     uint8_t scale;                       // VkTexImage.scale
 } VkExecTarget;
 
-void vk_exec_cond_frame_end(uint64_t frame);   // vk_exec_xfer.c: a present, in replay order (NX2NAVI_LOG_RCOND)
+void vk_exec_cond_frame_end(uint64_t frame);   // vk_exec_xfer.c: a present, in replay order (OOTPC_LOG_RCOND)
 extern unsigned vk_cond_clears_run, vk_cond_clears_skip, vk_cond_draws_skip, vk_cond_depth_run;
-void vk_exec_cond_why(const p_render_cond *c, char *buf, size_t cap);   // NX2NAVI_LOG_RCOND=ab
+void vk_exec_cond_why(const p_render_cond *c, char *buf, size_t cap);   // OOTPC_LOG_RCOND=ab
 
 // The replay state. One instance lives for the run: NVN state is queue state and carries over from one submission to
 // the next. The "per command buffer" fields are reset by vk_exec_record.
@@ -108,7 +108,7 @@ typedef struct VkExec {
     void *views;                         // image views created for this command buffer (freed at its fence)
     int nviews, cap_views;
     int barrier_at;                      // recorded right after the last full barrier (-1: none yet)
-    // NX2NAVI_BARRIER_GAME (vk_exec.c barrier_to_why): the last full barrier was one the replay itself needed (a copy,
+    // OOTPC_BARRIER_GAME (vk_exec.c barrier_to_why): the last full barrier was one the replay itself needed (a copy,
     // clear or fill of its own follows it), so the next pass or dispatch gets a full one too; passes and dispatches
     // begun since the last full barrier
     int bar_dirty, bar_passes, bar_dispatches;
@@ -139,15 +139,15 @@ void vk_exec_pass_end(VkExec *ex);
 // Full memory barrier (all commands, all memory); ends the open pass first. Copies and dispatches order themselves with
 // it. Skipped when nothing was recorded since the last one.
 void vk_exec_barrier(VkExec *ex);
-// The barrier before a game dispatch: a full one, or with NX2NAVI_BARRIER_GAME none unless the replay's own commands
+// The barrier before a game dispatch: a full one, or with OOTPC_BARRIER_GAME none unless the replay's own commands
 // came since the last full barrier (vk_exec.c barrier_to_why). Ends the open pass.
 void vk_exec_barrier_dispatch(VkExec *ex);
-// NX2NAVI_TRACE=perf, every 600 frames: the barriers per frame by kind.
+// OOTPC_TRACE=perf, every 600 frames: the barriers per frame by kind.
 void vk_exec_barrier_log(uint64_t frame);
 // Ends the open pass and the part without handing it to the queue (vk_sync_cut): the next draw begins the pass again
 // at the start of a new command buffer, which the part's pre-pass command buffer precedes. 0 when no more can wait.
 int vk_exec_split_now(VkExec *ex);
-// vk_texture.c (NX2NAVI_TEX_ALIAS): commands that must run at the replay's current position. vk_exec_inline_begin returns
+// vk_texture.c (OOTPC_TEX_ALIAS): commands that must run at the replay's current position. vk_exec_inline_begin returns
 // the command buffer being recorded after a full barrier (an open pass is ended; *reopen says so), or VK_NULL_HANDLE
 // when this thread is not recording a replay. vk_exec_inline_end begins the pass again when it was open.
 // vk_exec_inline_buffer: a device buffer for transfers, destroyed when the submission completes.
@@ -199,7 +199,7 @@ void vk_exec_pool_marks(VkExec *ex);
 VkBuffer vk_exec_inline_buffer(VkDeviceSize size);
 // vk_exec.c: the stand-in a 3D BC render target is drawn through goes with its image (vk_exec_image_gone).
 void vk_exec_bc_gone(VkImage image);
-// vk_hdr.c: with NX2NAVI_HDR=1, notes a draw into a presented window texture (vk_hdr_track: set by the first present).
+// vk_hdr.c: with OOTPC_HDR=1, notes a draw into a presented window texture (vk_hdr_track: set by the first present).
 extern int vk_hdr_track;
 void vk_hdr_draw(VkExec *ex, const VkPipeInfo *info);
 // Scissor 0 clipped to the render area of the open pass; extent 0: nothing to draw.
@@ -224,7 +224,7 @@ extern uint64_t vk_exec_ahead_draws, vk_exec_ahead_lookups;   // draws the scans
 // The current pass's targets with their formats, extents and the frames they were last rendered in (diagnostics).
 void vk_exec_targets_describe(VkExec *ex, char *buf, size_t cap);
 
-// NX2NAVI_TRACE=gfx: replay counters of the current frame, logged and reset at each present (vk_exec_frame_log).
+// OOTPC_TRACE=gfx: replay counters of the current frame, logged and reset at each present (vk_exec_frame_log).
 typedef struct {
     uint64_t passes, draws_seen, draws, clears, copies, dispatches, submits;
     uint64_t fb_draws, fb_barriers, fb_restarts, fb_layouts;   // feedback loops: draws sampling a written target of
@@ -252,8 +252,8 @@ int vk_frame_hold_left(void);
 // meanwhile show black stand-ins, and frame_hold leaves their presents out.
 int vk_exec_pool_loading(void);
 
-// NX2NAVI_DUMP=<frame> (vk_dump.c): between presents frame-1 and frame, every pass's targets and every dispatch's storage
-// images are copied out and written as PNGs to NX2NAVI_DUMP_DIR (default "dump"), with passes.txt (targets, pipelines,
+// OOTPC_DUMP=<frame> (vk_dump.c): between presents frame-1 and frame, every pass's targets and every dispatch's storage
+// images are copied out and written as PNGs to OOTPC_DUMP_DIR (default "dump"), with passes.txt (targets, pipelines,
 // textures, samplers) and images.txt (per image value statistics). The hooks run only when vk_dump_armed is set.
 extern int vk_dump_armed;
 void vk_dump_init(void);                 // reads the environment; vk_exec_record's first call
@@ -261,7 +261,8 @@ void vk_dump_pass_end(VkExec *ex);       // after vkCmdEndRendering
 // after a draw's binds; mesh: a mesh draw (s->vs is its mesh stage, s->ts its task stage or NULL)
 void vk_dump_draw(VkExec *ex, const VkPipeState *s, VkPipeline p, const VkPipeInfo *info, int mesh);
 enum { SK_DISABLED, SK_SCISSOR, SK_NO_PROGRAM, SK_NO_VERTEX_STAGE, SK_SHADER_PENDING, SK_SHADER_FAILED, SK_DLAA,
-       SK_PIPE_PENDING, SK_PIPE_FAILED, SK_POOL_OFF, SK_PROG_FILTER, SK_SHADER_FILTER, SK_HIDE_MESHES, SK_COUNT };
+       SK_PIPE_PENDING, SK_PIPE_FAILED, SK_POOL_OFF, SK_PROG_FILTER, SK_SHADER_FILTER, SK_HIDE_MESHES, SK_STAND_IN,
+       SK_COUNT };
 extern const char *const vk_draw_skip_names[SK_COUNT];
 void vk_dump_draw_skipped(const VkExec *ex, int mesh, int why);
 // Around a mesh draw of the dumped frame (after vk_dump_draw): a primitives-generated query, listed in mesh_prims.txt.
@@ -272,7 +273,7 @@ void vk_dump_dispatch(VkExec *ex, const GfxShader *cs, VkPipeline p, const VkPip
 void vk_dump_copy(VkExec *ex, uint32_t op, const void *payload);   // before a copy or texture clear is replayed
 void vk_dump_present(uint64_t frame);    // vk_be_present: waits for the dump frame's copies and closes the logs
 
-// c0, the NVN driver constant bank of one stage (vk_exec_draw.c; NX2NAVI_FIX_C0=0 binds zeros instead): bank is
+// c0, the NVN driver constant bank of one stage (vk_exec_draw.c; OOTPC_FIX_C0=0 binds zeros instead): bank is
 // VK_C0_BYTES, stage an NVN stage (0 vertex, 1 fragment, 5 compute), ssbo and ubo the 16 bound slots of that stage.
 #define VK_C0_BYTES 0x800u
 void vk_c0_fill(uint8_t bank[VK_C0_BYTES], int stage, const p_bind_buf ssbo[16], const p_bind_buf ubo[16],
@@ -302,7 +303,7 @@ int vk_exec_event_holds_now(const void *payload);   // an OP_WAIT_EVENT's condit
 // vk_backend.c submit_sync, before a submission is recorded: waits for the CPU's signal when the submission begins
 // with a wait for it (vk_exec.c "the gate").
 void vk_exec_gate_wait(const uint64_t *handles, int n);
-int vk_exec_event_at_sync(void);              // NX2NAVI_EVENT_AT_SYNC
+int vk_exec_event_at_sync(void);              // OOTPC_EVENT_AT_SYNC
 uint64_t vk_exec_event_late_take(void);       // waits only a CPU signal after the copies would have passed, since the last call
 // Since the last call, which resets them: waits, waits reached before their signal, those of them a later replayed
 // signal met, and the sum of how many submissions later it came.
@@ -312,7 +313,7 @@ extern uint32_t vk_exec_brk;          // replay thread: bumped by every op that 
 uint32_t vk_exec_brk_now(void);       // vk_exec_brk, or in a parallel group's chunk the chunk's own count
 int vk_exec_mesh_run(const void *cur, const void **out, int max);
 void vk_exec_mesh_run_stops(char *out, size_t n);
-// NX2NAVI_EVO_TRACE=1 (diagnostics, vk_exec.c "event order trace"): one token per step of the replay's event order.
+// OOTPC_EVO_TRACE=1 (diagnostics, vk_exec.c "event order trace"): one token per step of the replay's event order.
 void vk_exec_evt(char what, const void *event, uint32_t value);
 void vk_exec_evt_frame(uint64_t frame);   // the game's present call: the frame's tokens are closed and logged
 // The memory report's descriptor pools (vk_memory.c outside_log): the replay's pools, spare ones included, the sets
@@ -335,6 +336,9 @@ enum { VK_AA_GAME, VK_AA_OFF, VK_AA_FXAA, VK_AA_SMAA };
 enum { VK_AA_ROLE_NONE, VK_AA_ROLE_EDGES, VK_AA_ROLE_WEIGHTS, VK_AA_ROLE_COMPOSE };
 int vk_aa_mode(void);
 int vk_aa_role(uint64_t guest_hash);
+// vk_game_fx.c: 1 when the game's optional effect this compute program belongs to is turned off; *fill is then the
+// value its storage images take in its place
+int vk_game_fx_skip(uint64_t guest_hash, float *fill);
 int vk_aa_skip_ok(void);
 int vk_aa_record(VkCommandBuffer cb, int mode, VkImageView src, VkImageView dst, uint32_t w, uint32_t h);
 void vk_aa_composed(int ok);

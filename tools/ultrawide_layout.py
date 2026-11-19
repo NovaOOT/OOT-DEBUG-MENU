@@ -1,6 +1,6 @@
 # Copyright (c) 2026 MacNativeGames contributors (MIT; see THIRD_PARTY_NOTICES.md). Used by
 # tools/make_romfs_patches.py --aspect.
-"""The game's UI layouts for a canvas of another shape than 16:9 (output_res = 3440x1440 or 1280x800 in nx2navi.ini),
+"""The game's UI layouts for a canvas of another shape than 16:9 (output_res = 3440x1440 or 1280x800 in OOT-PC.ini),
 edited in place in the decompressed UI/LayoutArchive/Common.Product.*.blarc (tools/make_romfs_patches.py --aspect).
 
 The game lays its UI out on a 1920x1080 grid and maps that grid onto the canvas, so on a 21:9 canvas every layout comes

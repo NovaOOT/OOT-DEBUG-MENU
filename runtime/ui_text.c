@@ -30,24 +30,28 @@ typedef struct { const char *lang; const char *const *text; } Row;
 // The DLSS model file and the executable, as the player sees them on this platform.
 #ifdef _WIN32
 #define DLSS_FILE "nvngx_dlss.dll"
-#define EXE_FILE "nx2navi.exe"
+#define EXE_FILE "ocarina.exe"
 #else
 #define DLSS_FILE "libnvidia-ngx-dlss.so"
-#define EXE_FILE "nx2navi"
+#define EXE_FILE "ocarina"
 #endif
 
 static const char *const text_en[UI_TEXT_COUNT] = {
     SWKBD("Text entry", "Enter a name", "Horse", "OK", "Cancel", "Controller: A = OK, B = Cancel"),
 
     [UI_MENU_TITLE] = "Settings",
-    [UI_MENU_TAB_SCREEN] = "Display", [UI_MENU_TAB_GAME] = "Game", [UI_MENU_TAB_MODS] = "Mods", [UI_MENU_TAB_SOUND] = "Sound",
-    [UI_MENU_TAB_CONTROLS] = "Controls", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Advanced", [UI_MENU_TAB_DEBUG] = "Debug", [UI_MENU_TAB_RANDOMIZER] = "Randomizer",
-    [UI_MENU_CONTINUE] = "Continue", [UI_MENU_QUIT] = "Quit game",
+    [UI_MENU_TAB_SCREEN] = "Display", [UI_MENU_TAB_GAME] = "Gameplay", [UI_MENU_TAB_MODS] = "Mods", [UI_MENU_TAB_SOUND] = "Audio",
+    [UI_MENU_TAB_CONTROLS] = "Controls", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Advanced", [UI_MENU_TAB_DEBUG] = "Developer", [UI_MENU_TAB_PERFORMANCE] = "Performance", [UI_MENU_TAB_RANDOMIZER] = "Randomizer",
+    [UI_MENU_CONTINUE] = "Resume game", [UI_MENU_QUIT] = "Quit game",
+    [UI_MENU_SAVED] = "All changes saved", [UI_MENU_SAVING] = "Saving changes...",
+    [UI_MENU_NAV_HINT] = "LB / RB or Q / E: Categories    B / Esc: Back",
+    [UI_MENU_DEV_NAV_HINT] = "ZL / ZR: Sections    L / R: Categories    B: Back",
+    [UI_MENU_SCREEN_GROUP] = "SCREEN", [UI_MENU_SCREEN_SUBTITLE] = "Screen and graphics settings",
     [UI_MENU_ON] = "On", [UI_MENU_OFF] = "Off", [UI_MENU_AUTO] = "Automatic", [UI_MENU_DEFAULT_MARK] = "default",
     [UI_MENU_AFTER_RESTART] = "after restart", [UI_MENU_SET_BY_ENV] = "set by environment variable",
     [UI_MENU_SAVE_FAILED] = "could not save settings",
-    [UI_MENU_INI_UNKNOWN] = "nx2navi.ini: not settings of this version, ignored: %s",
-    [UI_MENU_VERSION] = "OOT-DEBUG-MENU %s, game %s",
+    [UI_MENU_INI_UNKNOWN] = "OOT-PC.ini: not settings of this version, ignored: %s",
+    [UI_MENU_VERSION] = "OOT-PC %s, game %s",
 
     [UI_MENU_FULLSCREEN] = "Fullscreen", [UI_MENU_FULLSCREEN_DESC] = "Play in fullscreen. F11 switches it.",
     [UI_MENU_WINDOW_SIZE] = "Window size", [UI_MENU_WINDOW_SIZE_DESC] = "Window size outside fullscreen.",
@@ -71,7 +75,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_PERF_OFF] = "Off", [UI_MENU_PERF_FPS] = "FPS", [UI_MENU_PERF_FULL] = "Full",
     // printf format of the overlay line in FPS mode: the frame rate
     [UI_PERF_LINE_FPS] = "%.0f fps",
-    [UI_MENU_GRAPHICS] = "Picture",
+    [UI_MENU_GRAPHICS] = "GRAPHICS",
     [UI_MENU_OUTPUT_RES] = "Game resolution",
     [UI_MENU_OUTPUT_RES_DESC] = "The resolution the game draws at. Higher needs a stronger GPU.",
     [UI_MENU_RENDER_SCALE] = "3D render scale",
@@ -194,6 +198,35 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_LOWEND_DUMP_KEY_DESC] = "Each press of this key in the game window dumps the next frame (images and the "
                                    "frame's passes) to the dump folder, for a glitch caught while it is on screen. "
                                    "Windows only.",
+    [UI_MENU_PERF_PRESET] = "Performance preset",
+    [UI_MENU_PERF_PRESET_DESC] = "Sets the rows below at once for a slower PC. Default: everything as the game ships. "
+                                 "Low: less grass and plant shadows, plants drawn less far out, 4x texture filtering, "
+                                 "no clip recording and no contact or soft shadows. Very low: also no foliage or "
+                                 "plant shadows, plants drawn half as far, the game's texture filtering with blurrier "
+                                 "textures, no anti-aliasing, no volumetric fog and no echo in the sound. Custom: the "
+                                 "rows were changed by hand. The foliage and draw distance rows take effect at the "
+                                 "next start; the others at once.",
+    [UI_MENU_PERF_PRESET_DEFAULT] = "Default",
+    [UI_MENU_PERF_PRESET_LOW] = "Low",
+    [UI_MENU_PERF_PRESET_VERY_LOW] = "Very low",
+    [UI_MENU_PERF_PRESET_CUSTOM] = "Custom",
+    [UI_MENU_PERF_FOG] = "Volumetric fog",
+    [UI_MENU_PERF_FOG_DESC] = "The haze of the Lost Woods, Kokiri Forest's mist and the distance fog over Hyrule Field. "
+                              "Off skips the fog's work on the GPU and shows the scenes clear; it can leave a faint "
+                              "ghost image under characters. Applies at once.",
+    [UI_MENU_PERF_PLANT_DISTANCE] = "Plant draw distance",
+    [UI_MENU_PERF_PLANT_DISTANCE_DESC] = "How far out grass tufts, bushes, flowers and low trees are drawn, as a share "
+                                         "of the game's distances (grass 40 m, low trees 135 m), in the areas that keep "
+                                         "the game's own. Less draws fewer plants, for speed. Takes effect at the next "
+                                         "start.",
+    [UI_MENU_TEX_LOD_BIAS] = "Texture blur for speed",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "Samples the surface textures (ground, walls, roofs) from their smaller versions: "
+                                  "+1 uses textures half as wide. The picture turns softer, and the GPU reads less "
+                                  "memory per pixel, which helps integrated graphics and older cards most. Off "
+                                  "samples as the game asks. Applies at once.",
+    [UI_MENU_AUDIO_REVERB] = "Echo and reverb",
+    [UI_MENU_AUDIO_REVERB_DESC] = "The game's echo in caves, temples and halls. Off passes the sound through without "
+                                  "it, which saves the audio thread some work on a slow CPU. Applies at once.",
     [UI_MENU_SHARPNESS] = "FSR sharpness",
     [UI_MENU_SHARPNESS_DESC] = "How sharp FSR makes the picture. 0 turns it off.",
     [UI_MENU_SHARPNESS_NEEDS_FSR] = "only with AMD FSR 1 or FSR 3.1",
@@ -376,7 +409,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                              "button the layout above presses (with Nintendo (A right) the right button does A, so the "
                              "prompts for A show B, or circle). Keyboard and mouse: the key each button has (E, Ctrl, "
                              "Space, left click...), WASD for moving and the mouse for the camera. The prompt files "
-                             "are made from button art with tools/pad_prompts.py, the keys as nx2navi.ini binds them "
+                             "are made from button art with tools/pad_prompts.py, the keys as OOT-PC.ini binds them "
                              "when it runs. The game reads its prompts at start, so they change after a restart. They "
                              "are part of the game's files, so a button you remap in Controls keeps its old prompt on "
                              "screen until the files are made again.",
@@ -388,7 +421,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_PROMPTS_RESTART] = "prompts change after restart",
     [UI_MENU_PROMPTS_OFF_SHAPE] = "off at a game resolution not 16:9",
     [UI_MENU_PROMPTS_OFF_MODS] = "off: a RomFS mod replaces their files",
-    [UI_MENU_PROMPTS_OFF_PATCHES] = "off while NX2NAVI_ROMFS_PATCHES is set",
+    [UI_MENU_PROMPTS_OFF_PATCHES] = "off while OOTPC_ROMFS_PATCHES is set",
     [UI_MENU_RESTART] = "Restart now",
     [UI_MENU_RESTART_DESC] = "Closes the game and starts it again with the new prompts. Progress since your last save "
                              "is lost.",
@@ -532,8 +565,12 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                                 "FSR 3.1 or FSR 4, and for now an AMD graphics card. Without them it changes nothing.",
     [UI_MENU_NEEDS_WORKERS] = "needs CPU helper threads", [UI_MENU_NEEDS_PIPE] = "needs Helpers work ahead",
     [UI_MENU_DISCORD_RPC] = "Discord Rich Presence",
-    [UI_MENU_DISCORD_RPC_DESC] = "Shows \"Playing NX2navi\" with the play time in your Discord status while the "
-                                 "game runs. discord_app_id and discord_image in nx2navi.ini choose the application.",
+    [UI_MENU_DISCORD_RPC_DESC] = "Shows \"Playing The Legend of Zelda: Ocarina of Time PC\" with the play time in your Discord status while the "
+                                 "game runs. discord_app_id and discord_image in OOT-PC.ini choose the application.",
+    [UI_MENU_DISCORD_LOCATION] = "Show location on Discord",
+    [UI_MENU_DISCORD_LOCATION_DESC] = "Adds where you are to your Discord status: the area the game has loaded and Link's age "
+                                      "(\"Hyrule Field · Adult\"), updated a few seconds after a loading screen.",
+    [UI_MENU_DISCORD_LOCATION_OFF] = "needs Discord Rich Presence on",
 
     [UI_MENU_ADV_WARNING] = "These settings are for testing and troubleshooting. Change them only when you know why.",
     [UI_MENU_GROUP_SCHED] = "Scheduling", [UI_MENU_GROUP_SHADERS] = "Shaders and pipelines",
@@ -551,6 +588,31 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_REPLAY_ASYNC_DESC] = "Prepares frames for the GPU on a separate thread instead of the game thread. Faster in heavy scenes, but can show a dark or flickering frame now and then, and adds up to one frame of latency.",
     [UI_MENU_TIMER_1MS] = "1 ms Windows timer",
     [UI_MENU_TIMER_1MS_DESC] = "Raises the system timer resolution to 1 ms for steadier frame pacing.",
+    [UI_MENU_OCCLUSION_OFF] = "Skip occlusion queries",
+    [UI_MENU_OCCLUSION_OFF_DESC] = "The game stops asking the graphics card which objects are hidden behind others and draws everything in view. That saves the queries and the wait for their answers but draws more, so it can be faster or slower depending on the place. Takes effect at the next start.",
+    [UI_MENU_FRAME_OVERLAP] = "Overlap CPU and GPU frames",
+    [UI_MENU_FRAME_OVERLAP_DESC] = "The processor prepares the next frame while the graphics card still draws the last one, by keeping its own copy of the game data each frame reads. More frames when both are busy, at some memory and up to a frame of extra latency. The low-end mode turns it on. Takes effect at the next start.",
+    [UI_MENU_FG_TARGET] = "Frame generation target",
+    [UI_MENU_FG_TARGET_DESC] = "The frame rate on screen with frame generation: the monitor's refresh rate, or a lower, steadier one. Dynamic picks its multiplier for it, and with the frame limit at Display the game draws this rate divided by the multiplier. Takes effect at once.",
+    [UI_MENU_FG_TARGET_DISPLAY] = "Monitor",
+    [UI_MENU_PERF_PRESET_RECOMMEND_LOW] = "Low recommended for this graphics chip",
+    [UI_MENU_DYN_RES] = "Dynamic resolution",
+    [UI_MENU_DYN_RES_DESC] = "Lowers the scene's resolution in heavy views to keep the frame rate below, and returns to your Upscaling choice when the view is light again. With DLSS it steps through the DLSS modes from your choice (from DLAA it keeps every pixel until a view runs short of time); without DLSS it renders the scene at down to half your resolution and scales it up. Takes effect at once.",
+    [UI_MENU_DYN_RES_TARGET] = "Dynamic resolution target",
+    [UI_MENU_DYN_RES_TARGET_DESC] = "The frame rate dynamic resolution holds; \"= fps limit\" follows the frame-rate limit. A higher target lowers the resolution sooner.",
+    [UI_MENU_NEEDS_DYN_RES] = "needs Dynamic resolution",
+    [UI_MENU_LEAF_SHADOW_CULL] = "Leaf shadow culling",
+    [UI_MENU_LEAF_SHADOW_CULL_DESC] = "Plant cards cast their sun shadow from one side only in these shadow cascades, which halves the work of the densest ones. Off draws both sides everywhere, as the game does. Takes effect at the next start.",
+    [UI_MENU_LEAF_SHADOW_VRS] = "Leaf shadow shading",
+    [UI_MENU_LEAF_SHADOW_VRS_DESC] = "Plant shadows in these cascades are shaded once per 2x2 pixels, a quarter of the cut-out tests. Needs a GPU with variable rate shading. Takes effect at the next start.",
+    [UI_MENU_CASCADES_ALL] = "All cascades", [UI_MENU_CASCADES_MID] = "Middle and far", [UI_MENU_CASCADES_FAR] = "Far only",
+    [UI_MENU_EDGE_FILL] = "Jitter edge repair",
+    [UI_MENU_EDGE_FILL_DESC] = "With DLSS, DLAA or FSR 3.1, fills the outermost pixel row and column of each scene pass, which some drivers leave undrawn when the picture is jittered. Automatic turns it off on NVIDIA, whose driver draws them, and on elsewhere. Takes effect at the next start.",
+    [UI_MENU_SPV_OPT] = "Optimise shaders",
+    [UI_MENU_SPV_OPT_DESC] = "Removes the repeated work the shader translation leaves in the game's shaders before the graphics driver compiles them. The picture stays the same; big lit materials such as the water of Lake Hylia get several times faster. Needs ootpc_spvopt.dll beside the game (on Linux, the system's SPIRV-Tools): without it, the shaders are used as translated. The first start after turning it on takes longer while the shaders are optimised; they are kept for the next starts. Takes effect at the next start.",
+    [UI_MENU_PACE_SMOOTH] = "Smooth frame pacing",
+    [UI_MENU_PACE_SMOOTH_DESC] = "Holds a frame that is ready early so frames reach the screen at even intervals. Off shows each frame as soon as it is ready: a little more speed and less latency, uneven motion. Takes effect at the next start.",
+    [UI_MENU_PERF_GROUP_GPU] = "Graphics work", [UI_MENU_PERF_GROUP_CPU] = "Processor work",
     [UI_MENU_PIPE_WAIT] = "Waiting draw handling",
     [UI_MENU_PIPE_WAIT_DESC] = "Default keeps the current scheduling with a reserved worker for waiting draws; Old (draw) uses the previous scheduling.",
     [UI_MENU_PIPE_WAIT_DEFAULT] = "Default", [UI_MENU_PIPE_WAIT_DRAW] = "Old (draw)",
@@ -605,6 +667,13 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_TRACE] = "Performance log", [UI_MENU_TRACE_DESC] = "Writes frame timings to a file.",
     [UI_MENU_FLIGHT] = "Flight recorder",
     [UI_MENU_FLIGHT_DESC] = "Keeps a short history and saves it when a frame freezes.",
+    [UI_MENU_TEX_COMPACT] = "Video memory compaction",
+    [UI_MENU_TEX_COMPACT_DESC] = "Moves textures out of half-empty blocks of video memory so the blocks go back to the driver. Keeps long sessions from running out of video memory and slowing down after many areas. Takes effect after a restart.",
+    [UI_MENU_GAME_AO] = "Ambient occlusion",
+    [UI_MENU_GAME_AO_DESC] = "The game's soft shadows in corners, creases and under objects. Off saves a little GPU time; the scene looks a little flatter.",
+    [UI_MENU_DISCORD_FIGHT] = "Show what you are fighting",
+    [UI_MENU_DISCORD_FIGHT_DESC] = "Adds the enemy you are fighting to your Discord status, such as \"Attacking: Deku Baba\", while the fight lasts.",
+    [UI_MENU_DISCORD_FIGHT_OFF] = "needs Discord Rich Presence and the location on",
     [UI_MENU_FLIGHT_SPIKE_MS] = "Freeze threshold (ms)",
     [UI_MENU_FLIGHT_SPIKE_MS_DESC] = "Frame time that counts as a freeze.",
     [UI_MENU_PASS_CRUMBS] = "GPU pass marks",
@@ -664,10 +733,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_SAVE_EXPORT_DESC] = "Writes your save (every slot) into one zip file in your Downloads folder, to give to "
                                  "another player or attach to a bug report. It never holds your keys or game files.",
     [UI_MENU_SAVE_EXPORT_BUG] = "Export save for a bug report",
-    [UI_MENU_SAVE_EXPORT_BUG_DESC] = "The same zip with this run's log and your settings (nx2navi.ini) added, which "
+    [UI_MENU_SAVE_EXPORT_BUG_DESC] = "The same zip with this run's log and your settings (OOT-PC.ini) added, which "
                                      "show what happened and with which settings. Attach it to your bug report.",
     [UI_MENU_SAVE_IMPORT] = "Import a save",
-    [UI_MENU_SAVE_IMPORT_DESC] = "Choose a save someone shared (an OOT-DEBUG-MENU-save zip). It replaces your save, every slot, "
+    [UI_MENU_SAVE_IMPORT_DESC] = "Choose a save someone shared (an OOT-PC-save zip). It replaces your save, every slot, "
                                  "at the next start: the game keeps your progress in memory and would write it back "
                                  "over a save replaced now. Your current save is copied to the saves folder first.",
     [UI_MENU_SAVE_IMPORT_WAITING] = "at next start",
@@ -675,7 +744,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_SAVE_IMPORT_CANCEL_DESC] = "Keeps your save as it is: the save waiting for the next start is dropped.",
     [UI_MENU_SAVE_BUSY] = "working…",
     [UI_MENU_SAVE_EXPORTED] = "Saved as %s",
-    [UI_MENU_SAVE_IMPORT_READY] = "The save (OOT-DEBUG-MENU %s) loads at the next start: select Restart below. Your current "
+    [UI_MENU_SAVE_IMPORT_READY] = "The save (OOT-PC %s) loads at the next start: select Restart below. Your current "
                                   "save is copied to the saves folder first.",
     [UI_MENU_SAVE_IMPORT_CANCELLED] = "Import cancelled; your save stays as it is.",
     [UI_MENU_SAVE_IMPORTED] = "A shared save was imported at this start. Your old save is in %s",
@@ -685,9 +754,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_SAVE_E_WRITE] = "The zip could not be written into %s.",
     [UI_MENU_SAVE_E_READ] = "%s could not be read.",
     [UI_MENU_SAVE_E_STAGE] = "The save could not be prepared for the next start; the log says why.",
-    [UI_MENU_SAVE_E_NOT_SAVE] = "%s is not a save OOT-DEBUG-MENU exported.",
+    [UI_MENU_SAVE_E_NOT_SAVE] = "%s is not a save OOT-PC exported.",
     [UI_MENU_SAVE_E_OTHER_GAME] = "%s is a save of another game.",
-    [UI_MENU_SAVE_E_NEWER] = "%s was made by a newer OOT-DEBUG-MENU: update OOT-DEBUG-MENU first.",
+    [UI_MENU_SAVE_E_NEWER] = "%s was made by a newer OOT-PC: update OOT-PC first.",
     [UI_MENU_SAVE_E_DAMAGED] = "%s is damaged: download it again.",
     [UI_MENU_SAVE_E_UNSAFE] = "%s was refused: it holds files outside a save, links, or far more than a save.",
     [UI_MENU_CAPTURE_SAVED] = "Bug capture %d saved",
@@ -729,7 +798,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_FRAMEGEN_MULT_DESC] = "Frames on screen for each frame the game draws: 2x adds one generated frame, 3x "
                                    "two, 4x three. Higher is smoother but adds a little delay. The frame limit counts "
                                    "the frames the game draws, so the screen shows the limit times this. 2x needs a "
-                                   "GeForce RTX 40 GPU or newer, 3x and 4x an RTX 50.",
+                                   "GeForce RTX 40 GPU or newer, 3x and 4x an RTX 50. Dynamic adds only the frames needed to reach "
+                                   "your display's refresh rate, so heavy places stay smooth and light ones show "
+                                   "more real frames.",
     [UI_MENU_FRAMEGEN_MULT_RTX50] = "3x and 4x need an RTX 50 GPU",
     [UI_MENU_FRAMEGEN_MULT_UPTO] = "up to %dx on this GPU and driver",
     [UI_MENU_FRAMEGEN_MULT_OLD_DLL] = "2x only: update the DLSS frame generation files",
@@ -754,6 +825,94 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_EXEFS_ON] = "Code patches in use: %d files.",
     [UI_MENU_MODS_REPLACES_BUILTIN] = "Code patches in use: %d files. They replace the port's own patch %s, which "
                                       "stays off while this mod is on.",
+    [UI_MENU_TAB_COOP] = "Co-op",
+    [UI_MENU_COOP_ON] = "Co-op (experimental)",
+    [UI_MENU_COOP_ON_DESC] = "Co-op is on (the Steam Co-op mod). Reaching Steam…",
+    [UI_MENU_COOP_NO_LIBRARY] = "Steam's library file, steam_api64.dll, is not beside the game. The launcher puts it there when "
+                                "it starts the game, from a Steam game you have installed: start the game from the launcher, with "
+                                "Steam and at least one game from 2021 or later installed. You can also copy the file yourself "
+                                "from a Steam game's folder into the folder of ocarina.exe.",
+    [UI_MENU_COOP_OLD_LIBRARY] = "The steam_api64.dll beside the game is too old for co-op. Replace it with one from a newer Steam "
+                                 "game.",
+    [UI_MENU_COOP_NO_CLIENT] = "Steam did not answer. Start Steam and sign in, then choose Look for Steam again.",
+    [UI_MENU_COOP_RETRY] = "Look for Steam again",
+    [UI_MENU_COOP_RETRY_DESC] = "Tries now to reach Steam; the game also tries by itself every few seconds.",
+    [UI_MENU_COOP_CREATE] = "Create a room",
+    [UI_MENU_COOP_CREATE_DESC] = "Makes a room for up to four players. You get a room ID to pass on, and you can invite Steam "
+                                 "friends.",
+    [UI_MENU_COOP_JOIN] = "Join a room",
+    [UI_MENU_COOP_JOIN_DESC] = "Joins the room whose ID a friend gave you.",
+    [UI_MENU_COOP_ROOM_ID] = "Room ID",
+    [UI_MENU_COOP_ROOM_ID_DESC] = "Friends type this into Join a room. Press to copy it. Anyone who has it can join, so pass it on "
+                                  "only to the people you want in your game.",
+    [UI_MENU_COOP_ROOM_ID_HINT] = "8 letters and digits, as XXXX-XXXX: any case, with or without the dash.",
+    [UI_MENU_COOP_ROOM_ID_BAD] = "This is not a room ID: check it for a mistyped character.",
+    [UI_MENU_COOP_PASTE] = "Paste",
+    [UI_MENU_COOP_PASTE_EMPTY] = "The clipboard has no text.",
+    [UI_MENU_COOP_COPIED] = "copied",
+    [UI_MENU_COOP_OK] = "OK",
+    [UI_MENU_COOP_JOINING] = "Getting into the room…",
+    [UI_MENU_COOP_STOP] = "Stop",
+    [UI_MENU_COOP_STOP_DESC] = "Stops trying to get into the room.",
+    [UI_MENU_COOP_INVITE] = "Invite a friend",
+    [UI_MENU_COOP_INVITE_DESC] = "Sends a Steam invite to a friend. It reaches a friend whose OOT-PC is running with co-op on; "
+                                 "anyone else can use the room ID.",
+    [UI_MENU_COOP_INVITE_TITLE] = "Invite a Steam friend",
+    [UI_MENU_COOP_INVITE_NONE] = "Steam shows no friends.",
+    [UI_MENU_COOP_INVITE_SENT] = "Invite sent to %s.",
+    [UI_MENU_COOP_INVITE_IN_GAME] = "in co-op now",
+    [UI_MENU_COOP_INVITE_ONLINE] = "online",
+    [UI_MENU_COOP_INVITE_OFFLINE] = "offline",
+    [UI_MENU_COOP_INVITE_STEAM] = "Steam's invite window",
+    [UI_MENU_COOP_INVITE_CLOSE] = "Close",
+    [UI_MENU_COOP_INVITED] = "%s invites you to a room.",
+    [UI_MENU_COOP_INVITED_JOIN] = "Join their room",
+    [UI_MENU_COOP_INVITED_JOIN_DESC] = "Joins the room you were invited to.",
+    [UI_MENU_COOP_INVITED_NO] = "Not now",
+    [UI_MENU_COOP_INVITED_NO_DESC] = "Puts the invite away.",
+    [UI_MENU_COOP_PLAYERS] = "Players",
+    [UI_MENU_COOP_YOU] = "you",
+    [UI_MENU_COOP_HOST] = "host",
+    [UI_MENU_COOP_PLAYER_DESC] = "A player in the room, and the area their Link is in.",
+    [UI_MENU_COOP_PLAYER_REMOVE_DESC] = "A player in the room. As the host you can press to remove them from the room.",
+    [UI_MENU_COOP_PLAYER_AWAY] = "not in the world",
+    [UI_MENU_COOP_REMOVE] = "Remove",
+    [UI_MENU_COOP_REMOVE_CONFIRM] = "Remove %s from the room? They cannot come back into this room.",
+    [UI_MENU_COOP_LEAVE] = "Leave the room",
+    [UI_MENU_COOP_LEAVE_DESC] = "Leaves the room. Your game and save go on as they are.",
+    [UI_MENU_COOP_LEAVE_CONFIRM] = "Leave the room?",
+    [UI_MENU_COOP_LEAVE_HOST] = "You are the host: the room goes on with another player as its host.",
+    [UI_MENU_COOP_STAY] = "Stay",
+    [UI_MENU_COOP_CHAT] = "Chat",
+    [UI_MENU_COOP_CHAT_WRITE] = "Write a message",
+    [UI_MENU_COOP_CHAT_WRITE_DESC] = "Sends a line of text to everyone in the room.",
+    [UI_MENU_COOP_SEND] = "Send",
+    [UI_MENU_COOP_CHAT_JOINED] = "%s joined the room",
+    [UI_MENU_COOP_CHAT_LEFT] = "%s left the room",
+    [UI_MENU_COOP_SETTINGS] = "Co-op settings",
+    [UI_MENU_COOP_SHARE] = "Share progress",
+    [UI_MENU_COOP_SHARE_DESC] = "In a room, what anyone achieves counts for everyone: story progress, chests, doors, items and "
+                                "songs. Before anything from a room reaches your save, the save is copied to coop-backup in the "
+                                "profile folder. Small keys, rupees, ammunition and hearts stay your own. Off: only names and "
+                                "chat are shared.",
+    [UI_MENU_COOP_NAMES] = "Show player names",
+    [UI_MENU_COOP_NAMES_DESC] = "Shows the name of each other player where their Link stands in your world, with the distance. "
+                                "Needs DLSS, FSR or TAA on (the game tells the menu where the camera looks only then).",
+    [UI_MENU_COOP_CHAT_SHOW] = "Show chat over the game",
+    [UI_MENU_COOP_CHAT_SHOW_DESC] = "New chat lines and who joined or left show for a few seconds while the menu is closed.",
+    [UI_MENU_COOP_N_CREATE_FAILED] = "Steam could not make the room. Try again in a moment.",
+    [UI_MENU_COOP_N_NO_ROOM] = "No room has this ID: check it, or ask your friend whether the room is still open.",
+    [UI_MENU_COOP_N_FULL] = "The room is full.",
+    [UI_MENU_COOP_N_REFUSED] = "The room did not let you in.",
+    [UI_MENU_COOP_N_NOT_OURS] = "That is not an OOT-PC room.",
+    [UI_MENU_COOP_N_OTHER_VERSION] = "The room's host runs another version of OOT-PC or of the game: use the same versions.",
+    [UI_MENU_COOP_N_REMOVED] = "The host removed you from the room.",
+    [UI_MENU_COOP_N_HOST_SILENT] = "The room's host did not answer.",
+    [UI_MENU_COOP_N_LOST] = "Steam lost its connection; the room is gone.",
+    [UI_MENU_COOP_N_LEFT] = "You left the room.",
+    [UI_MENU_COOP_LOCAL] = "Test mode: a stand-in for Steam on this PC.",
+    [UI_MENU_COOP_TOAST_INVITE] = "%s invites you to a room: open the menu's Co-op tab.",
+    [UI_MENU_COOP_MOD_OFF] = "Co-op is a mod: turn on Steam Co-op on the Mods tab (or the launcher's Mods screen) and restart the game. Then you can play with friends over Steam, each in their own game and save. With it off the game uses no network.",
 };
 
 static const char *const text_ru[UI_TEXT_COUNT] = {
@@ -761,14 +920,14 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
 
     [UI_MENU_TITLE] = "Настройки",
     [UI_MENU_TAB_SCREEN] = "Экран", [UI_MENU_TAB_GAME] = "Игра", [UI_MENU_TAB_MODS] = "Моды", [UI_MENU_TAB_SOUND] = "Звук",
-    [UI_MENU_TAB_CONTROLS] = "Управление", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Меню", [UI_MENU_TAB_ADVANCED] = "Дополнительно", [UI_MENU_TAB_DEBUG] = "Отладка", [UI_MENU_TAB_RANDOMIZER] = "Рандомайзер",
+    [UI_MENU_TAB_CONTROLS] = "Управление", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Меню", [UI_MENU_TAB_ADVANCED] = "Дополнительно", [UI_MENU_TAB_DEBUG] = "Отладка", [UI_MENU_TAB_PERFORMANCE] = "Производительность", [UI_MENU_TAB_RANDOMIZER] = "Рандомайзер",
     [UI_MENU_CONTINUE] = "Продолжить", [UI_MENU_QUIT] = "Выйти из игры",
     [UI_MENU_ON] = "Вкл.", [UI_MENU_OFF] = "Выкл.", [UI_MENU_AUTO] = "Автоматически",
     [UI_MENU_DEFAULT_MARK] = "по умолчанию",
     [UI_MENU_AFTER_RESTART] = "после перезапуска", [UI_MENU_SET_BY_ENV] = "задано переменной окружения",
     [UI_MENU_SAVE_FAILED] = "не удалось сохранить настройки",
-    [UI_MENU_INI_UNKNOWN] = "nx2navi.ini: не настройки этой версии, пропущены: %s",
-    [UI_MENU_VERSION] = "OOT-DEBUG-MENU %s, игра %s",
+    [UI_MENU_INI_UNKNOWN] = "OOT-PC.ini: не настройки этой версии, пропущены: %s",
+    [UI_MENU_VERSION] = "OOT-PC %s, игра %s",
 
     [UI_MENU_FULLSCREEN] = "Полный экран", [UI_MENU_FULLSCREEN_DESC] = "Игра на весь экран. F11 переключает.",
     [UI_MENU_WINDOW_SIZE] = "Размер окна", [UI_MENU_WINDOW_SIZE_DESC] = "Размер окна вне полноэкранного режима.",
@@ -1003,7 +1162,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                              "кнопкой, которую нажимает раскладка выше (в Nintendo (A справа) A делает правая кнопка, "
                              "и подсказки A показывают B или круг). Клавиатура и мышь: клавиша каждой кнопки (E, Ctrl, "
                              "пробел, левый клик...), WASD для движения и мышь для камеры. Файлы подсказок создаются "
-                             "из картинок кнопок программой tools/pad_prompts.py, клавиши берутся из nx2navi.ini на "
+                             "из картинок кнопок программой tools/pad_prompts.py, клавиши берутся из OOT-PC.ini на "
                              "момент её запуска. Игра читает подсказки при запуске, так что они меняются после "
                              "перезапуска. Подсказки записаны в файлах игры, поэтому у кнопки, переназначенной на "
                              "вкладке управления, на экране остаётся прежняя подсказка, пока файлы не созданы заново.",
@@ -1015,7 +1174,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_PROMPTS_RESTART] = "подсказки сменятся после перезапуска",
     [UI_MENU_PROMPTS_OFF_SHAPE] = "выкл. при разрешении игры не 16:9",
     [UI_MENU_PROMPTS_OFF_MODS] = "выкл.: мод RomFS заменяет их файлы",
-    [UI_MENU_PROMPTS_OFF_PATCHES] = "выкл., пока задан NX2NAVI_ROMFS_PATCHES",
+    [UI_MENU_PROMPTS_OFF_PATCHES] = "выкл., пока задан OOTPC_ROMFS_PATCHES",
     [UI_MENU_RESTART] = "Перезапустить сейчас",
     [UI_MENU_RESTART_DESC] = "Закрывает игру и запускает её снова с новыми подсказками. Прогресс после последнего "
                              "сохранения будет потерян.",
@@ -1141,8 +1300,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                                  "меньше ждёт видеокарту, а кадры готовятся в отдельном потоке. Проверено только на Radeon RX 580: изредка "
                                  "возможен тёмный или мерцающий кадр, поэтому на новой карте оставьте выключенным.",
     [UI_MENU_DISCORD_RPC] = "Discord Rich Presence",
-    [UI_MENU_DISCORD_RPC_DESC] = "Пока игра запущена, показывает «Играю в NX2navi» со временем игры в статусе "
-                                 "Discord. Приложение выбирают discord_app_id и discord_image в nx2navi.ini.",
+    [UI_MENU_DISCORD_RPC_DESC] = "Пока игра запущена, показывает «Играю в The Legend of Zelda: Ocarina of Time PC» со временем игры в статусе "
+                                 "Discord. Приложение выбирают discord_app_id и discord_image в OOT-PC.ini.",
 
     [UI_MENU_ADV_WARNING] = "Эти настройки нужны для тестов и поиска неполадок. Меняйте их, только если знаете зачем.",
     [UI_MENU_GROUP_SCHED] = "Планирование", [UI_MENU_GROUP_SHADERS] = "Шейдеры и конвейеры",
@@ -1216,6 +1375,13 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_TRACE] = "Журнал производительности", [UI_MENU_TRACE_DESC] = "Пишет время кадров в файл.",
     [UI_MENU_FLIGHT] = "Запись последних кадров (для отчёта о фризе)",
     [UI_MENU_FLIGHT_DESC] = "Хранит короткую историю и сохраняет её, когда кадр подвисает.",
+    [UI_MENU_TEX_COMPACT] = "Уплотнение видеопамяти",
+    [UI_MENU_TEX_COMPACT_DESC] = "Переносит текстуры из полупустых блоков видеопамяти, чтобы эти блоки вернулись драйверу. Не даёт долгим сеансам исчерпать видеопамять и замедлиться после множества локаций. Действует после перезапуска.",
+    [UI_MENU_GAME_AO] = "Фоновое затенение",
+    [UI_MENU_GAME_AO_DESC] = "Мягкие тени игры в углах, складках и под предметами. Выключение немного экономит время видеокарты; сцена выглядит чуть более плоской.",
+    [UI_MENU_DISCORD_FIGHT] = "Показывать, с кем вы сражаетесь",
+    [UI_MENU_DISCORD_FIGHT_DESC] = "Добавляет в статус Discord врага, с которым вы сражаетесь, например \"Attacking: Deku Baba\", пока идёт бой.",
+    [UI_MENU_DISCORD_FIGHT_OFF] = "нужны статус Discord и показ места",
     [UI_MENU_FLIGHT_SPIKE_MS] = "Порог подвисания (мс)",
     [UI_MENU_FLIGHT_SPIKE_MS_DESC] = "Время кадра, которое считается подвисанием.",
     [UI_MENU_PASS_CRUMBS] = "Метки проходов GPU",
@@ -1274,10 +1440,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                                  "передать его другому игроку или приложить к сообщению об ошибке. Ключи и файлы игры "
                                  "в него не попадают.",
     [UI_MENU_SAVE_EXPORT_BUG] = "Экспорт для сообщения об ошибке",
-    [UI_MENU_SAVE_EXPORT_BUG_DESC] = "Тот же zip с журналом этого запуска и вашими настройками (nx2navi.ini): по ним "
+    [UI_MENU_SAVE_EXPORT_BUG_DESC] = "Тот же zip с журналом этого запуска и вашими настройками (OOT-PC.ini): по ним "
                                      "видно, что произошло и с какими настройками. Приложите его к сообщению об ошибке.",
     [UI_MENU_SAVE_IMPORT] = "Импорт сохранения",
-    [UI_MENU_SAVE_IMPORT_DESC] = "Выберите сохранение, которым с вами поделились (zip OOT-DEBUG-MENU-save). Оно заменит ваше "
+    [UI_MENU_SAVE_IMPORT_DESC] = "Выберите сохранение, которым с вами поделились (zip OOT-PC-save). Оно заменит ваше "
                                  "сохранение, все слоты, при следующем запуске: игра держит прогресс в памяти и "
                                  "записала бы его поверх сохранения, заменённого сейчас. Текущее сохранение сначала "
                                  "копируется в папку saves.",
@@ -1287,7 +1453,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                                         "удаляется.",
     [UI_MENU_SAVE_BUSY] = "выполняется…",
     [UI_MENU_SAVE_EXPORTED] = "Сохранено: %s",
-    [UI_MENU_SAVE_IMPORT_READY] = "Сохранение (OOT-DEBUG-MENU %s) загрузится при следующем запуске: выберите «Перезапустить» "
+    [UI_MENU_SAVE_IMPORT_READY] = "Сохранение (OOT-PC %s) загрузится при следующем запуске: выберите «Перезапустить» "
                                   "внизу. Текущее сохранение сначала копируется в папку saves.",
     [UI_MENU_SAVE_IMPORT_CANCELLED] = "Импорт отменён, ваше сохранение не изменилось.",
     [UI_MENU_SAVE_IMPORTED] = "При этом запуске импортировано сохранение. Прежнее сохранение лежит в %s",
@@ -1297,9 +1463,9 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_SAVE_E_WRITE] = "Не удалось записать zip в %s.",
     [UI_MENU_SAVE_E_READ] = "Не удалось прочитать %s.",
     [UI_MENU_SAVE_E_STAGE] = "Не удалось подготовить сохранение к следующему запуску; причина указана в журнале.",
-    [UI_MENU_SAVE_E_NOT_SAVE] = "%s — не сохранение, экспортированное OOT-DEBUG-MENU.",
+    [UI_MENU_SAVE_E_NOT_SAVE] = "%s — не сохранение, экспортированное OOT-PC.",
     [UI_MENU_SAVE_E_OTHER_GAME] = "%s — сохранение другой игры.",
-    [UI_MENU_SAVE_E_NEWER] = "%s создан более новой версией OOT-DEBUG-MENU: сначала обновите OOT-DEBUG-MENU.",
+    [UI_MENU_SAVE_E_NEWER] = "%s создан более новой версией OOT-PC: сначала обновите OOT-PC.",
     [UI_MENU_SAVE_E_DAMAGED] = "%s повреждён: скачайте его заново.",
     [UI_MENU_SAVE_E_UNSAFE] = "%s отклонён: в нём файлы вне сохранения, ссылки или слишком много данных.",
     [UI_MENU_CAPTURE_SAVED] = "Снимок ошибки %d сохранён",
@@ -1319,6 +1485,95 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_EXEFS_ON] = "Патчи кода в работе: файлов: %d.",
     [UI_MENU_MODS_REPLACES_BUILTIN] = "Патчи кода в работе: файлов: %d. Они заменяют собственный патч порта %s, "
                                       "который выключен, пока этот мод включён.",
+    [UI_MENU_TAB_COOP] = "Кооператив",
+    [UI_MENU_COOP_ON] = "Кооператив (эксперимент)",
+    [UI_MENU_COOP_ON_DESC] = "Совместная игра включена (мод Steam Co-op). Подключение к Steam…",
+    [UI_MENU_COOP_NO_LIBRARY] = "Файла библиотеки Steam, steam_api64.dll, нет рядом с игрой. Лаунчер кладёт его туда при запуске "
+                                "игры, из установленной у вас игры Steam: запустите игру из лаунчера при установленном Steam и "
+                                "хотя бы одной игре 2021 года или новее. Можно и самому скопировать файл из папки любой игры "
+                                "Steam в папку с ocarina.exe.",
+    [UI_MENU_COOP_OLD_LIBRARY] = "Файл steam_api64.dll рядом с игрой слишком старый для кооператива. Замените его файлом из более "
+                                 "новой игры Steam.",
+    [UI_MENU_COOP_NO_CLIENT] = "Steam не ответил. Запустите Steam, войдите в аккаунт и выберите «Искать Steam снова».",
+    [UI_MENU_COOP_RETRY] = "Искать Steam снова",
+    [UI_MENU_COOP_RETRY_DESC] = "Пробует связаться со Steam сейчас; игра и сама пробует каждые несколько секунд.",
+    [UI_MENU_COOP_CREATE] = "Создать комнату",
+    [UI_MENU_COOP_CREATE_DESC] = "Создаёт комнату до четырёх игроков. Вы получите ID комнаты, который можно передать, и сможете "
+                                 "пригласить друзей из Steam.",
+    [UI_MENU_COOP_JOIN] = "Войти в комнату",
+    [UI_MENU_COOP_JOIN_DESC] = "Вход в комнату, ID которой вам дал друг.",
+    [UI_MENU_COOP_ROOM_ID] = "ID комнаты",
+    [UI_MENU_COOP_ROOM_ID_DESC] = "Друзья вводят его в «Войти в комнату». Нажмите, чтобы скопировать. Войти может любой, у кого он "
+                                  "есть, поэтому передавайте его только тем, кого хотите видеть в своей игре.",
+    [UI_MENU_COOP_ROOM_ID_HINT] = "8 букв и цифр в виде XXXX-XXXX: в любом регистре, с дефисом или без.",
+    [UI_MENU_COOP_ROOM_ID_BAD] = "Это не ID комнаты: проверьте, нет ли опечатки.",
+    [UI_MENU_COOP_PASTE] = "Вставить",
+    [UI_MENU_COOP_PASTE_EMPTY] = "В буфере обмена нет текста.",
+    [UI_MENU_COOP_COPIED] = "скопировано",
+    [UI_MENU_COOP_OK] = "ОК",
+    [UI_MENU_COOP_JOINING] = "Вход в комнату…",
+    [UI_MENU_COOP_STOP] = "Остановить",
+    [UI_MENU_COOP_STOP_DESC] = "Прекращает попытку войти в комнату.",
+    [UI_MENU_COOP_INVITE] = "Пригласить друга",
+    [UI_MENU_COOP_INVITE_DESC] = "Отправляет другу приглашение через Steam. Оно дойдёт до друга, у которого запущена OOT-PC с "
+                                 "включённым кооперативом; остальные могут воспользоваться ID комнаты.",
+    [UI_MENU_COOP_INVITE_TITLE] = "Пригласить друга из Steam",
+    [UI_MENU_COOP_INVITE_NONE] = "Steam не показывает друзей.",
+    [UI_MENU_COOP_INVITE_SENT] = "Приглашение отправлено: %s.",
+    [UI_MENU_COOP_INVITE_IN_GAME] = "сейчас в кооперативе",
+    [UI_MENU_COOP_INVITE_ONLINE] = "в сети",
+    [UI_MENU_COOP_INVITE_OFFLINE] = "не в сети",
+    [UI_MENU_COOP_INVITE_STEAM] = "Окно приглашений Steam",
+    [UI_MENU_COOP_INVITE_CLOSE] = "Закрыть",
+    [UI_MENU_COOP_INVITED] = "%s приглашает вас в комнату.",
+    [UI_MENU_COOP_INVITED_JOIN] = "Войти в их комнату",
+    [UI_MENU_COOP_INVITED_JOIN_DESC] = "Вход в комнату, в которую вас пригласили.",
+    [UI_MENU_COOP_INVITED_NO] = "Не сейчас",
+    [UI_MENU_COOP_INVITED_NO_DESC] = "Убирает приглашение.",
+    [UI_MENU_COOP_PLAYERS] = "Игроки",
+    [UI_MENU_COOP_YOU] = "вы",
+    [UI_MENU_COOP_HOST] = "хост",
+    [UI_MENU_COOP_PLAYER_DESC] = "Игрок в комнате и область, в которой находится его Линк.",
+    [UI_MENU_COOP_PLAYER_REMOVE_DESC] = "Игрок в комнате. Как хост вы можете нажать, чтобы удалить его из комнаты.",
+    [UI_MENU_COOP_PLAYER_AWAY] = "не в мире",
+    [UI_MENU_COOP_REMOVE] = "Удалить",
+    [UI_MENU_COOP_REMOVE_CONFIRM] = "Удалить %s из комнаты? Вернуться в эту комнату он не сможет.",
+    [UI_MENU_COOP_LEAVE] = "Выйти из комнаты",
+    [UI_MENU_COOP_LEAVE_DESC] = "Выход из комнаты. Ваша игра и сохранение остаются как есть.",
+    [UI_MENU_COOP_LEAVE_CONFIRM] = "Выйти из комнаты?",
+    [UI_MENU_COOP_LEAVE_HOST] = "Вы хост: комната продолжит работу, хостом станет другой игрок.",
+    [UI_MENU_COOP_STAY] = "Остаться",
+    [UI_MENU_COOP_CHAT] = "Чат",
+    [UI_MENU_COOP_CHAT_WRITE] = "Написать сообщение",
+    [UI_MENU_COOP_CHAT_WRITE_DESC] = "Отправляет строку текста всем в комнате.",
+    [UI_MENU_COOP_SEND] = "Отправить",
+    [UI_MENU_COOP_CHAT_JOINED] = "%s входит в комнату",
+    [UI_MENU_COOP_CHAT_LEFT] = "%s выходит из комнаты",
+    [UI_MENU_COOP_SETTINGS] = "Настройки кооператива",
+    [UI_MENU_COOP_SHARE] = "Общий прогресс",
+    [UI_MENU_COOP_SHARE_DESC] = "В комнате достижения любого игрока засчитываются всем: сюжет, сундуки, двери, предметы и песни. "
+                                "Прежде чем что-либо из комнаты попадёт в ваше сохранение, оно копируется в coop-backup в папке "
+                                "профиля. Малые ключи, рупии, боеприпасы и сердца остаются вашими. Выкл.: общими остаются только "
+                                "имена и чат.",
+    [UI_MENU_COOP_NAMES] = "Показывать имена игроков",
+    [UI_MENU_COOP_NAMES_DESC] = "Показывает имя каждого другого игрока там, где его Линк стоит в вашем мире, и расстояние до "
+                                "него. Нужны включённые DLSS, FSR или TAA (только тогда меню знает, куда смотрит камера).",
+    [UI_MENU_COOP_CHAT_SHOW] = "Показывать чат поверх игры",
+    [UI_MENU_COOP_CHAT_SHOW_DESC] = "Новые строки чата и сообщения о входе и выходе игроков показываются несколько секунд, пока меню "
+                                    "закрыто.",
+    [UI_MENU_COOP_N_CREATE_FAILED] = "Steam не смог создать комнату. Попробуйте ещё раз чуть позже.",
+    [UI_MENU_COOP_N_NO_ROOM] = "Комнаты с таким ID нет: проверьте его или спросите друга, открыта ли ещё комната.",
+    [UI_MENU_COOP_N_FULL] = "Комната заполнена.",
+    [UI_MENU_COOP_N_REFUSED] = "Комната вас не впустила.",
+    [UI_MENU_COOP_N_NOT_OURS] = "Это не комната OOT-PC.",
+    [UI_MENU_COOP_N_OTHER_VERSION] = "У хоста комнаты другая версия OOT-PC или игры: используйте одинаковые версии.",
+    [UI_MENU_COOP_N_REMOVED] = "Хост удалил вас из комнаты.",
+    [UI_MENU_COOP_N_HOST_SILENT] = "Хост комнаты не ответил.",
+    [UI_MENU_COOP_N_LOST] = "Steam потерял соединение; комнаты больше нет.",
+    [UI_MENU_COOP_N_LEFT] = "Вы вышли из комнаты.",
+    [UI_MENU_COOP_LOCAL] = "Тестовый режим: замена Steam на этом ПК.",
+    [UI_MENU_COOP_TOAST_INVITE] = "%s приглашает вас в комнату: откройте вкладку «Кооператив» в меню.",
+    [UI_MENU_COOP_MOD_OFF] = "Совместная игра — это мод: включите Steam Co-op на вкладке «Моды» (или на экране модов в лаунчере) и перезапустите игру. Тогда можно играть с друзьями через Steam, у каждого своя игра и своё сохранение. Пока мод выключен, игра не использует сеть.",
 };
 
 static const char *const text_pt_br[UI_TEXT_COUNT] = {
@@ -1326,7 +1581,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
 
     [UI_MENU_TITLE] = "Configurações",
     [UI_MENU_TAB_SCREEN] = "Tela", [UI_MENU_TAB_GAME] = "Jogo", [UI_MENU_TAB_SOUND] = "Som",
-    [UI_MENU_TAB_CONTROLS] = "Controles", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Avançado", [UI_MENU_TAB_DEBUG] = "Depuração", [UI_MENU_TAB_RANDOMIZER] = "Randomizador",
+    [UI_MENU_TAB_CONTROLS] = "Controles", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Avançado", [UI_MENU_TAB_DEBUG] = "Depuração", [UI_MENU_TAB_PERFORMANCE] = "Desempenho", [UI_MENU_TAB_RANDOMIZER] = "Randomizador",
     [UI_MENU_TAB_MODS] = "Mods",
     [UI_MENU_MODS_BUILTIN] = "Embutidos no port", [UI_MENU_MODS_INSTALLED] = "Mods instalados",
     [UI_MENU_MODS_NONE] = "Nenhum mod ainda. Descompacte um mod na pasta mods, uma pasta por mod com a pasta romfs dentro, "
@@ -1363,8 +1618,8 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_DEFAULT_MARK] = "padrão",
     [UI_MENU_AFTER_RESTART] = "após reiniciar", [UI_MENU_SET_BY_ENV] = "definido por variável de ambiente",
     [UI_MENU_SAVE_FAILED] = "não foi possível salvar as configurações",
-    [UI_MENU_INI_UNKNOWN] = "nx2navi.ini: não são configurações desta versão, ignoradas: %s",
-    [UI_MENU_VERSION] = "OOT-DEBUG-MENU %s, jogo %s",
+    [UI_MENU_INI_UNKNOWN] = "OOT-PC.ini: não são configurações desta versão, ignoradas: %s",
+    [UI_MENU_VERSION] = "OOT-PC %s, jogo %s",
 
     [UI_MENU_FULLSCREEN] = "Tela cheia", [UI_MENU_FULLSCREEN_DESC] = "Jogar em tela cheia. F11 alterna.",
     [UI_MENU_WINDOW_SIZE] = "Tamanho da janela",
@@ -1577,8 +1832,8 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                  "menos pela GPU e prepara os quadros numa thread própria. Medido apenas numa Radeon RX 580: pode mostrar um "
                                  "quadro escuro ou piscando de vez em quando, então deixe desligado numa placa mais nova.",
     [UI_MENU_DISCORD_RPC] = "Discord Rich Presence",
-    [UI_MENU_DISCORD_RPC_DESC] = "Mostra \"Jogando NX2navi\" com o tempo de jogo no seu status do Discord "
-                                 "enquanto o jogo roda. discord_app_id e discord_image no nx2navi.ini escolhem a "
+    [UI_MENU_DISCORD_RPC_DESC] = "Mostra \"Jogando The Legend of Zelda: Ocarina of Time PC\" com o tempo de jogo no seu status do Discord "
+                                 "enquanto o jogo roda. discord_app_id e discord_image no OOT-PC.ini escolhem a "
                                  "aplicação.",
 
     [UI_MENU_ADV_WARNING] = "Estas configurações são para testes e solução de problemas. Altere-as só quando souber "
@@ -1655,6 +1910,13 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_TRACE] = "Registro de desempenho", [UI_MENU_TRACE_DESC] = "Grava os tempos de quadro num arquivo.",
     [UI_MENU_FLIGHT] = "Caixa-preta",
     [UI_MENU_FLIGHT_DESC] = "Guarda um histórico curto e o salva quando um quadro trava.",
+    [UI_MENU_TEX_COMPACT] = "Compactação da memória de vídeo",
+    [UI_MENU_TEX_COMPACT_DESC] = "Move texturas de blocos meio vazios da memória de vídeo para que esses blocos voltem ao driver. Evita que sessões longas esgotem a memória de vídeo e fiquem lentas depois de muitas áreas. Vale após reiniciar.",
+    [UI_MENU_GAME_AO] = "Oclusão de ambiente",
+    [UI_MENU_GAME_AO_DESC] = "As sombras suaves do jogo em cantos, dobras e sob objetos. Desligada, poupa um pouco de tempo da placa de vídeo; a cena fica um pouco mais plana.",
+    [UI_MENU_DISCORD_FIGHT] = "Mostrar contra o que você luta",
+    [UI_MENU_DISCORD_FIGHT_DESC] = "Adiciona ao seu status do Discord o inimigo que você está enfrentando, como \"Attacking: Deku Baba\", enquanto a luta durar.",
+    [UI_MENU_DISCORD_FIGHT_OFF] = "precisa do status do Discord e do local mostrado",
     [UI_MENU_FLIGHT_SPIKE_MS] = "Limite de travamento (ms)",
     [UI_MENU_FLIGHT_SPIKE_MS_DESC] = "Tempo de quadro que conta como travamento.",
     [UI_MENU_PASS_CRUMBS] = "Marcas de passagem da GPU",
@@ -1743,7 +2005,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                              "então os ícones de A mostram B, ou círculo). Teclado e mouse: a tecla de cada botão (E, "
                              "Ctrl, Espaço, clique esquerdo...), WASD para andar e o mouse para a câmera. Os arquivos "
                              "dos ícones são feitos a partir de imagens de botões com tools/pad_prompts.py, com as "
-                             "teclas como o nx2navi.ini as define quando ele roda. O jogo lê os ícones ao iniciar, "
+                             "teclas como o OOT-PC.ini as define quando ele roda. O jogo lê os ícones ao iniciar, "
                              "então eles mudam depois de reiniciar. Eles fazem parte dos arquivos do jogo, então um "
                              "botão remapeado em Controles continua com o ícone antigo na tela até os arquivos serem "
                              "feitos de novo.",
@@ -1763,7 +2025,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PROMPTS_RESTART] = "os ícones mudam após reiniciar",
     [UI_MENU_PROMPTS_OFF_SHAPE] = "desligados numa resolução de jogo que não é 16:9",
     [UI_MENU_PROMPTS_OFF_MODS] = "desligados: um mod de RomFS substitui os arquivos deles",
-    [UI_MENU_PROMPTS_OFF_PATCHES] = "desligados enquanto NX2NAVI_ROMFS_PATCHES está definido",
+    [UI_MENU_PROMPTS_OFF_PATCHES] = "desligados enquanto OOTPC_ROMFS_PATCHES está definido",
     [UI_MENU_RESTART] = "Reiniciar agora",
     [UI_MENU_RESTART_DESC] = "Fecha o jogo e o abre de novo com os novos ícones. O progresso desde o último "
                              "salvamento é perdido.",
@@ -1794,7 +2056,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PCSS_DESC] = "Sombras do sol nítidas onde um objeto toca o chão e mais suaves quanto mais longe a sombra "
                           "cai (PCSS). 0 mantém o filtro do jogo. Vale no próximo início.",
     [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
-    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS para a cena 3D (placas NVIDIA RTX; nvngx_dlss.dll ao lado do nx2navi.exe): bordas "
+    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS para a cena 3D (placas NVIDIA RTX; nvngx_dlss.dll ao lado do ocarina.exe): bordas "
                           "mais suaves e menos cintilação. O HUD não é afetado. O modo abaixo define a resolução de "
                           "onde ele parte. Vale após reiniciar.",
     [UI_MENU_DLSS] = "Modo do DLSS",
@@ -1859,10 +2121,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                  "outro jogador ou anexar a um relato de bug. Ele nunca contém suas chaves nem arquivos "
                                  "do jogo.",
     [UI_MENU_SAVE_EXPORT_BUG] = "Exportar para relato de bug",
-    [UI_MENU_SAVE_EXPORT_BUG_DESC] = "O mesmo zip com o log desta execução e suas configurações (nx2navi.ini), que "
+    [UI_MENU_SAVE_EXPORT_BUG_DESC] = "O mesmo zip com o log desta execução e suas configurações (OOT-PC.ini), que "
                                      "mostram o que aconteceu e com quais configurações. Anexe-o ao seu relato de bug.",
     [UI_MENU_SAVE_IMPORT] = "Importar save",
-    [UI_MENU_SAVE_IMPORT_DESC] = "Escolha um save que alguém compartilhou (um zip OOT-DEBUG-MENU-save). Ele substitui seu save, "
+    [UI_MENU_SAVE_IMPORT_DESC] = "Escolha um save que alguém compartilhou (um zip OOT-PC-save). Ele substitui seu save, "
                                  "todos os slots, na próxima inicialização: o jogo mantém seu progresso na memória e o "
                                  "gravaria por cima de um save substituído agora. Seu save atual é copiado antes para a "
                                  "pasta saves.",
@@ -1872,7 +2134,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                         "descartado.",
     [UI_MENU_SAVE_BUSY] = "trabalhando…",
     [UI_MENU_SAVE_EXPORTED] = "Salvo como %s",
-    [UI_MENU_SAVE_IMPORT_READY] = "O save (OOT-DEBUG-MENU %s) é carregado na próxima inicialização: selecione Reiniciar abaixo. "
+    [UI_MENU_SAVE_IMPORT_READY] = "O save (OOT-PC %s) é carregado na próxima inicialização: selecione Reiniciar abaixo. "
                                   "Seu save atual é copiado antes para a pasta saves.",
     [UI_MENU_SAVE_IMPORT_CANCELLED] = "Importação cancelada; seu save continua como estava.",
     [UI_MENU_SAVE_IMPORTED] = "Um save compartilhado foi importado nesta inicialização. Seu save anterior está em %s",
@@ -1882,9 +2144,9 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_SAVE_E_WRITE] = "Não foi possível gravar o zip em %s.",
     [UI_MENU_SAVE_E_READ] = "Não foi possível ler %s.",
     [UI_MENU_SAVE_E_STAGE] = "Não foi possível preparar o save para a próxima inicialização; o log diz o motivo.",
-    [UI_MENU_SAVE_E_NOT_SAVE] = "%s não é um save exportado pelo OOT-DEBUG-MENU.",
+    [UI_MENU_SAVE_E_NOT_SAVE] = "%s não é um save exportado pelo OOT-PC.",
     [UI_MENU_SAVE_E_OTHER_GAME] = "%s é um save de outro jogo.",
-    [UI_MENU_SAVE_E_NEWER] = "%s foi feito por um OOT-DEBUG-MENU mais novo: atualize o OOT-DEBUG-MENU primeiro.",
+    [UI_MENU_SAVE_E_NEWER] = "%s foi feito por um OOT-PC mais novo: atualize o OOT-PC primeiro.",
     [UI_MENU_SAVE_E_DAMAGED] = "%s está danificado: baixe-o de novo.",
     [UI_MENU_SAVE_E_UNSAFE] = "%s foi recusado: contém arquivos fora de um save, links ou dados demais.",
     [UI_MENU_CAPTURE_SAVED] = "Captura de bug %d salva",
@@ -1904,6 +2166,94 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_EXEFS_ON] = "Patches de código em uso: %d arquivos.",
     [UI_MENU_MODS_REPLACES_BUILTIN] = "Patches de código em uso: %d arquivos. Eles substituem o patch do próprio port "
                                       "%s, que fica desligado enquanto este mod está ligado.",
+    [UI_MENU_TAB_COOP] = "Co-op",
+    [UI_MENU_COOP_ON] = "Co-op (experimental)",
+    [UI_MENU_COOP_ON_DESC] = "O co-op está ligado (o mod Steam Co-op). Conectando à Steam…",
+    [UI_MENU_COOP_NO_LIBRARY] = "O arquivo da biblioteca da Steam, steam_api64.dll, não está ao lado do jogo. O launcher o coloca "
+                                "lá ao iniciar o jogo, a partir de um jogo da Steam que você tem instalado: inicie o jogo pelo "
+                                "launcher, com a Steam e pelo menos um jogo de 2021 ou mais novo instalados. Você também pode "
+                                "copiar o arquivo da pasta de um jogo da Steam para a pasta do ocarina.exe.",
+    [UI_MENU_COOP_OLD_LIBRARY] = "O steam_api64.dll ao lado do jogo é antigo demais para o co-op. Troque por um de um jogo mais "
+                                 "novo da Steam.",
+    [UI_MENU_COOP_NO_CLIENT] = "A Steam não respondeu. Abra a Steam, entre na sua conta e escolha Procurar a Steam de novo.",
+    [UI_MENU_COOP_RETRY] = "Procurar a Steam de novo",
+    [UI_MENU_COOP_RETRY_DESC] = "Tenta falar com a Steam agora; o jogo também tenta sozinho a cada poucos segundos.",
+    [UI_MENU_COOP_CREATE] = "Criar uma sala",
+    [UI_MENU_COOP_CREATE_DESC] = "Cria uma sala para até quatro jogadores. Você recebe um ID da sala para passar adiante e pode "
+                                 "convidar amigos da Steam.",
+    [UI_MENU_COOP_JOIN] = "Entrar em uma sala",
+    [UI_MENU_COOP_JOIN_DESC] = "Entra na sala cujo ID um amigo passou para você.",
+    [UI_MENU_COOP_ROOM_ID] = "ID da sala",
+    [UI_MENU_COOP_ROOM_ID_DESC] = "Os amigos digitam isto em Entrar em uma sala. Pressione para copiar. Quem tiver o ID pode "
+                                  "entrar, então passe só para quem você quer no seu jogo.",
+    [UI_MENU_COOP_ROOM_ID_HINT] = "8 letras e números, como XXXX-XXXX: maiúsculas ou minúsculas, com ou sem o traço.",
+    [UI_MENU_COOP_ROOM_ID_BAD] = "Isto não é um ID de sala: veja se há algum caractere errado.",
+    [UI_MENU_COOP_PASTE] = "Colar",
+    [UI_MENU_COOP_PASTE_EMPTY] = "A área de transferência não tem texto.",
+    [UI_MENU_COOP_COPIED] = "copiado",
+    [UI_MENU_COOP_OK] = "OK",
+    [UI_MENU_COOP_JOINING] = "Entrando na sala…",
+    [UI_MENU_COOP_STOP] = "Parar",
+    [UI_MENU_COOP_STOP_DESC] = "Para de tentar entrar na sala.",
+    [UI_MENU_COOP_INVITE] = "Convidar um amigo",
+    [UI_MENU_COOP_INVITE_DESC] = "Envia um convite da Steam a um amigo. Ele chega a quem está com o OOT-PC aberto e o co-op "
+                                 "ligado; os outros podem usar o ID da sala.",
+    [UI_MENU_COOP_INVITE_TITLE] = "Convidar um amigo da Steam",
+    [UI_MENU_COOP_INVITE_NONE] = "A Steam não mostra amigos.",
+    [UI_MENU_COOP_INVITE_SENT] = "Convite enviado para %s.",
+    [UI_MENU_COOP_INVITE_IN_GAME] = "no co-op agora",
+    [UI_MENU_COOP_INVITE_ONLINE] = "online",
+    [UI_MENU_COOP_INVITE_OFFLINE] = "offline",
+    [UI_MENU_COOP_INVITE_STEAM] = "Janela de convites da Steam",
+    [UI_MENU_COOP_INVITE_CLOSE] = "Fechar",
+    [UI_MENU_COOP_INVITED] = "%s convida você para uma sala.",
+    [UI_MENU_COOP_INVITED_JOIN] = "Entrar na sala",
+    [UI_MENU_COOP_INVITED_JOIN_DESC] = "Entra na sala para a qual você foi convidado.",
+    [UI_MENU_COOP_INVITED_NO] = "Agora não",
+    [UI_MENU_COOP_INVITED_NO_DESC] = "Dispensa o convite.",
+    [UI_MENU_COOP_PLAYERS] = "Jogadores",
+    [UI_MENU_COOP_YOU] = "você",
+    [UI_MENU_COOP_HOST] = "anfitrião",
+    [UI_MENU_COOP_PLAYER_DESC] = "Um jogador da sala e a área em que o Link dele está.",
+    [UI_MENU_COOP_PLAYER_REMOVE_DESC] = "Um jogador da sala. Como anfitrião, você pode pressionar para removê-lo da sala.",
+    [UI_MENU_COOP_PLAYER_AWAY] = "fora do mundo",
+    [UI_MENU_COOP_REMOVE] = "Remover",
+    [UI_MENU_COOP_REMOVE_CONFIRM] = "Remover %s da sala? Essa pessoa não poderá voltar a esta sala.",
+    [UI_MENU_COOP_LEAVE] = "Sair da sala",
+    [UI_MENU_COOP_LEAVE_DESC] = "Sai da sala. Seu jogo e seu save continuam como estão.",
+    [UI_MENU_COOP_LEAVE_CONFIRM] = "Sair da sala?",
+    [UI_MENU_COOP_LEAVE_HOST] = "Você é o anfitrião: a sala continua com outro jogador como anfitrião.",
+    [UI_MENU_COOP_STAY] = "Ficar",
+    [UI_MENU_COOP_CHAT] = "Chat",
+    [UI_MENU_COOP_CHAT_WRITE] = "Escrever uma mensagem",
+    [UI_MENU_COOP_CHAT_WRITE_DESC] = "Envia uma linha de texto a todos na sala.",
+    [UI_MENU_COOP_SEND] = "Enviar",
+    [UI_MENU_COOP_CHAT_JOINED] = "%s entrou na sala",
+    [UI_MENU_COOP_CHAT_LEFT] = "%s saiu da sala",
+    [UI_MENU_COOP_SETTINGS] = "Configurações do co-op",
+    [UI_MENU_COOP_SHARE] = "Compartilhar progresso",
+    [UI_MENU_COOP_SHARE_DESC] = "Em uma sala, o que qualquer um conquista vale para todos: história, baús, portas, itens e "
+                                "canções. Antes de algo da sala chegar ao seu save, ele é copiado para coop-backup na pasta do "
+                                "perfil. Chaves pequenas, rupias, munição e corações continuam seus. Desligado: só nomes e chat "
+                                "são compartilhados.",
+    [UI_MENU_COOP_NAMES] = "Mostrar nomes dos jogadores",
+    [UI_MENU_COOP_NAMES_DESC] = "Mostra o nome de cada outro jogador onde o Link dele está no seu mundo, com a distância. Precisa "
+                                "de DLSS, FSR ou TAA ligado (só assim o menu sabe para onde a câmera olha).",
+    [UI_MENU_COOP_CHAT_SHOW] = "Mostrar o chat sobre o jogo",
+    [UI_MENU_COOP_CHAT_SHOW_DESC] = "Novas linhas do chat e quem entrou ou saiu aparecem por alguns segundos com o menu fechado.",
+    [UI_MENU_COOP_N_CREATE_FAILED] = "A Steam não conseguiu criar a sala. Tente de novo em instantes.",
+    [UI_MENU_COOP_N_NO_ROOM] = "Nenhuma sala tem esse ID: confira, ou pergunte ao seu amigo se a sala ainda está aberta.",
+    [UI_MENU_COOP_N_FULL] = "A sala está cheia.",
+    [UI_MENU_COOP_N_REFUSED] = "A sala não deixou você entrar.",
+    [UI_MENU_COOP_N_NOT_OURS] = "Essa não é uma sala do OOT-PC.",
+    [UI_MENU_COOP_N_OTHER_VERSION] = "O anfitrião da sala usa outra versão do OOT-PC ou do jogo: usem as mesmas versões.",
+    [UI_MENU_COOP_N_REMOVED] = "O anfitrião removeu você da sala.",
+    [UI_MENU_COOP_N_HOST_SILENT] = "O anfitrião da sala não respondeu.",
+    [UI_MENU_COOP_N_LOST] = "A Steam perdeu a conexão; a sala acabou.",
+    [UI_MENU_COOP_N_LEFT] = "Você saiu da sala.",
+    [UI_MENU_COOP_LOCAL] = "Modo de teste: um substituto da Steam neste PC.",
+    [UI_MENU_COOP_TOAST_INVITE] = "%s convida você para uma sala: abra a aba Co-op do menu.",
+    [UI_MENU_COOP_MOD_OFF] = "O co-op é um mod: ative o Steam Co-op na aba Mods (ou na tela de mods do launcher) e reinicie o jogo. Assim você joga com amigos pela Steam, cada um no seu jogo e no seu save. Com ele desligado o jogo não usa a rede.",
 };
 
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
@@ -1920,7 +2270,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_TAB_AMIIBO] = "amiibo",
     [UI_MENU_TAB_MENU] = "菜单",
     [UI_MENU_TAB_ADVANCED] = "高级",
-    [UI_MENU_TAB_DEBUG] = "调试", [UI_MENU_TAB_RANDOMIZER] = "随机化",
+    [UI_MENU_TAB_DEBUG] = "调试", [UI_MENU_TAB_PERFORMANCE] = "性能", [UI_MENU_TAB_RANDOMIZER] = "随机化",
     [UI_MENU_TAB_MODS] = "模组",
     [UI_MENU_MODS_BUILTIN] = "移植版内置", [UI_MENU_MODS_INSTALLED] = "已安装的模组",
     [UI_MENU_MODS_NONE] = "还没有模组。把模组解压到 mods 文件夹，每个模组一个文件夹，里面放 romfs 文件夹，然后重启游戏。"
@@ -1954,8 +2304,8 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_AFTER_RESTART] = "重启后生效",
     [UI_MENU_SET_BY_ENV] = "由环境变量设定",
     [UI_MENU_SAVE_FAILED] = "无法保存设置",
-    [UI_MENU_INI_UNKNOWN] = "nx2navi.ini：以下不是此版本的设置，已忽略：%s",
-    [UI_MENU_VERSION] = "OOT-DEBUG-MENU %s，游戏 %s",
+    [UI_MENU_INI_UNKNOWN] = "OOT-PC.ini：以下不是此版本的设置，已忽略：%s",
+    [UI_MENU_VERSION] = "OOT-PC %s，游戏 %s",
     [UI_MENU_FULLSCREEN] = "全屏",
     [UI_MENU_FULLSCREEN_DESC] = "全屏运行。按 F11 切换。",
     [UI_MENU_WINDOW_SIZE] = "窗口大小",
@@ -2249,7 +2599,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
                                  "将显存占用控制在驱动报告的可用范围内，减少等待 GPU 的时间，并在独立线程上准备帧。"
                                  "仅在 Radeon RX 580 上测试过：偶尔可能出现变暗或闪烁的画面，较新的显卡请保持关闭。",
     [UI_MENU_DISCORD_RPC] = "Discord Rich Presence",
-    [UI_MENU_DISCORD_RPC_DESC] = "游戏运行时在 Discord 状态中显示“正在玩 NX2navi”及游戏时长。nx2navi.ini 中的 "
+    [UI_MENU_DISCORD_RPC_DESC] = "游戏运行时在 Discord 状态中显示“正在玩 The Legend of Zelda: Ocarina of Time PC”及游戏时长。OOT-PC.ini 中的 "
                                  "discord_app_id 和 discord_image 选择应用。",
     [UI_MENU_ADV_WARNING] = "这些设置用于测试和排查问题，请在了解原因后再修改。",
     [UI_MENU_GROUP_SCHED] = "调度",
@@ -2353,6 +2703,13 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_TRACE_DESC] = "把每帧耗时写入文件。",
     [UI_MENU_FLIGHT] = "飞行记录仪",
     [UI_MENU_FLIGHT_DESC] = "保留一小段历史记录，在画面卡住时保存。",
+    [UI_MENU_TEX_COMPACT] = "显存整理",
+    [UI_MENU_TEX_COMPACT_DESC] = "将纹理移出半空的显存块，使这些块归还给驱动。避免长时间游玩、经过多个区域后显存耗尽而变慢。重启后生效。",
+    [UI_MENU_GAME_AO] = "环境光遮蔽",
+    [UI_MENU_GAME_AO_DESC] = "游戏在角落、褶皱和物体下方的柔和阴影。关闭可略微节省 GPU 时间；画面会略显平淡。",
+    [UI_MENU_DISCORD_FIGHT] = "显示正在战斗的敌人",
+    [UI_MENU_DISCORD_FIGHT_DESC] = "战斗期间，在 Discord 状态中加入你正在对战的敌人，例如 \"Attacking: Deku Baba\"。",
+    [UI_MENU_DISCORD_FIGHT_OFF] = "需要开启 Discord 状态和显示位置",
     [UI_MENU_FLIGHT_SPIKE_MS] = "卡顿阈值（ms）",
     [UI_MENU_FLIGHT_SPIKE_MS_DESC] = "算作卡顿的帧时间。",
     [UI_MENU_PASS_CRUMBS] = "GPU 渲染通道标记",
@@ -2434,7 +2791,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
                              "Xbox 和 PlayStation：该手柄的按键（LB、RB、LT、RT、Menu、View；L1、R1、L2、R2、Options、Create），"
                              "A、B、X、Y 显示为上方布局所按下的按键（使用 Nintendo（A 在右）时由右侧按键执行 A，因此 A 的提示显示 B 或圆圈）。"
                              "键盘和鼠标：每个按键对应的键（E、Ctrl、空格、左键……），WASD 移动，鼠标控制镜头。"
-                             "提示文件由 tools/pad_prompts.py 根据按键图片生成，键位以生成时 nx2navi.ini 中的设置为准。"
+                             "提示文件由 tools/pad_prompts.py 根据按键图片生成，键位以生成时 OOT-PC.ini 中的设置为准。"
                              "游戏在启动时读取按键提示，因此重启后才会改变。"
                              "提示属于游戏文件，在“操作”中重新映射的按键在重新生成文件之前仍显示原来的提示。",
     [UI_MENU_PROMPTS_NINTENDO] = "Nintendo",
@@ -2453,7 +2810,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_PROMPTS_RESTART] = "按键提示重启后生效",
     [UI_MENU_PROMPTS_OFF_SHAPE] = "游戏分辨率不是 16:9 时关闭",
     [UI_MENU_PROMPTS_OFF_MODS] = "已关闭：RomFS 模组替换了它们的文件",
-    [UI_MENU_PROMPTS_OFF_PATCHES] = "设置了 NX2NAVI_ROMFS_PATCHES 时关闭",
+    [UI_MENU_PROMPTS_OFF_PATCHES] = "设置了 OOTPC_ROMFS_PATCHES 时关闭",
     [UI_MENU_RESTART] = "立即重启",
     [UI_MENU_RESTART_DESC] = "关闭游戏并以新的按键提示重新启动。上次存档之后的进度将会丢失。",
     [UI_MENU_RESTART_CONFIRM] = "现在重启游戏？上次存档之后的进度将会丢失。",
@@ -2479,7 +2836,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_PCSS] = "柔和阴影",
     [UI_MENU_PCSS_DESC] = "物体接触地面处的太阳阴影锐利，阴影投得越远越柔和（PCSS）。0 保留游戏自身的过滤。下次启动时生效。",
     [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
-    [UI_MENU_DLAA_DESC] = "用于 3D 场景的 NVIDIA DLSS（NVIDIA RTX 显卡；nvngx_dlss.dll 放在 nx2navi.exe 旁）：边缘更平滑，闪烁更少。HUD "
+    [UI_MENU_DLAA_DESC] = "用于 3D 场景的 NVIDIA DLSS（NVIDIA RTX 显卡；nvngx_dlss.dll 放在 ocarina.exe 旁）：边缘更平滑，闪烁更少。HUD "
                           "不受影响。下方的模式决定它的工作分辨率。重启后生效。",
     [UI_MENU_DLSS] = "DLSS 模式",
     [UI_MENU_DLSS_DESC] = "DLAA 以全分辨率绘制 3D 场景。质量、平衡、性能和超级性能分别以 67%、58%、50% 和 33% 绘制，再由 DLSS 放大，以节省 GPU 时间；它们会取代 3D 渲染比例。立即生效。",
@@ -2532,10 +2889,10 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_SAVE_EXPORT_DESC] = "将你的存档（所有存档位）写入“下载”文件夹中的一个 zip 文件，可分享给其他玩家或附在错误报告中。"
                                  "其中不含你的密钥和游戏文件。",
     [UI_MENU_SAVE_EXPORT_BUG] = "导出存档用于错误报告",
-    [UI_MENU_SAVE_EXPORT_BUG_DESC] = "同样的 zip，另附本次运行的日志和你的设置（nx2navi.ini），可看出发生了什么以及使用了哪些"
+    [UI_MENU_SAVE_EXPORT_BUG_DESC] = "同样的 zip，另附本次运行的日志和你的设置（OOT-PC.ini），可看出发生了什么以及使用了哪些"
                                      "设置。请将其附在错误报告中。",
     [UI_MENU_SAVE_IMPORT] = "导入存档",
-    [UI_MENU_SAVE_IMPORT_DESC] = "选择别人分享的存档（OOT-DEBUG-MENU-save zip）。它会在下次启动时替换你的存档（所有存档位）：游戏"
+    [UI_MENU_SAVE_IMPORT_DESC] = "选择别人分享的存档（OOT-PC-save zip）。它会在下次启动时替换你的存档（所有存档位）：游戏"
                                  "把进度保存在内存中，若现在替换，游戏会把进度写回并覆盖它。你当前的存档会先复制到 saves "
                                  "文件夹。",
     [UI_MENU_SAVE_IMPORT_WAITING] = "下次启动时",
@@ -2543,7 +2900,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_SAVE_IMPORT_CANCEL_DESC] = "保留你的存档不变：丢弃等待下次启动的存档。",
     [UI_MENU_SAVE_BUSY] = "处理中…",
     [UI_MENU_SAVE_EXPORTED] = "已保存为 %s",
-    [UI_MENU_SAVE_IMPORT_READY] = "该存档（OOT-DEBUG-MENU %s）将在下次启动时载入：请选择下方的“重启”。你当前的存档会先复制到 saves "
+    [UI_MENU_SAVE_IMPORT_READY] = "该存档（OOT-PC %s）将在下次启动时载入：请选择下方的“重启”。你当前的存档会先复制到 saves "
                                   "文件夹。",
     [UI_MENU_SAVE_IMPORT_CANCELLED] = "已取消导入，你的存档保持不变。",
     [UI_MENU_SAVE_IMPORTED] = "本次启动时已导入分享的存档。你原来的存档在 %s",
@@ -2553,9 +2910,9 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_SAVE_E_WRITE] = "无法将 zip 写入 %s。",
     [UI_MENU_SAVE_E_READ] = "无法读取 %s。",
     [UI_MENU_SAVE_E_STAGE] = "无法为下次启动准备存档；原因见日志。",
-    [UI_MENU_SAVE_E_NOT_SAVE] = "%s 不是 OOT-DEBUG-MENU 导出的存档。",
+    [UI_MENU_SAVE_E_NOT_SAVE] = "%s 不是 OOT-PC 导出的存档。",
     [UI_MENU_SAVE_E_OTHER_GAME] = "%s 是其他游戏的存档。",
-    [UI_MENU_SAVE_E_NEWER] = "%s 由更新版本的 OOT-DEBUG-MENU 制作：请先更新 OOT-DEBUG-MENU。",
+    [UI_MENU_SAVE_E_NEWER] = "%s 由更新版本的 OOT-PC 制作：请先更新 OOT-PC。",
     [UI_MENU_SAVE_E_DAMAGED] = "%s 已损坏：请重新下载。",
     [UI_MENU_SAVE_E_UNSAFE] = "%s 被拒绝：其中含有存档以外的文件、链接或过多的数据。",
     [UI_MENU_CAPTURE_SAVED] = "错误快照 %d 已保存",
@@ -2570,6 +2927,85 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_EXEFS_OTHER] = "它的代码补丁（exefs）是为其他游戏版本制作的。",
     [UI_MENU_MODS_EXEFS_ON] = "正在使用的代码补丁：%d 个文件。",
     [UI_MENU_MODS_REPLACES_BUILTIN] = "正在使用的代码补丁：%d 个文件。它们取代本移植自带的补丁 %s，此模组开启时该补丁保持关闭。",
+    [UI_MENU_TAB_COOP] = "合作",
+    [UI_MENU_COOP_ON] = "合作（实验性）",
+    [UI_MENU_COOP_ON_DESC] = "联机合作已开启（Steam Co-op 模组）。正在连接 Steam…",
+    [UI_MENU_COOP_NO_LIBRARY] = "游戏旁边没有 Steam 的库文件 steam_api64.dll。启动器在启动游戏时会从你已安装的 Steam 游戏里把它放到那里：请在安装了 Steam 和至少一款 2021 "
+                                "年或更新的游戏的情况下，从启动器启动游戏。你也可以自己从某个 Steam 游戏的文件夹里把这个文件复制到 ocarina.exe 所在的文件夹。",
+    [UI_MENU_COOP_OLD_LIBRARY] = "游戏旁边的 steam_api64.dll 对合作模式来说太旧。请换成较新的 Steam 游戏里的那个文件。",
+    [UI_MENU_COOP_NO_CLIENT] = "Steam 没有响应。请启动 Steam 并登录，然后选择“重新查找 Steam”。",
+    [UI_MENU_COOP_RETRY] = "重新查找 Steam",
+    [UI_MENU_COOP_RETRY_DESC] = "立即尝试连接 Steam；游戏每隔几秒也会自动尝试。",
+    [UI_MENU_COOP_CREATE] = "创建房间",
+    [UI_MENU_COOP_CREATE_DESC] = "创建一个最多四人的房间。你会得到一个可以告诉别人的房间 ID，也可以邀请 Steam 好友。",
+    [UI_MENU_COOP_JOIN] = "加入房间",
+    [UI_MENU_COOP_JOIN_DESC] = "加入朋友给你的房间 ID 对应的房间。",
+    [UI_MENU_COOP_ROOM_ID] = "房间 ID",
+    [UI_MENU_COOP_ROOM_ID_DESC] = "朋友在“加入房间”里输入它。按下即可复制。拿到它的人都能加入，所以只告诉你想一起玩的人。",
+    [UI_MENU_COOP_ROOM_ID_HINT] = "8 位字母和数字，形如 XXXX-XXXX：不分大小写，带不带连字符都可以。",
+    [UI_MENU_COOP_ROOM_ID_BAD] = "这不是房间 ID：请检查是否输错了字符。",
+    [UI_MENU_COOP_PASTE] = "粘贴",
+    [UI_MENU_COOP_PASTE_EMPTY] = "剪贴板里没有文字。",
+    [UI_MENU_COOP_COPIED] = "已复制",
+    [UI_MENU_COOP_OK] = "确定",
+    [UI_MENU_COOP_JOINING] = "正在进入房间…",
+    [UI_MENU_COOP_STOP] = "停止",
+    [UI_MENU_COOP_STOP_DESC] = "停止尝试进入房间。",
+    [UI_MENU_COOP_INVITE] = "邀请好友",
+    [UI_MENU_COOP_INVITE_DESC] = "向好友发送 Steam 邀请。只有正在运行 OOT-PC 并开启了合作模式的好友能收到；其他人可以使用房间 ID。",
+    [UI_MENU_COOP_INVITE_TITLE] = "邀请 Steam 好友",
+    [UI_MENU_COOP_INVITE_NONE] = "Steam 没有显示任何好友。",
+    [UI_MENU_COOP_INVITE_SENT] = "已向 %s 发送邀请。",
+    [UI_MENU_COOP_INVITE_IN_GAME] = "正在合作模式中",
+    [UI_MENU_COOP_INVITE_ONLINE] = "在线",
+    [UI_MENU_COOP_INVITE_OFFLINE] = "离线",
+    [UI_MENU_COOP_INVITE_STEAM] = "Steam 的邀请窗口",
+    [UI_MENU_COOP_INVITE_CLOSE] = "关闭",
+    [UI_MENU_COOP_INVITED] = "%s 邀请你加入房间。",
+    [UI_MENU_COOP_INVITED_JOIN] = "加入对方的房间",
+    [UI_MENU_COOP_INVITED_JOIN_DESC] = "加入邀请你的那个房间。",
+    [UI_MENU_COOP_INVITED_NO] = "暂不",
+    [UI_MENU_COOP_INVITED_NO_DESC] = "忽略这次邀请。",
+    [UI_MENU_COOP_PLAYERS] = "玩家",
+    [UI_MENU_COOP_YOU] = "你",
+    [UI_MENU_COOP_HOST] = "房主",
+    [UI_MENU_COOP_PLAYER_DESC] = "房间里的一名玩家，以及其林克所在的区域。",
+    [UI_MENU_COOP_PLAYER_REMOVE_DESC] = "房间里的一名玩家。作为房主，你可以按下将其移出房间。",
+    [UI_MENU_COOP_PLAYER_AWAY] = "不在世界中",
+    [UI_MENU_COOP_REMOVE] = "移出",
+    [UI_MENU_COOP_REMOVE_CONFIRM] = "将 %s 移出房间？对方将无法再回到这个房间。",
+    [UI_MENU_COOP_LEAVE] = "离开房间",
+    [UI_MENU_COOP_LEAVE_DESC] = "离开房间。你的游戏和存档保持现状。",
+    [UI_MENU_COOP_LEAVE_CONFIRM] = "离开房间？",
+    [UI_MENU_COOP_LEAVE_HOST] = "你是房主：房间会继续存在，由另一名玩家担任房主。",
+    [UI_MENU_COOP_STAY] = "留下",
+    [UI_MENU_COOP_CHAT] = "聊天",
+    [UI_MENU_COOP_CHAT_WRITE] = "写消息",
+    [UI_MENU_COOP_CHAT_WRITE_DESC] = "向房间里的所有人发送一行文字。",
+    [UI_MENU_COOP_SEND] = "发送",
+    [UI_MENU_COOP_CHAT_JOINED] = "%s 加入了房间",
+    [UI_MENU_COOP_CHAT_LEFT] = "%s 离开了房间",
+    [UI_MENU_COOP_SETTINGS] = "合作设置",
+    [UI_MENU_COOP_SHARE] = "共享进度",
+    [UI_MENU_COOP_SHARE_DESC] = "在房间里，任何人取得的进展都算作所有人的：剧情、宝箱、门、道具和乐曲。在房间里的任何内容写入你的存档之前，存档会先复制到配置文件夹里的 "
+                                "coop-backup。小钥匙、卢比、弹药和心保持各自独立。关闭：只共享名字和聊天。",
+    [UI_MENU_COOP_NAMES] = "显示玩家名字",
+    [UI_MENU_COOP_NAMES_DESC] = "在其他玩家的林克所处的位置显示其名字和距离。需要开启 DLSS、FSR 或 TAA（只有这样菜单才知道摄像机的朝向）。",
+    [UI_MENU_COOP_CHAT_SHOW] = "在游戏画面上显示聊天",
+    [UI_MENU_COOP_CHAT_SHOW_DESC] = "菜单关闭时，新的聊天内容以及玩家加入或离开的提示会显示几秒钟。",
+    [UI_MENU_COOP_N_CREATE_FAILED] = "Steam 无法创建房间。请稍后再试。",
+    [UI_MENU_COOP_N_NO_ROOM] = "没有使用这个 ID 的房间：请检查一下，或者问问朋友房间是否还开着。",
+    [UI_MENU_COOP_N_FULL] = "房间已满。",
+    [UI_MENU_COOP_N_REFUSED] = "房间没有让你进入。",
+    [UI_MENU_COOP_N_NOT_OURS] = "那不是 OOT-PC 的房间。",
+    [UI_MENU_COOP_N_OTHER_VERSION] = "房主使用的 OOT-PC 或游戏版本与你不同：请使用相同的版本。",
+    [UI_MENU_COOP_N_REMOVED] = "房主已将你移出房间。",
+    [UI_MENU_COOP_N_HOST_SILENT] = "房主没有响应。",
+    [UI_MENU_COOP_N_LOST] = "Steam 断开了连接；房间已不存在。",
+    [UI_MENU_COOP_N_LEFT] = "你已离开房间。",
+    [UI_MENU_COOP_LOCAL] = "测试模式：在本机上代替 Steam。",
+    [UI_MENU_COOP_TOAST_INVITE] = "%s 邀请你加入房间：请打开菜单的“合作”页。",
+    [UI_MENU_COOP_MOD_OFF] = "联机合作是一个模组：在“模组”页（或启动器的模组界面）中打开 Steam Co-op，然后重新启动游戏。之后即可通过 Steam 与好友一起游玩，每人使用自己的游戏和存档。关闭时游戏不使用网络。",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}
@@ -2658,13 +3094,13 @@ void ui_text_visit(const char *lang, void (*visit)(void *ctx, const char *text),
         if (r->text[id] && *r->text[id]) visit(ctx, r->text[id]);
 }
 
-// The menu language, re-read when cfg_version changes. NX2NAVI_MENU_LANG names a catalog language ("en", "ru", "pt-BR",
+// The menu language, re-read when cfg_version changes. OOTPC_MENU_LANG names a catalog language ("en", "ru", "pt-BR",
 // "zh-Hans"); unset, it follows the system UI language, through the same code map the game language uses ("zh-CN" ->
 // "zh-Hans"). Windows names a region with it ("ru-RU"), so a tag without menu text tries its language alone ("ru"). A
 // language whose row has no menu text (only the software keyboard does) shows English, so other Windows locales keep the
 // English menu.
 static const char *resolve_menu_lang(void) {
-    const char *v = cfg_value("NX2NAVI_MENU_LANG");
+    const char *v = cfg_value("OOTPC_MENU_LANG");
     const char *sys = plat_ui_language();
     const char *lang = v && *v ? ui_text_lang(v) : sys && *sys ? ui_text_lang(sys) : "en";
     if (ui_text_defined(lang, UI_MENU_TITLE)) return lang;

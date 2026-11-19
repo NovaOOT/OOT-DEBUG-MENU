@@ -3,7 +3,7 @@
 tools/xlate/AmpereLowering.cs rewrites the SM86 instructions of the game's neural-network passes as Maxwell code:
 Lowerer.Hmma (HMMA.1688 / HMMA.16816, .F16 and .F32), Lowerer.Ldsm (LDSM.16.M88 / MT88 .1/.2/.4), Lowerer.Movm
 (MOVM.16.MT88) and Lowerer.Half (HFMA2, HFMA2.RELU). This script lowers every case of the vector file with
-`nx2navi_xlate --lower`, runs the Maxwell words on tests/maxwell_warp_emu.py (which executes them as the shader
+`ootpc_xlate --lower`, runs the Maxwell words on tests/maxwell_warp_emu.py (which executes them as the shader
 translator does) and compares with the registers the GPU wrote. Exit status 1 on any failure. The vector file names
 the GPU that produced it ("device"). So far that is an RTX 5090 running the compute_86 PTX through the driver's JIT,
 as no SM86 part was at hand: the results follow the PTX semantics but need not show SM86's internal precision.
@@ -13,7 +13,7 @@ as no SM86 part was at hand: the results follow the PTX semantics but need not s
 
 Defaults: vectors.json is <workspace>/work/tensor-gt/vectors.json (<workspace>/work/tensor-gt/gen_vectors.py writes
 it: each case is one SM86 instruction in inline PTX, run on one warp), the translator
-<workspace>/build/xlate/nx2navi_xlate.exe (python tools/build_xlate.py builds it); <workspace> is the directory two
+<workspace>/build/xlate/ootpc_xlate.exe (python tools/build_xlate.py builds it); <workspace> is the directory two
 levels above this repository. numpy is needed.
 
 Every case runs several times and must pass each run:
@@ -416,7 +416,7 @@ def mufu_f16_model(reg: int, operation: int, high: bool, absolute: bool, negate:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("vectors", nargs="?", type=Path, default=DEFAULT_VECTORS, help=f"vector file (default {DEFAULT_VECTORS})")
-    ap.add_argument("--xlate", type=Path, default=emu.DEFAULT_XLATE, help="nx2navi_xlate executable")
+    ap.add_argument("--xlate", type=Path, default=emu.DEFAULT_XLATE, help="ootpc_xlate executable")
     ap.add_argument("--case", action="append", help="only cases whose name contains this (repeatable)")
     ap.add_argument("-v", "--verbose", action="store_true", help="more differing values per failure")
     args = ap.parse_args(argv)

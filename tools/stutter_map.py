@@ -1,4 +1,4 @@
-"""The stutter map of a play session, from its log (runtime/stutter_map.c, NX2NAVI_STUTTER_MAP=1), and what a game
+"""The stutter map of a play session, from its log (runtime/stutter_map.c, OOTPC_STUTTER_MAP=1), and what a game
 folder recorded that a pipeline list lacks.
 
     python tools/stutter_map.py report LOG [LOG ...] [--out FILE.md]
@@ -79,7 +79,7 @@ def report(logs, out):
         block, hitches = read_log(p)
         lines += [f'## {p}', '']
         if not block:
-            lines += ['No stutter map in this log (stutter_map = 1 in nx2navi.ini turns it on).', '']
+            lines += ['No stutter map in this log (stutter_map = 1 in OOT-PC.ini turns it on).', '']
             continue
         tag, mins, nareas, hitch, load, paced, causes = block['head']
         lines += [f'{float(mins):.1f} min of play in {nareas} areas ({tag}): **{hitch} hitches in play**, {load} right '

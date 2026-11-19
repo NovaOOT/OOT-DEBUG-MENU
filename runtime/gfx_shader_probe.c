@@ -1,4 +1,4 @@
-// --probe-shader: the shader service client (gfx_shader.c) against 32 census shaders. Needs build/xlate/nx2navi_xlate.exe and
+// --probe-shader: the shader service client (gfx_shader.c) against 32 census shaders. Needs build/xlate/ootpc_xlate.exe and
 // a census, build/<version>/shaders/ (tools/shader_census.py, probe_census_dir); uses a throwaway cache directory.
 //   1. Translate 32 shaders (mixed stages) through gfx_shader_get; each SPIR-V starts with the magic 0x07230203.
 //   2. Drop the memory cache and ask again: 32 hits from disk, 0 service requests. A third pass returns the same pointers.
@@ -51,7 +51,7 @@ static const char *str_field(const char *from, const char *to, const char *name,
 static int hexval(char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; }
 
 // The shader census the probes translate (tools/shader_census.py --version <ver>): build/<ver>/shaders in the nearest
-// parent of nx2navi.exe that has one with a jobs.json, the running game version's first, then the others' (any census
+// parent of ocarina.exe that has one with a jobs.json, the running game version's first, then the others' (any census
 // serves a probe). 1 with that folder in dir.
 int probe_census_dir(char *dir, size_t n) {
     const char *const versions[3] = {RT_V110 ? "v110" : RT_V143 ? "v143" : "v121",
@@ -160,8 +160,8 @@ int probe_shader(void) {
     char dir[PLAT_PATH_MAX];
     char tmp[PLAT_PATH_MAX];
     if (!plat_temp_dir(tmp, sizeof tmp)) strcpy(tmp, ".");
-    snprintf(dir, sizeof dir, "%s/nx2navi-shader-probe-%u", tmp, plat_process_id());
-    CHECK(cfg_setenv("NX2NAVI_SHADER_CACHE", dir), "cannot set NX2NAVI_SHADER_CACHE");
+    snprintf(dir, sizeof dir, "%s/ootpc-shader-probe-%u", tmp, plat_process_id());
+    CHECK(cfg_setenv("OOTPC_SHADER_CACHE", dir), "cannot set OOTPC_SHADER_CACHE");
 
     // pass 1: translate through the service
     const GfxShader *first[WANT];

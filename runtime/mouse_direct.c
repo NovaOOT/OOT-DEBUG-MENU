@@ -1,4 +1,4 @@
-// Direct mouse input for NX2navi 1.4.3. The camera controller's input update (main+0x874c1c) turns HID stick floats
+// Direct mouse input for OOT-PC 1.4.3. The camera controller's input update (main+0x874c1c) turns HID stick floats
 // into a radial dead zone, clamps the radius to one and applies StickExponent. The mouse enters after all three,
 // at main+0x874cb4, before the game's X/Y inversion and input-activity flags. It never becomes a HID stick value.
 // Free orbit removes that sample again before the camera's additional vertical square/velocity filters and adds
@@ -24,7 +24,7 @@
 
 static int direct_mode(void) {
     // cfg_value: unset is the settings table's default (direct), as the menu shows it
-    return !strcmp(cfg_value("NX2NAVI_MOUSE_MODE"), "direct") && rt_patch_enabled(rt_patch_set("mouse_direct"));
+    return !strcmp(cfg_value("OOTPC_MOUSE_MODE"), "direct") && rt_patch_enabled(rt_patch_set("mouse_direct"));
 }
 
 static uint64_t last_update;
@@ -167,7 +167,7 @@ static void camera_input(Cpu *c) {
     if (direct_mode()) {
         int32_t dx, dy;
         input_direct_mouse_sample(!input_direct_mouse_selector_active() && (accept || hand_active(plat_now_ns())), &dx, &dy);
-        float sensitivity = (float)cfg_double("NX2NAVI_MOUSE_SENS");
+        float sensitivity = (float)cfg_double("OOTPC_MOUSE_SENS");
         sensitivity = fminf(10, fmaxf(0, sensitivity));
         // The game multiplies camera input by its 30 Hz frame ratio later. Divide by that exact ratio, rather
         // than wall-clock time: an equal distance of mouse motion then gives equal input at every frame rate.
@@ -341,12 +341,12 @@ static void camera_activity(Cpu *c) {
 #define OOT_RESET_TIMER 0x5e0   // 60 Hz frames left of the pause after a camera reset (right stick click)
 #define OOT_FLAG_IDLE 0x10u     // flags (+0x530): the processed stick is under the game's 10% idle threshold
 
-// NX2NAVI_MOUSE_TRACE=1 (test runs): one line per camera input update, with the stick the update made, the counts taken
+// OOTPC_MOUSE_TRACE=1 (test runs): one line per camera input update, with the stick the update made, the counts taken
 // and what they added. vk_dlaa.c adds the camera's direction per frame, so a scripted run gives degrees per count.
 static int mouse_trace(void) {
     static int on = -1;
     if (on < 0) {
-        const char *e = cfg_get("NX2NAVI_MOUSE_TRACE");
+        const char *e = cfg_get("OOTPC_MOUSE_TRACE");
         on = e && *e && strcmp(e, "0");
     }
     return on;
@@ -366,9 +366,9 @@ static void camera_input_oot(Cpu *c) {
     int32_t dx = 0, dy = 0;
     if (direct_mode()) {
         input_direct_mouse_sample(accept, &dx, &dy);
-        float sensitivity = fminf(10, fmaxf(0, (float)cfg_double("NX2NAVI_MOUSE_SENS")));
+        float sensitivity = fminf(10, fmaxf(0, (float)cfg_double("OOTPC_MOUSE_SENS")));
         // The game multiplies the processed stick by the frames it steps and by its camera speeds, which
-        // NX2NAVI_STICK_SENS scales (camera_speed.c): divided by both, a count turns the camera by the same angle at
+        // OOTPC_STICK_SENS scales (camera_speed.c): divided by both, a count turns the camera by the same angle at
         // every frame rate and stick speed. Nothing after the site clamps the sum, so a fast flick is not cut short.
         float per = frames * cam_speed_applied();
         if (accept && sensitivity > 0 && isfinite(per) && per > 0 && (dx || dy)) {

@@ -1,6 +1,6 @@
 // The DualShock 3 reader of the Windows build (input_ds3_win.c): the controller's own HID reports, read directly, for
 // when no driver presents it to SDL or XInput as a gamepad. Windows only; input.c calls it from its gamepad poll.
-// NX2NAVI_DS3=0 (`ds3 = 0` in nx2navi.ini) turns it off. Controls: docs/controls.md.
+// OOTPC_DS3=0 (`ds3 = 0` in OOT-PC.ini) turns it off. Controls: docs/controls.md.
 #pragma once
 #include <stdint.h>
 

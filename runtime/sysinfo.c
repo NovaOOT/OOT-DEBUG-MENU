@@ -58,7 +58,7 @@ static int private_setting(const char *key) { return cfg_private_key(key); }   /
 
 static void put_setting(const char *key, const char *value, int from_env, void *ctx) {
     if (private_setting(key)) value = CFG_PRIVATE_SHOWN;
-    put(ctx, from_env ? "  NX2NAVI_%s=%s (environment)\n" : "  %s = %s\n", key, value);
+    put(ctx, from_env ? "  OOTPC_%s=%s (environment)\n" : "  %s = %s\n", key, value);
 }
 
 int sysinfo_text(char *buf, size_t n) {
@@ -66,7 +66,7 @@ int sysinfo_text(char *buf, size_t n) {
     Out o = {buf, n, 0};
     buf[0] = 0;
     char s[256];
-    put(&o, "OOT-DEBUG-MENU system info\n");
+    put(&o, "OOT-PC system info\n");
     put(&o, "OS: %s\n", plat_os_version(s, sizeof s) ? s : "unknown");
     sysinfo_cpu_name(s, sizeof s);
     put(&o, "CPU: %s, %u logical processors\n", s[0] ? s : "unknown", plat_cpu_count());

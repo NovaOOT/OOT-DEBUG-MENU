@@ -201,23 +201,141 @@ static int u64_get(const Byml *b, uint32_t node, const char *key, uint64_t *out)
     return 1;
 }
 
-// The logic modules whose Area makes touching it a void-out: the fall-down gimmicks (Gimmick_AreaContact_FallDown,
-// _FallDownMountian, _FallDown_GanonCastle) and the two level modules that do the same with one Area of their own. The
-// _FallDown_Item modules only put dropped items back, so they are left out. Each module was checked to hold the
-// HoldSensorHitInfoGiveAbyssActor node (game 1.1.1).
-static int void_logic(const char *logic) {
-    const char *base = strrchr(logic, '/');
-    base = base ? base + 1 : logic;
-    if (strstr(base, "FallDown")) return !strstr(base, "FallDown_Item");
-    return !strncmp(base, "Market_Child_Prefab_d415.", 25) || !strncmp(base, "CrumblingGanonCastle_Prefab_633f.", 33);
+// ---- the void-out zones: the placements an AI module sends the player back with
+// The root's AiGroups list dictionaries {Logic: "Logic/Module/<dir>/<name>.ain", References: [{Id, Path, Reference: a
+// placement's Hash}]}. The module is the romfs file Logic/<name>.ainb, an AI node graph ("AIB ", version 0x408):
+//   header: u32 command count +0x0c, node count +0x10, string pool +0x24, immediate parameters +0x2c (six u32 offsets,
+//     one table per type: int, bool, float, string, vec3, user-defined), input and output parameters +0x34 (twelve: the
+//     inputs then the outputs of each type), the multi-source table +0x38. A string is an offset into the pool.
+//   nodes: after the 0x74-byte header and 0x18 bytes per command, 0x3c bytes each: u16 type, u16 index, name +0x08,
+//     body +0x14. A body starts with six {u32 first, u32 count} runs of immediate parameters, then twelve runs of input
+//     and output parameters.
+//   a string immediate: 12 bytes {u32 name, u32 flags, u32 value}. A user-defined input: 20 bytes {u32 name, u32 class,
+//     i16 source node, i16 source output, ...}; a source node of -100 or less names a run of the multi-source table (8
+//     bytes each: {u16 node, u16 output, u32}) that starts at entry -100 - node and is as long as the output field says.
+// The node that sends the player back takes the sensor hits of Area actor nodes (ActorLogicAreaActor), whose immediate
+// string InstanceName is the Id of one of the group's references: HoldSensorHitInfoGiveAbyssActor (every fall-down
+// gimmick, the Stalfos boat's water, Ganon's tower and its collapse, the Water Temple's whirlpool), its ...Condition
+// form, which does it only while a condition holds (the Market moat, the collapsing castle's sections, two Shadow
+// Temple rooms, the Water Temple's lobby), and HoldSensorHitInfoSendSandAbyss, the Haunted Wasteland's sand rivers. The
+// HoldSensorHitInfoGiveAbyssItem modules only put dropped items back and are left out. The other Areas of a module
+// (observers, restart points) are not void-outs: in the Stalfos stage only the one under the boat is. Nor is an Area
+// whose node is never created: its bool input Logic_Create (16 bytes {u32 name, i16 source node, i16 source output,
+// u32 flags, u32 default}) has no source and a default of 0, as the Desert free roam mod writes them
+// (tools/make_desert_roam_mod.py).
+#define VOID_IDS 64
+
+typedef struct {
+    const uint8_t *p;
+    size_t n;
+    uint32_t pool;
+} Ainb;
+
+static const char *ainb_str(const Ainb *a, uint32_t off) {
+    size_t s = (size_t)a->pool + off;
+    if (s >= a->n || !memchr(a->p + s, 0, a->n - s)) return NULL;
+    return (const char *)a->p + s;
 }
 
-// The hashes of the Area placements a void-out logic module refers to: the root's AiGroups list dictionaries {Logic (the
-// module's path), References [{Id, Path, Reference: the placement's Hash}]}. malloc'd, *n their count.
-static uint64_t *void_hashes(const Byml *b, uint32_t root, int *n_out) {
+static int ainb_u16(const Ainb *a, size_t off, uint16_t *v) {
+    if (off > a->n || a->n - off < 2) return 0;
+    memcpy(v, a->p + off, 2);
+    return 1;
+}
+
+// The node whose index field is idx: its offset in the file; 0 when there is none.
+static size_t ainb_node(const Ainb *a, size_t nodes, uint32_t count, uint16_t idx) {
+    for (uint32_t i = 0; i < count; i++) {
+        uint16_t v;
+        size_t at = nodes + (size_t)i * 0x3c;
+        if (!ainb_u16(a, at + 2, &v)) return 0;
+        if (v == idx) return at;
+    }
+    return 0;
+}
+
+// The InstanceName string of the node at `node`; NULL when it has none.
+static const char *ainb_instance(const Ainb *a, uint32_t strs, size_t node) {
+    uint32_t body, first, count, name, value;
+    if (!u32_at(a->p, a->n, node + 0x14, &body) || !u32_at(a->p, a->n, (size_t)body + 24, &first) ||
+        !u32_at(a->p, a->n, (size_t)body + 28, &count) || count > 4096)
+        return NULL;
+    for (uint32_t k = 0; k < count; k++) {
+        size_t e = strs + 12 * ((size_t)first + k);
+        if (!u32_at(a->p, a->n, e, &name) || !u32_at(a->p, a->n, e + 8, &value)) return NULL;
+        const char *s = ainb_str(a, name);
+        if (s && !strcmp(s, "InstanceName")) return ainb_str(a, value);
+    }
+    return NULL;
+}
+
+// 1 when the node at `node` is never created: its Logic_Create input has no source and a default of 0. bools: the
+// table of bool inputs.
+static int ainb_never_created(const Ainb *a, uint32_t bools, size_t node) {
+    uint32_t body, first, count, name, value;
+    uint16_t src;
+    if (!u32_at(a->p, a->n, node + 0x14, &body) || !u32_at(a->p, a->n, (size_t)body + 0x30 + 16, &first) ||
+        !u32_at(a->p, a->n, (size_t)body + 0x30 + 20, &count) || count > 4096)
+        return 0;
+    for (uint32_t k = 0; k < count; k++) {
+        size_t e = bools + 16 * ((size_t)first + k);
+        if (!u32_at(a->p, a->n, e, &name) || !ainb_u16(a, e + 4, &src) || !u32_at(a->p, a->n, e + 12, &value)) return 0;
+        const char *s = ainb_str(a, name);
+        if (s && !strcmp(s, "Logic_Create")) return (int16_t)src == -1 && !value;
+    }
+    return 0;
+}
+
+// The Ids of the Area nodes whose touch sends the player back in the module p[0..n), with DBG_VOID_ kinds; their count.
+static int abyss_ids(const uint8_t *p, size_t n, const char **ids, int *kinds, int max) {
+    Ainb a = {p, n, 0};
+    uint32_t ncmd, nnode, imm, io, multi, strs, uds, bools;
+    if (n < 0x74 || memcmp(p, "AIB ", 4) || !u32_at(p, n, 0x0c, &ncmd) || !u32_at(p, n, 0x10, &nnode) ||
+        !u32_at(p, n, 0x24, &a.pool) || !u32_at(p, n, 0x2c, &imm) || !u32_at(p, n, 0x34, &io) ||
+        !u32_at(p, n, 0x38, &multi) || !u32_at(p, n, (size_t)imm + 12, &strs) || !u32_at(p, n, (size_t)io + 40, &uds) ||
+        !u32_at(p, n, (size_t)io + 8, &bools) || ncmd > 4096 || nnode > 65536)
+        return 0;
+    size_t nodes = 0x74 + (size_t)ncmd * 0x18;
+    int got = 0;
+    for (uint32_t i = 0; i < nnode && got < max; i++) {
+        size_t node = nodes + (size_t)i * 0x3c;
+        uint32_t nm, body, first, count;
+        if (!u32_at(p, n, node + 8, &nm) || !u32_at(p, n, node + 0x14, &body)) break;
+        const char *name = ainb_str(&a, nm);
+        if (!name || (!strstr(name, "GiveAbyssActor") && !strstr(name, "SendSandAbyss"))) continue;
+        int kind = strstr(name, "SendSandAbyss") ? DBG_VOID_SAND : strstr(name, "Condition") ? DBG_VOID_CONDITION : DBG_VOID;
+        if (!u32_at(p, n, (size_t)body + 0x30 + 8 * 10, &first) || !u32_at(p, n, (size_t)body + 0x30 + 8 * 10 + 4, &count) ||
+            count > 64)
+            continue;
+        for (uint32_t k = 0; k < count && got < max; k++) {
+            size_t e = uds + 20 * ((size_t)first + k);
+            uint16_t src, out;
+            if (!ainb_u16(&a, e + 8, &src) || !ainb_u16(&a, e + 10, &out)) break;
+            int16_t s = (int16_t)src;
+            uint32_t start = s <= -100 ? (uint32_t)(-100 - s) : 0, runs = s <= -100 ? out : 1;
+            for (uint32_t j = 0; j < runs && j < 256 && got < max; j++) {
+                uint16_t from = src;
+                if (s <= -100 && !ainb_u16(&a, multi + 8 * ((size_t)start + j), &from)) break;
+                size_t at = ainb_node(&a, nodes, nnode, from);
+                const char *id = at && !ainb_never_created(&a, bools, at) ? ainb_instance(&a, strs, at) : NULL;
+                if (id && *id) ids[got] = id, kinds[got++] = kind;
+            }
+        }
+    }
+    return got;
+}
+
+typedef struct {
+    uint64_t hash;
+    int kind;
+} VoidRef;
+
+// The placements the stage's AI modules send the player back with (see above): their hashes and kinds. malloc'd, *n
+// their count.
+static VoidRef *void_refs(const Byml *b, uint32_t root, int *n_out) {
     uint8_t t;
     uint32_t groups;
-    uint64_t *out = NULL;
+    VoidRef *out = NULL;
     int n = 0, cap = 0;
     *n_out = 0;
     if (!dict_get(b, root, "AiGroups", &t, &groups) || t != 0xc0) return NULL;
@@ -227,22 +345,36 @@ static uint64_t *void_hashes(const Byml *b, uint32_t root, int *n_out) {
         if (!array_get(b, groups, i, &gt, &g)) break;
         if (gt != 0xc1 || !dict_get(b, g, "Logic", &lt, &lv) || lt != 0xa0) continue;
         const char *logic = table_str(b, b->strs, lv);
-        if (!logic || !void_logic(logic) || !dict_get(b, g, "References", &rt, &refs) || rt != 0xc0) continue;
-        for (uint32_t j = 0;; j++) {
+        if (!logic || !dict_get(b, g, "References", &rt, &refs) || rt != 0xc0) continue;
+        const char *base = strrchr(logic, '/');
+        base = base ? base + 1 : logic;
+        char file[256];
+        if (snprintf(file, sizeof file, "Logic/%sb", base) >= (int)sizeof file) continue;
+        uint64_t fn = 0;
+        uint8_t *f = romfs_load(file, &fn);
+        if (!f) continue;
+        const char *ids[VOID_IDS];
+        int kinds[VOID_IDS];
+        int nid = abyss_ids(f, (size_t)fn, ids, kinds, VOID_IDS);
+        for (uint32_t j = 0; nid > 0; j++) {
             uint8_t et, it;
             uint32_t r, iv;
             uint64_t h;
             if (!array_get(b, refs, j, &et, &r)) break;
-            if (et != 0xc1 || !dict_get(b, r, "Id", &it, &iv) || it != 0xa0) continue;
+            if (et != 0xc1 || !dict_get(b, r, "Id", &it, &iv) || it != 0xa0 || !u64_get(b, r, "Reference", &h)) continue;
             const char *id = table_str(b, b->strs, iv);
-            if (!id || strncmp(id, "Area_", 5) || !u64_get(b, r, "Reference", &h)) continue;
+            int kind = 0;
+            for (int k = 0; id && k < nid && !kind; k++)
+                if (!strcmp(ids[k], id)) kind = kinds[k];
+            if (!kind) continue;
             if (n == cap) {
-                uint64_t *v = realloc(out, (size_t)(cap = cap ? cap * 2 : 64) * sizeof *v);
+                VoidRef *v = realloc(out, (size_t)(cap = cap ? cap * 2 : 64) * sizeof *v);
                 if (!v) break;
                 out = v;
             }
-            out[n++] = h;
+            out[n].hash = h, out[n++].kind = kind;
         }
+        free(f);
     }
     *n_out = n;
     return out;
@@ -259,7 +391,7 @@ static int each_actor(const uint8_t *p, size_t n, int (*fn)(const DbgPlacement *
     uint32_t actors;
     if (!dict_get(&b, root, "Actors", &t, &actors) || t != 0xc0) return 0;
     int count = 0, nvoid = 0;
-    uint64_t *voids = void_hashes(&b, root, &nvoid);
+    VoidRef *voids = void_refs(&b, root, &nvoid);
     for (uint32_t i = 0;; i++) {
         uint8_t et, gt;
         uint32_t node, gv;
@@ -274,10 +406,18 @@ static int each_actor(const uint8_t *p, size_t n, int (*fn)(const DbgPlacement *
         if (!vec3(&b, node, "Scale", pl.scale)) pl.scale[0] = pl.scale[1] = pl.scale[2] = 1.0f;
         axes_of(rot, pl.axes);
         pl.name = name;
-        pl.void_out = 0;
+        pl.void_kind = 0;
         uint64_t h;
-        if (nvoid && !strcmp(name, "Area") && u64_get(&b, node, "Hash", &h))
-            for (int k = 0; k < nvoid && !pl.void_out; k++) pl.void_out = voids[k] == h;
+        if (nvoid && u64_get(&b, node, "Hash", &h))
+            for (int k = 0; k < nvoid && !pl.void_kind; k++)
+                if (voids[k].hash == h) pl.void_kind = voids[k].kind;
+        // Dynamic.RigidBodyShapeType (an Area's shape, debug_tools.h DbgPlacement), the pack's default when not set
+        uint8_t dt, st;
+        uint32_t dyn, sv;
+        pl.shape_type = dict_get(&b, node, "Dynamic", &dt, &dyn) && dt == 0xc1 &&
+                                dict_get(&b, dyn, "RigidBodyShapeType", &st, &sv) && (st == 0xd1 || st == 0xd3)
+                            ? (int)sv
+                            : -1;
         count++;
         if (!fn(&pl, ctx)) break;
     }
@@ -317,6 +457,30 @@ static int byml_open(const uint8_t *p, size_t n, Byml *b, uint32_t *root) {
     if (n < 16 || memcmp(p, "YB", 2)) return 0;
     memcpy(&ver, p + 2, 2);
     return ver >= 2 && u32_at(p, n, 4, &b->keys) && u32_at(p, n, 8, &b->strs) && u32_at(p, n, 12, root);
+}
+
+// The box the area's volume statistics cover (debug_voidcells.c): Game/VolumeStatsAABB/<area>.game__VolumeStatsAABB.bgyml,
+// a BYML dictionary {Max: {X, Y, Z}, Min: {X, Y, Z}} of floats (Market_Adult: -31 97 -61 to 158 154 85).
+int dbg_volume_stats_box(const char *area, float lo[3], float hi[3]) {
+    char path[160];
+    snprintf(path, sizeof path, "Game/VolumeStatsAABB/%s.game__VolumeStatsAABB.bgyml", area);
+    uint64_t n = 0;
+    uint8_t *f = romfs_load(path, &n);
+    Byml b;
+    uint32_t root, node;
+    uint8_t t;
+    int ok = f && byml_open(f, (size_t)n, &b, &root);
+    static const char *const ax[] = {"X", "Y", "Z"};
+    for (int k = 0; ok && k < 2; k++) {
+        ok = dict_get(&b, root, k ? "Min" : "Max", &t, &node) && t == 0xc1;
+        for (int i = 0; ok && i < 3; i++) {
+            uint32_t v;
+            ok = dict_get(&b, node, ax[i], &t, &v) && t == 0xd2;
+            if (ok) memcpy(k ? &lo[i] : &hi[i], &v, 4);
+        }
+    }
+    free(f);
+    return ok;
 }
 
 // The pack member a "Work/....gyml" path names.

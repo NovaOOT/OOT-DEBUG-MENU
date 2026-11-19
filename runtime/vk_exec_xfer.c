@@ -10,11 +10,11 @@
 //
 // Events and counters are CPU-visible side effects. Their values go into guest memory on the completion thread through
 // vk_completion_add, in submit order, as gfx_null.c does: event WRITE / ADD, counter {0, timestamp} for every type but
-// samples passed. A timestamp report puts 0 in the counter word: NX2NAVI gates its clears on two such words being unequal.
+// samples passed. A timestamp report puts 0 in the counter word: OOTPC gates its clears on two such words being unequal.
 //
 // Samples passed (NVN_COUNTER_TYPE_SAMPLES_PASSED) is a running count on the queue: RESET_COUNTER zeroes it, every
 // draw after it adds the samples that passed the depth and stencil tests, REPORT_COUNTER writes the running value.
-// NX2NAVI resets and reports it 3 to 8 times a frame in the field and its CPU reads the results back (f_70010c3298); a 0
+// OOTPC resets and reports it 3 to 8 times a frame in the field and its CPU reads the results back (f_70010c3298); a 0
 // there culls what the query tested. The replay counts with Vulkan occlusion queries ("occlusion counts" below).
 //
 // Conditional rendering is a CPU-side skip, not VK_EXT_conditional_rendering: the extension compares one 32-bit word
@@ -23,7 +23,7 @@
 // as unknown if it is samples passed. An unknown count renders: the report usually sits in the command buffer being
 // recorded, so its value cannot be waited for, and the word in memory still holds an older query's count. Rendering
 // costs at most the work the condition would have saved; in the field
-// NX2NAVI conditions only on timestamp reports. The condition sets VkExec.render_disabled, which vk_exec.c honours for
+// OOTPC conditions only on timestamp reports. The condition sets VkExec.render_disabled, which vk_exec.c honours for
 // clears and vk_exec_draw.c for draws and dispatches. A condition that cannot be read (address outside every pool)
 // renders.
 // Copies and CLEAR_TEX are not conditional.
@@ -73,7 +73,7 @@ int vk_exec_tail_results(void) { int r = tail_results; tail_results = 0; return 
 void vk_exec_note_results(int kind) {
     if (vk_exec_tail()) tail_results |= kind;
     __atomic_fetch_or(&ex_results, kind, __ATOMIC_RELAXED);
-    vk_gpu_passes_result(kind);   // NX2NAVI_GPU_PASSES: where in the submission it is done
+    vk_gpu_passes_result(kind);   // OOTPC_GPU_PASSES: where in the submission it is done
 }
 int vk_exec_take_results(void) { return __atomic_exchange_n(&ex_results, 0, __ATOMIC_RELAXED); }
 
@@ -188,7 +188,7 @@ static Pending pending[PENDING];
 static uint64_t report_seq;
 static uint64_t cond_frame;
 
-// Per-frame counts of conditional work (NX2NAVI_LOG_RCOND=1, vk_exec_cond_frame_end logs them): clears and
+// Per-frame counts of conditional work (OOTPC_LOG_RCOND=1, vk_exec_cond_frame_end logs them): clears and
 // draws issued under a render condition, run or skipped.
 unsigned vk_cond_clears_run, vk_cond_clears_skip, vk_cond_draws_skip, vk_cond_depth_run;
 
@@ -235,7 +235,7 @@ static Pending *pending_slot(uint64_t addr, int insert) {
     return e;
 }
 
-// ---- small buffer clears over counter records (NX2NAVI_CLEAR_SMALL_CPU, default 1; 0: the GPU's fill alone)
+// ---- small buffer clears over counter records (OOTPC_CLEAR_SMALL_CPU, default 1; 0: the GPU's fill alone)
 //
 // A ClearBuffer or ReportValue is a fill the GPU makes where it stands in the stream (clear_buf): guest memory has the
 // bytes once the GPU got there, through the imported pool, a mirror's twin or the mirror's write-back. A counter
@@ -292,8 +292,8 @@ static void clear_note_report(uint64_t addr) {
 // Replay thread: the fill of [a, a + n) with value, 4-byte aligned, backed and CPU-visible, at its place in the stream.
 static void clear_small(uint64_t a, uint64_t n, uint32_t value) {
     if (clr_cpu < 0) {
-        clr_cpu = cfg_bool("NX2NAVI_CLEAR_SMALL_CPU");
-        rt_log("vk: buffer clears of at most %d bytes %s (NX2NAVI_CLEAR_SMALL_CPU)", CLEAR_SMALL,
+        clr_cpu = cfg_bool("OOTPC_CLEAR_SMALL_CPU");
+        rt_log("vk: buffer clears of at most %d bytes %s (OOTPC_CLEAR_SMALL_CPU)", CLEAR_SMALL,
                clr_cpu ? "are also applied at their place in the replay to the counter records they cover"
                        : "are the GPU's fill alone, also over counter records");
     }
@@ -362,7 +362,7 @@ void vk_exec_clear_stats(char *out, size_t n) {
 //
 // After a SAMPLES_PASSED reset, the first draw of a pass begins an occlusion query (precise when the device has
 // occlusionQueryPrecise); the query ends with the pass, or at the next report or reset of the counter, and the next
-// draw begins another. A Vulkan query begun inside a render pass must end inside it. NX2NAVI always resets, draws the
+// draw begins another. A Vulkan query begun inside a render pass must end inside it. OOTPC always resets, draws the
 // tested proxies, reports, so counting stops at a report and restarts at the next reset: queries cover only the draws
 // between the two, not every pass of the frame. Once the game reports twice without a reset in between, counting stays
 // on for good (cumulative NVN semantics; that one report misses the draws since the previous one). The queries closed since the last
@@ -413,7 +413,7 @@ static _Thread_local struct {
     const uint8_t *cond;
     uint32_t ncond, i;
 } XW = {.open = -1};
-// GS: per group slot (vk_exec.c LIVE_GROUPS), the front pass's segments of the group. tail: with NX2NAVI_REPLAY_PIPE
+// GS: per group slot (vk_exec.c LIVE_GROUPS), the front pass's segments of the group. tail: with OOTPC_REPLAY_PIPE
 // the submitting thread replays on past the group before its chunks are done: the first segment made after the
 // group's front pass (tail_wait), by the next group's front pass or the replay, takes the queries the chunks close
 // after the group's last report or reset, which in the stream come before that one's own.
@@ -568,7 +568,7 @@ void vk_exec_xfer_shutdown(void) {
     oq_hold_drop();
 }
 
-// The completion thread reads the results in batches (NX2NAVI_OQ_BATCH, default 1; 0: every segment by itself, as
+// The completion thread reads the results in batches (OOTPC_OQ_BATCH, default 1; 0: every segment by itself, as
 // before). The game tests one proxy per report, so a segment holds one query, and a frame of Hyrule Field has about a
 // hundred of them: one vkGetQueryPoolResults and one vkResetQueryPool each. On an RX 7900 XT (26.10.1) each of those
 // calls goes into the kernel, and the two hundred took 3.9 ms of every frame on the completion thread, which runs a
@@ -633,7 +633,7 @@ static uint64_t oq_take(VkDevice dev, uint32_t q, int *avail) {
     return OQB.v[2 * k];
 }
 
-// NX2NAVI_OQ_HOLD (default 0): a report whose segment left draws uncounted (a full ring, vk_exec_oq_draw) writes the
+// OOTPC_OQ_HOLD (default 0): a report whose segment left draws uncounted (a full ring, vk_exec_oq_draw) writes the
 // larger of what was counted and the last complete count of its record (vk_oq_hold.h); off, what was counted, at least
 // 1. Such reports are counted either way and logged at the 1st, 10th, 100th... so a log shows how often the ring ran
 // full. Completion thread only, as oq_count.
@@ -645,8 +645,8 @@ static void oq_hold_drop(void) { memset(&oq_held, 0, sizeof oq_held), oq_lossy =
 
 static uint64_t oq_report_count(const OqSegment *s, uint64_t counted) {
     if (oq_hold_on < 0) {
-        oq_hold_on = cfg_bool("NX2NAVI_OQ_HOLD");
-        if (oq_hold_on) rt_log("vk: samples-passed reports that miss draws repeat their record's last complete count (NX2NAVI_OQ_HOLD)");
+        oq_hold_on = cfg_bool("OOTPC_OQ_HOLD");
+        if (oq_hold_on) rt_log("vk: samples-passed reports that miss draws repeat their record's last complete count (OOTPC_OQ_HOLD)");
     }
     if (!s->lost) {
         if (oq_hold_on) oqh_note(&oq_held, s->addr, counted);
@@ -658,14 +658,14 @@ static uint64_t oq_report_count(const OqSegment *s, uint64_t counted) {
     if (p == n)
         rt_log("vk: %llu samples-passed reports so far missed draws the full occlusion query ring left uncounted (this "
                "one: %llu counted, %llu reported%s)", (unsigned long long)n, (unsigned long long)counted,
-               (unsigned long long)v, oq_hold_on ? ", NX2NAVI_OQ_HOLD" : "");
+               (unsigned long long)v, oq_hold_on ? ", OOTPC_OQ_HOLD" : "");
     return v;
 }
 
 static void oq_cb(void *arg) {
     OqSegment *s = arg;
     VkDevice dev = vk_ctx()->device;
-    if (oq_batch_mode < 0) oq_batch_mode = cfg_bool("NX2NAVI_OQ_BATCH");
+    if (oq_batch_mode < 0) oq_batch_mode = cfg_bool("OOTPC_OQ_BATCH");
     // a segment the replay workers filled lists its slots in the order the chunks closed them: in ring order, they are
     // taken in runs (oq_take)
     for (uint32_t i = 1; i < s->n; i++) {
@@ -751,7 +751,7 @@ static void oq_report(VkExec *ex, uint64_t addr) {
 // has set the value. Every submission replays here on one queue in the order it came, and a wait records nothing, so a
 // wait whose signal comes in a later submission does not hold its work back: that work runs before what it waits for.
 // The replay keeps the value each event reaches in replay order (ev_seen, the signals recorded so far, on top of the
-// value in memory) and counts the waits it reaches unmet; NX2NAVI_TRACE=perf logs the count, and the first few are
+// value in memory) and counts the waits it reaches unmet; OOTPC_TRACE=perf logs the count, and the first few are
 // logged as they happen. Replay thread only.
 #define EV_SEEN 64
 static struct { volatile uint32_t *val; uint32_t v; } ev_seen[EV_SEEN];
@@ -793,7 +793,7 @@ static int ev_holds(uint32_t have, uint32_t mode, uint32_t want) {
 // its start (vk_exec_event_sync), and a signal with a later number does not count for that submission. The wait then
 // stops the submission like any wait reached before its signal, and vk_backend.c submit_sync lets it go on at once
 // in a submission of its own, whose copies are taken after the signal.
-// NX2NAVI_EVENT_AT_SYNC=0: the value in memory when the walk reaches the wait, as before.
+// OOTPC_EVENT_AT_SYNC=0: the value in memory when the walk reaches the wait, as before.
 #define CPU_EV 16
 #define CPU_EV_HIST 8
 static struct { const void *val; uint64_t seq[CPU_EV_HIST]; uint32_t before[CPU_EV_HIST]; unsigned n; } cpu_ev[CPU_EV];
@@ -987,13 +987,13 @@ static int counter_word(uint64_t addr, uint64_t *v) {
     return 1;
 }
 
-// The counter type of the newest report to addr the ring still holds, -1 when there is none (NX2NAVI_LOG_RCOND).
+// The counter type of the newest report to addr the ring still holds, -1 when there is none (OOTPC_LOG_RCOND).
 static int last_type(uint64_t addr) {
     const Pending *e = pending_slot(addr, 0);
     return e ? e->type : -1;
 }
 
-// NX2NAVI_LOG_RCOND=ab (diagnosis): the words a condition compares and where each came from: "f" a report replayed
+// OOTPC_LOG_RCOND=ab (diagnosis): the words a condition compares and where each came from: "f" a report replayed
 // this frame (0), "p" a pending report (0 or unknown), "m" memory, "c" memory after a small clear that came after the
 // report (clear_small), with the newest report's type and frame.
 void vk_exec_cond_why(const p_render_cond *c, char *buf, size_t cap) {
@@ -1018,7 +1018,7 @@ static int cond_enabled(const p_render_cond *c) {
     }
     if (rx == 2 || ry == 2) return 1;   // a samples-passed count not done yet
     int on = c->mode == 0 ? x == y : x != y;
-    // NX2NAVI_LOG_RCOND=1: one condition in 499 (up to 300 lines), on or off, with the counter types last reported there
+    // OOTPC_LOG_RCOND=1: one condition in 499 (up to 300 lines), on or off, with the counter types last reported there
     static int log_on = -1, nlog;
     static unsigned ncond;
     if (log_on < 0) log_on = rt_knob("LOG_RCOND", "0");
@@ -1136,7 +1136,7 @@ static void copy_buffer_image(VkExec *ex, const p_copy_b2t *p, int to_image) {
     if (!sub_resolve(p->tex, &p->view, p->has_view, &p->r, 1, &s)) return;
     vk_gpu_gap_note(to_image ? VK_GAP_COPY_B2T : VK_GAP_COPY_T2B, (uint64_t)s.w * s.h);
     if (s.img->scale > 1) {   // the buffer holds the game's texel count, the image more
-        warn_once(W_REGION, "buffer copy of a shadow map enlarged by NX2NAVI_SHADOW_SCALE: skipped");
+        warn_once(W_REGION, "buffer copy of a shadow map enlarged by OOTPC_SHADOW_SCALE: skipped");
         return;
     }
     uint64_t size;
@@ -1409,10 +1409,10 @@ static void op_xfer_impl(VkExec *ex, uint32_t op, const void *payload) {
     }
 }
 
-// NX2NAVI_REPLAY_TIME: see the note over vk_exec_op_draw in vk_exec_draw.c; transfers are the third kind.
+// OOTPC_REPLAY_TIME: see the note over vk_exec_op_draw in vk_exec_draw.c; transfers are the third kind.
 void vk_exec_op_xfer(VkExec *ex, uint32_t op, const void *payload) {
     static int on = -1;
-    if (on < 0) on = cfg_bool("NX2NAVI_REPLAY_TIME");
+    if (on < 0) on = cfg_bool("OOTPC_REPLAY_TIME");
     if (!on) { op_xfer_impl(ex, op, payload); return; }
     uint64_t t0 = plat_now_ns();
     op_xfer_impl(ex, op, payload);

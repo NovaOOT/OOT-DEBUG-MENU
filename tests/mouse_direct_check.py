@@ -19,7 +19,7 @@ static float ratio=0.5f, frames=1, speed=1;
 static double sens=1;
 static uint64_t now=1000000000;
 static GuestFn hook, activity_hook, begin_hook, angles_hook, hand_hook;
-const char *cfg_get(const char *key) { return strcmp(key, "NX2NAVI_MOUSE_MODE") ? NULL : mode ? "direct" : "stick"; }
+const char *cfg_get(const char *key) { return strcmp(key, "OOTPC_MOUSE_MODE") ? NULL : mode ? "direct" : "stick"; }
 const char *cfg_value(const char *key) { return cfg_get(key); }
 double cfg_double(const char *key) { (void)key; return sens; }
 float frame_step_frames(void) { return frames; }
@@ -327,8 +327,8 @@ static const char *script_path;
 static uint64_t test_tick;
 static int64_t test_world=-1;
 const char *cfg_get(const char *key) {
-    if (!strcmp(key,"NX2NAVI_INPUT_SCRIPT")) return script_path;
-    if (!strcmp(key,"NX2NAVI_INPUT")) return "none";
+    if (!strcmp(key,"OOTPC_INPUT_SCRIPT")) return script_path;
+    if (!strcmp(key,"OOTPC_INPUT")) return "none";
     return NULL;
 }
 unsigned cfg_version(void) { return 0; }
@@ -378,7 +378,7 @@ def main():
     ap.add_argument('--cc', required=True)
     ap.add_argument('--deps', type=Path, help='dependency include directory (SDL3/Vulkan), to also check input scripts')
     args = ap.parse_args()
-    with tempfile.TemporaryDirectory(prefix='nx2navi-mouse-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='ootpc-mouse-') as tmp:
         folder = Path(tmp)
         (folder / 'patches.h').write_text('#define RT_PATCH_PAGE 0x7003adf000ull\n')
         source = folder / 'check.c'

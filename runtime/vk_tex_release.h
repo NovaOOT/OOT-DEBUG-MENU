@@ -13,7 +13,7 @@
 // absence: nothing released for longer was asked for again. A released texture not taken back within a minute was
 // never taken back.
 //
-// So a released texture goes once it has gone unused for the hold (TRL_HOLD_S by default, NX2NAVI_TEX_RELEASED_HOLD),
+// So a released texture goes once it has gone unused for the hold (TRL_HOLD_S by default, OOTPC_TEX_RELEASED_HOLD),
 // three times the longest gap seen, whether or not the bound is reached: the cache then holds what the last few
 // minutes released, not what the bound allows, and it empties within minutes of the last area change. Unused counts
 // from the release or from the last time a shader sampled the released image (a finalized slot may show it), whichever

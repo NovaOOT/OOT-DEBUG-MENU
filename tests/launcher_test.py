@@ -49,7 +49,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
 
-from launcher import build, feed, gameini, gamefiles, jobs, locks, net, saves, settings, toolchain, updater, versions, winsys  # noqa: E402
+from launcher import build, feed, gameini, gamefiles, jobs, locks, mods, net, saves, settings, steamlib, toolchain, updater, versions, winsys  # noqa: E402
 from launcher.context import Context  # noqa: E402
 from launcher.paths import Layout  # noqa: E402
 
@@ -245,7 +245,7 @@ def fake_fast_repo(folder, clang_version='1.0-1'):
 
 class Tmp(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='nx2navi-test-'))
+        self.tmp = Path(tempfile.mkdtemp(prefix='ootpc-test-'))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.layout = Layout(root=self.tmp / 'launcher', app=ROOT).ensure()
 
@@ -308,27 +308,27 @@ PLAYER_INI = (
 
 
 class GameIniTest(Tmp):
-    """The game settings the launcher switches (launcher/gameini.py), read as runtime/cfg.c reads nx2navi.ini."""
+    """The game settings the launcher switches (launcher/gameini.py), read as runtime/cfg.c reads OOT-PC.ini."""
 
     def test_new_file_gets_the_section(self):
         gameini.put(self.tmp, 'discord', 'discord_rpc', '1')
-        self.assertEqual((self.tmp / 'nx2navi.ini').read_bytes(), b'[discord]\ndiscord_rpc = 1\n')
+        self.assertEqual((self.tmp / 'OOT-PC.ini').read_bytes(), b'[discord]\ndiscord_rpc = 1\n')
         self.assertEqual(gameini.get(self.tmp, 'discord_rpc'), '1')
 
     def test_only_the_key_line_changes(self):
         # the byte order mark, the line ends and a line that is not UTF-8 stay as they were
-        ini = self.tmp / 'nx2navi.ini'
+        ini = self.tmp / 'OOT-PC.ini'
         ini.write_bytes(b'\xef\xbb\xbf[display]\r\nfullscreen = 1\r\n# caf\xe9\r\n# discord_rpc = 1\r\n[discord]\r\n'
-                        b'NX2NAVI_DISCORD_RPC = "1"\r\ndiscord_app_id = 42')
+                        b'OOTPC_DISCORD_RPC = "1"\r\ndiscord_app_id = 42')
         self.assertEqual(gameini.get(self.tmp, 'DISCORD_RPC'), '1')   # quotes, prefix and case as the game reads them
         gameini.put(self.tmp, 'discord', 'discord_rpc', '0')
         self.assertEqual(ini.read_bytes(), b'\xef\xbb\xbf[display]\r\nfullscreen = 1\r\n# caf\xe9\r\n# discord_rpc = 1\r\n'
                          b'[discord]\r\ndiscord_rpc = 0\r\ndiscord_app_id = 42')
         self.assertEqual(gameini.get(self.tmp, 'discord_rpc'), '0')
-        self.assertFalse((self.tmp / 'nx2navi.ini.tmp').exists())
+        self.assertFalse((self.tmp / 'OOT-PC.ini.tmp').exists())
 
     def test_missing_key_goes_under_its_section(self):
-        ini = self.tmp / 'nx2navi.ini'
+        ini = self.tmp / 'OOT-PC.ini'
         ini.write_bytes(b'[discord]\ndiscord_app_id = 42\n[display]\nfullscreen = 1')
         self.assertEqual(gameini.get(self.tmp, 'discord_rpc'), '')
         gameini.put(self.tmp, 'discord', 'discord_rpc', '1')
@@ -336,19 +336,19 @@ class GameIniTest(Tmp):
 
     def test_an_empty_line_leaves_the_earlier_value(self):
         # runtime/cfg.c: "key =" leaves the setting as it was, so the game keeps 0 here, and a change goes to that line
-        ini = self.tmp / 'nx2navi.ini'
+        ini = self.tmp / 'OOT-PC.ini'
         ini.write_bytes(b'discord_rpc = 0\ndiscord_rpc =\n')
         self.assertEqual(gameini.get(self.tmp, 'discord_rpc'), '0')
         gameini.put(self.tmp, 'discord', 'discord_rpc', '1')
         self.assertEqual(ini.read_bytes(), b'discord_rpc = 1\ndiscord_rpc =\n')
 
     def test_an_unreadable_file_is_not_rewritten(self):
-        (self.tmp / 'nx2navi.ini').mkdir()   # there, but not a file that can be read
+        (self.tmp / 'OOT-PC.ini').mkdir()   # there, but not a file that can be read
         with self.assertRaises(OSError):
             gameini.get(self.tmp, 'discord_rpc')
         with self.assertRaises(OSError):
             gameini.put(self.tmp, 'discord', 'discord_rpc', '1')
-        self.assertTrue((self.tmp / 'nx2navi.ini').is_dir())
+        self.assertTrue((self.tmp / 'OOT-PC.ini').is_dir())
 
 class PlayerIniTest(Tmp):
     """The settings file of a player (PLAYER_INI) under the two writers outside the game: the launcher's Settings
@@ -356,7 +356,7 @@ class PlayerIniTest(Tmp):
     for; the lines that are no settings of the game, the comment and every other byte stay."""
 
     def test_the_launchers_setting_adds_one_line(self):
-        ini = self.tmp / 'nx2navi.ini'
+        ini = self.tmp / 'OOT-PC.ini'
         ini.write_bytes(PLAYER_INI)
         self.assertEqual(gameini.get(self.tmp, 'wb_lazy'), '0')
         self.assertEqual(gameini.get(self.tmp, 'async_compute'), '1')   # read like any line; the game ignores it
@@ -372,7 +372,7 @@ class PlayerIniTest(Tmp):
         leaves the file alone; a changed language changes that line; a byte order mark and a line that is not UTF-8
         stay too."""
         from installer import ini as inst_ini
-        path = self.tmp / 'nx2navi.ini'
+        path = self.tmp / 'OOT-PC.ini'
         path.write_bytes(PLAYER_INI)
         inst_ini.write(self.tmp, 'en-US')
         want = PLAYER_INI.replace(b'[language]\r\n', b'[language]\r\nlang = en-US\r\n')
@@ -387,7 +387,7 @@ class PlayerIniTest(Tmp):
         path.write_bytes(marked)
         inst_ini.write(self.tmp, 'fr')
         self.assertEqual(path.read_bytes(), marked.replace(b'lang = ja', b'lang = fr'))
-        self.assertFalse((self.tmp / 'nx2navi.ini.tmp').exists())
+        self.assertFalse((self.tmp / 'OOT-PC.ini.tmp').exists())
 
 
 class RebuildArgsTest(Tmp):
@@ -456,8 +456,8 @@ class UninstallTest(Tmp):
 
     def test_plan_keeps_the_game_and_what_is_not_ours(self):
         from types import SimpleNamespace
-        root = self.tmp / 'OOT-DEBUG-MENU'
-        self.tree(root, ('OOT-DEBUG-MENU.exe', 'app/current.txt', 'python.old-3/x', 'game/profile/save/1/a.sav', 'mine.txt'))
+        root = self.tmp / 'OOT-PC'
+        self.tree(root, ('OOT-PC.exe', 'app/current.txt', 'python.old-3/x', 'game/profile/save/1/a.sav', 'mine.txt'))
         layout = SimpleNamespace(root=root, toolchain=root / 'toolchain')
         gone, empty = winsys.uninstall_plan(layout)
         self.assertNotIn(root / 'game', gone)
@@ -466,8 +466,8 @@ class UninstallTest(Tmp):
         self.assertEqual(empty, [root])
         gone, _ = winsys.uninstall_plan(layout, str(root / 'game'))
         self.assertEqual(gone[0], root / 'game')
-        # the toolchain moved to C:\OOT-DEBUG-MENU: that folder goes only when nothing else is left in it
-        other = self.tmp / 'C OOT-DEBUG-MENU' / 'toolchain'
+        # the toolchain moved to C:\OOT-PC: that folder goes only when nothing else is left in it
+        other = self.tmp / 'C OOT-PC' / 'toolchain'
         gone, empty = winsys.uninstall_plan(SimpleNamespace(root=root, toolchain=other))
         self.assertIn(other, gone)
         self.assertNotIn(other.parent, gone)
@@ -476,8 +476,8 @@ class UninstallTest(Tmp):
     @unittest.skipUnless(os.name == 'nt', 'runs the cmd.exe script')
     def test_script_on_windows(self):
         from types import SimpleNamespace
-        root = self.tmp / 'OOT-DEBUG-MENU ÿ x'   # spaces and a character outside ASCII
-        self.tree(root, ('OOT-DEBUG-MENU.exe', 'app/1/VERSION', 'python/pythonw.exe', 'python.old-12/x', 'pydeps/z',
+        root = self.tmp / 'OOT-PC ÿ x'   # spaces and a character outside ASCII
+        self.tree(root, ('OOT-PC.exe', 'app/1/VERSION', 'python/pythonw.exe', 'python.old-12/x', 'pydeps/z',
                          'data/launcher.json', 'toolchain/msys64/a', 'game/profile/save/1/a.sav', 'mine.txt'))
         layout = SimpleNamespace(root=root, toolchain=root / 'toolchain')
         script = winsys.uninstall_script(*winsys.uninstall_plan(layout)).replace('ping -n 3 127.0.0.1 >nul', 'echo')
@@ -792,7 +792,7 @@ class NetTest(Tmp):
         with self.low_disk(free):
             with self.assertRaises(updater.UpdateError) as refused:
                 updater.safe_extract(z, self.tmp / 'x')
-            self.assertIn('no room for the files of NX2navi-app-0.9.0.zip', str(refused.exception))
+            self.assertIn('no room for the files of OOT-PC-app-0.9.0.zip', str(refused.exception))
             self.assertFalse((self.tmp / 'x').exists())                                  # nothing was unpacked
             from launcher import mods
             with self.assertRaises(mods.ModError) as refused:
@@ -912,7 +912,7 @@ def make_app_zip(folder, ver, extra=None):
     (app / 'launcher').mkdir(parents=True)
     (app / 'launcher' / 'start.pyw').write_text('# test\n')
     (app / 'VERSION').write_text(ver + '\n')
-    z = folder / f'OOT-DEBUG-MENU-app-{ver}.zip'
+    z = folder / f'OOT-PC-app-{ver}.zip'
     with zipfile.ZipFile(z, 'w') as zf:
         for p in app.rglob('*'):
             if p.is_file():
@@ -1103,7 +1103,7 @@ class BackgroundUpdateTest(Tmp):
         z = make_app_zip(self.tmp, ver)
         m = manifest_for(z, ver)
         if runtime:
-            r = self.tmp / f'OOT-DEBUG-MENU-runtime-{runtime}.zip'
+            r = self.tmp / f'OOT-PC-runtime-{runtime}.zip'
             with zipfile.ZipFile(r, 'w') as zf:
                 zf.writestr('python.exe', 'MZ')
                 zf.writestr('runtime-id.txt', runtime + '\n')
@@ -1208,11 +1208,11 @@ class BackgroundUpdateTest(Tmp):
     def test_an_update_leaves_the_games_settings_file(self):
         """The launcher's part of an update (the release staged beside the running version, the switch to it, the
         cleanup after the rebuild) changes nothing in the game folder, also in its default place inside the
-        launcher's folder: the player's nx2navi.ini is the same bytes afterwards, and an uninstall that keeps the game
+        launcher's folder: the player's OOT-PC.ini is the same bytes afterwards, and an uninstall that keeps the game
         does not name it."""
         game = self.layout.root / 'game'
         (game / 'profile').mkdir(parents=True)
-        ini = game / 'nx2navi.ini'
+        ini = game / 'OOT-PC.ini'
         ini.write_bytes(PLAYER_INI)
         before = sorted(p.relative_to(game).as_posix() for p in game.rglob('*'))
         bg = self.background(self.context())
@@ -1814,14 +1814,14 @@ class MakeGameTest(Tmp):
         self.assertEqual(calls, ['lift', 'compile', 'compile', 'lift', 'compile'])
 
     def test_shader_progress_reaches_the_launcher(self):
-        """The shaders step turns nx2navi.exe's counts into progress (translation the first half of the bar, the
+        """The shaders step turns ocarina.exe's counts into progress (translation the first half of the bar, the
         driver build the second), sends one every few seconds while nothing is printed, says when the counts stop
         moving, and passes its other lines on to the log."""
         kit = self.tmp / 'kit'
         (kit / 'tools').mkdir(parents=True)
         (kit / 'bin').mkdir()
         self.out.mkdir()
-        for name in (self.mg.XLATE_NAME, 'nx2navi_xlate.id'):
+        for name in (self.mg.XLATE_NAME, 'ootpc_xlate.id'):
             (kit / 'bin' / name).write_bytes(b'current translator')
             (self.out / name).write_bytes(b'old translator')
         (kit / 'tools' / 'prepare_shaders.py').write_text(
@@ -1841,7 +1841,7 @@ class MakeGameTest(Tmp):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.mg.step_shaders(self.out)
-        for name in (self.mg.XLATE_NAME, 'nx2navi_xlate.id'):
+        for name in (self.mg.XLATE_NAME, 'ootpc_xlate.id'):
             self.assertEqual((self.out / name).read_bytes(), b'current translator')
         lines = buf.getvalue().splitlines()
         events = [json.loads(ln[2:]) for ln in lines if ln.startswith('@@')]
@@ -2070,19 +2070,19 @@ class MakeGameTest(Tmp):
         xlate = kit / 'build' / 'xlate'
         xlate.mkdir(parents=True)
         (xlate / self.mg.XLATE_NAME).write_bytes(b'')
-        (xlate / 'nx2navi_xlate.id').write_text('xlate 1\n')
+        (xlate / 'ootpc_xlate.id').write_text('xlate 1\n')
 
         def key():
             return self.mg.step_key('shaders', 'game', self.out)
         with mock.patch.object(self.mg, 'KIT', kit):
             first = key()
-            (xlate / 'nx2navi_xlate.id').write_text('xlate 2\n')
+            (xlate / 'ootpc_xlate.id').write_text('xlate 2\n')
             self.assertNotEqual(key(), first)
             (kit / 'bin').mkdir()
             (kit / 'bin' / self.mg.XLATE_NAME).write_bytes(b'')
-            (kit / 'bin' / 'nx2navi_xlate.id').write_text('xlate 3\n')
+            (kit / 'bin' / 'ootpc_xlate.id').write_text('xlate 3\n')
             from_bin = key()
-            (xlate / 'nx2navi_xlate.id').write_text('xlate 4\n')
+            (xlate / 'ootpc_xlate.id').write_text('xlate 4\n')
             self.assertEqual(key(), from_bin)
             shutil.rmtree(kit / 'bin')
             shutil.rmtree(xlate)
@@ -2100,7 +2100,7 @@ class MakeGameTest(Tmp):
         (kit / 'tools').mkdir(parents=True)
         (kit / 'bin').mkdir()
         (kit / 'bin' / self.mg.XLATE_NAME).write_bytes(b'')   # the translator the shaders key names (xlate_source)
-        (kit / 'bin' / 'nx2navi_xlate.id').write_text('xlate 1\n')
+        (kit / 'bin' / 'ootpc_xlate.id').write_text('xlate 1\n')
         (kit / 'tools' / 'prepare_shaders.py').write_text('')
         for name in ('prompt_art.py', 'button_icons.py'):
             shutil.copy2(ROOT / 'tools' / name, kit / 'tools' / name)
@@ -2148,9 +2148,9 @@ class MakeGameTest(Tmp):
             self.assertIn('prompts', json.loads((self.out / 'build-cache' / 'state.json').read_text())['steps'])
             self.assertEqual(build(), ([], [{'ev': 'step', 'step': 'prompts', 'state': 'skip'}], 1))
             # a setting that is no key binding changes nothing; a binding draws the prompts again, and only them
-            (self.out / 'nx2navi.ini').write_text('vsync = on\n')
+            (self.out / 'OOT-PC.ini').write_text('vsync = on\n')
             self.assertEqual(build()[2], 1)
-            (self.out / 'nx2navi.ini').write_text('vsync = on\nbind_a = key:f   # jump\n')
+            (self.out / 'OOT-PC.ini').write_text('vsync = on\nbind_a = key:f   # jump\n')
             others, ev, runs = build()
             self.assertEqual((others, states(ev), runs), ([], ['start', 'done'], 2))
             # a folder gone, or new art: drawn again
@@ -2172,7 +2172,7 @@ class MakeGameTest(Tmp):
 
     def test_an_update_keeps_the_settings_file(self):
         """The rebuild an update ends with (make_game.py --rebuild under a newer kit: the lift, the compile, the
-        shaders step and the button prompts all run again) leaves the game folder's nx2navi.ini as the player has it,
+        shaders step and the button prompts all run again) leaves the game folder's OOT-PC.ini as the player has it,
         byte for byte. The build reads the file (the bind_ lines for the prompts, shader_carry for the shaders step)
         and never writes it; so does a second rebuild that finds nothing to do, and one from the game files again.
         The lift and the compile are stand-ins here (the real ones need the game and clang); the check, the ExeFS and
@@ -2184,7 +2184,7 @@ class MakeGameTest(Tmp):
         (kit / 'VERSION').write_text('0.7.0\n')
         (kit / 'recomp' / 'gen.py').write_text('# the lifter of 0.7.0\n')
         (kit / 'bin' / self.mg.XLATE_NAME).write_bytes(b'translator')
-        (kit / 'bin' / 'nx2navi_xlate.id').write_text('xlate 1\n')
+        (kit / 'bin' / 'ootpc_xlate.id').write_text('xlate 1\n')
         (kit / 'tools' / 'prepare_shaders.py').write_text('print("prepare-shaders: progress build 1 1", flush=True)\n')
         for name in ('prompt_art.py', 'button_icons.py'):
             shutil.copy2(ROOT / 'tools' / name, kit / 'tools' / name)
@@ -2211,7 +2211,7 @@ class MakeGameTest(Tmp):
 
         sys.path.insert(0, str(self.layout.pydeps))   # the fake zbic
         self.addCleanup(sys.path.remove, str(self.layout.pydeps))
-        ini = self.out / 'nx2navi.ini'
+        ini = self.out / 'OOT-PC.ini'
         with mock.patch.multiple(self.mg, KIT=kit, PROMPT_PACKAGES={}, EVENTS=False, step_lift=fake('lift'),
                                  step_compile=fake('compile'), step_scan=fake('scan')):
             self.assertEqual(build('--nup', str(self.nup)),
@@ -2860,7 +2860,7 @@ class MakeGameTest(Tmp):
         self.assertFalse(self.mg.shader_carry(out))   # prepared, but the cache names no translator
         (out / 'shader-cache' / 'identities.txt').write_text('# translators\n' + 'ab' * 32 + '\n')
         self.assertTrue(self.mg.shader_carry(out))
-        (out / 'nx2navi.ini').write_text('[performance]\nNX2NAVI_SHADER_CARRY = "0"\n')
+        (out / 'OOT-PC.ini').write_text('[performance]\nOOTPC_SHADER_CARRY = "0"\n')
         self.assertFalse(self.mg.shader_carry(out))
 
     def test_cache_from_before_carrying_names_its_translator(self):
@@ -2869,7 +2869,7 @@ class MakeGameTest(Tmp):
         out = self.tmp / 'game'
         out.mkdir()
         old = 'B72C60033CE90FC475EF5B4D397555DDA9A52AD0FDF480B8A4E292ED925A6DE7'
-        (out / 'nx2navi_xlate.id').write_text(old + '\r\n')
+        (out / 'ootpc_xlate.id').write_text(old + '\r\n')
         self.mg.note_cache_translator(out)   # no cache: nothing to name
         self.assertFalse((out / 'shader-cache' / 'identities.txt').exists())
         (out / 'shader-cache').mkdir()
@@ -2879,11 +2879,11 @@ class MakeGameTest(Tmp):
         self.assertTrue(lines[0].startswith('#'))
         self.assertEqual(lines[1], old.lower())
         self.assertEqual(self.mg.cache_identities(out), [old.lower()])
-        (out / 'nx2navi_xlate.id').write_text('cd' * 32)   # a file the game keeps is never written over
+        (out / 'ootpc_xlate.id').write_text('cd' * 32)   # a file the game keeps is never written over
         self.mg.note_cache_translator(out)
         self.assertEqual(self.mg.cache_identities(out), [old.lower()])
         ids.unlink()
-        (out / 'nx2navi_xlate.id').write_text('not an identity')
+        (out / 'ootpc_xlate.id').write_text('not an identity')
         self.mg.note_cache_translator(out)
         self.assertFalse(ids.exists())
 
@@ -2901,7 +2901,7 @@ class MakeGameTest(Tmp):
             for n in self.mg.DLSSG_FILES[:-1]:
                 (src / n).write_bytes(n.encode())
             self.assertEqual(self.mg.place_dlssg(out), 0)   # nvngx_dlssg.dll missing: nothing is placed
-            self.assertFalse((out / 'nx2navi_dlssg.dll').exists())
+            self.assertFalse((out / 'ootpc_dlssg.dll').exists())
             (src / 'nvngx_dlssg.dll').write_bytes(b'ngx')
             (src / 'streamline-LICENSE.txt').write_text('MIT')
             self.assertEqual(self.mg.place_dlssg(out), len(self.mg.DLSSG_FILES) + 1)
@@ -2949,7 +2949,7 @@ class MakeGameTest(Tmp):
                     z.writestr(n, b'changed' if n == 'license.txt' else d)
             with self.assertRaises(SystemExit):
                 streamline_pin.extract(archive, self.tmp / 'x')
-            dll = self.tmp / 'nx2navi_dlssg.dll'
+            dll = self.tmp / 'ootpc_dlssg.dll'
             dll.write_bytes(b'our frame generation shim')
             dest = self.tmp / 'bin' / 'dlssg'
             streamline_pin.place(dll, sdk, dest)
@@ -2958,7 +2958,7 @@ class MakeGameTest(Tmp):
         self.assertEqual((dest / 'streamline-LICENSE.txt').read_bytes(), files['license.txt'])
         note = (dest / streamline_pin.NOTICE).read_text(encoding='utf-8')
         self.assertIn(f'Streamline {streamline_pin.VERSION} SDK', note)
-        self.assertIn(f'nx2navi_dlssg.dll sha256 {hashlib.sha256(dll.read_bytes()).hexdigest()}', note)
+        self.assertIn(f'ootpc_dlssg.dll sha256 {hashlib.sha256(dll.read_bytes()).hexdigest()}', note)
         self.assertIn(f'nvngx_dlssg.dll sha256 {pins["bin/x64/nvngx_dlssg.dll"]}', note)
 
     @unittest.skipIf(os.name == 'nt', 'a script stands in for windres.exe')
@@ -2974,10 +2974,10 @@ class MakeGameTest(Tmp):
         obj.mkdir(parents=True)
         rt = self.tmp / 'the kit' / 'runtime'
         rt.mkdir(parents=True)
-        for name in ('nx2navi.rc', 'nx2navi.manifest', 'nx2navi.ico'):
+        for name in ('ootpc.rc', 'ootpc.manifest', 'ootpc.ico'):
             shutil.copy2(ROOT / 'runtime' / name, rt / name)
         rco = self.mg.compile_resources(msys, rt, obj, dict(os.environ))
-        self.assertEqual((rco, rco.read_bytes()), (obj / 'nx2navi_rc.o', b'coff'))
+        self.assertEqual((rco, rco.read_bytes()), (obj / 'ootpc_rc.o', b'coff'))
         seen = json.loads(windres.with_suffix('.json').read_text())
         args = seen['argv']
         self.assertEqual(seen['cwd'], str(rt))
@@ -2985,12 +2985,12 @@ class MakeGameTest(Tmp):
         self.assertIn(f'--preprocessor={msys / "bin" / "gcc.exe"}', args)
         self.assertEqual([a for a in args if a.startswith('--preprocessor-arg=')],
                          ['--preprocessor-arg=-E', '--preprocessor-arg=-xc', '--preprocessor-arg=-DRC_INVOKED'])
-        self.assertEqual(args[args.index('-i') + 1], 'nx2navi.rc')
+        self.assertEqual(args[args.index('-i') + 1], 'ootpc.rc')
         self.assertFalse([a for a in args if a.startswith(('-I', '--include-dir', '-D', '-U'))])
         # the temporary files went to a folder of the build cache, which is gone with the two windres left there
         self.assertEqual(seen['tmp'], seen['temp'])
         self.assertEqual(Path(seen['tmp']).parent, obj)
-        self.assertEqual(sorted(p.name for p in obj.iterdir()), ['nx2navi_rc.o'])
+        self.assertEqual(sorted(p.name for p in obj.iterdir()), ['ootpc_rc.o'])
         # the same resource again: the object keeps its time, so the link key does not change and nothing relinks
         before = rco.stat().st_mtime_ns
         time.sleep(0.02)
@@ -3000,8 +3000,8 @@ class MakeGameTest(Tmp):
         err = io.StringIO()
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
             self.mg.compile_resources(msys, rt, obj, dict(os.environ, FAKE_WINDRES_FAIL='1'))
-        self.assertIn('windres failed on runtime/nx2navi.rc: windres: preprocessing failed.', err.getvalue())
-        self.assertEqual(sorted(p.name for p in obj.iterdir()), ['nx2navi_rc.o'])
+        self.assertIn('windres failed on runtime/ootpc.rc: windres: preprocessing failed.', err.getvalue())
+        self.assertEqual(sorted(p.name for p in obj.iterdir()), ['ootpc_rc.o'])
 
     def test_a_cut_romfs_image_does_not_count_as_used_space(self):
         """The RomFS step removes the romfs.bin.part of a run that was cut short before it measures the free space:
@@ -3943,7 +3943,7 @@ class LockTest(Tmp):
             self.assertEqual(app.main(['--root', str(self.layout.root)]), 0)
         window.assert_not_called()                 # no second window
         self.assertEqual(len(said), 1)
-        self.assertIn(f'NX2navi is already running: the launcher window (process {other.pid}', said[0])
+        self.assertIn(f'OOT-PC is already running: the launcher window (process {other.pid}', said[0])
 
     def test_the_lock_goes_when_its_process_dies(self):
         other = self.holder(self.layout)
@@ -4130,7 +4130,7 @@ class SavesTest(unittest.TestCase):
     """launcher/saves.py: where the game keeps its save, the save folders it recognises, and the import."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='nx2navi-saves-'))
+        self.tmp = Path(tempfile.mkdtemp(prefix='ootpc-saves-'))
         self.game = self.tmp / 'game'
         self.game.mkdir()
 
@@ -4433,7 +4433,7 @@ class SaveShareTest(unittest.TestCase):
             'slot_02/progress.sav': b'p2'}
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='nx2navi-share-'))
+        self.tmp = Path(tempfile.mkdtemp(prefix='ootpc-share-'))
         self.game = self.tmp / 'game'
         self.out = self.tmp / 'out'
         self.out.mkdir()
@@ -4457,7 +4457,7 @@ class SaveShareTest(unittest.TestCase):
         with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
             if manifest is not False:
                 m = manifest or {'format': saves.FORMAT, 'format_version': 1, 'title_id': '0400486024dec000',
-                                 'game_version': '1.1.1', 'nx2navi': '0.6.1', 'exported': '2026-11-09T17:30:05Z'}
+                                 'game_version': '1.1.1', 'ootpc': '0.6.1', 'exported': '2026-11-09T17:30:05Z'}
                 z.writestr(saves.MANIFEST, json.dumps(m))
             for n, data in members.items():
                 z.writestr(n, data)
@@ -4468,9 +4468,9 @@ class SaveShareTest(unittest.TestCase):
         tx = self.game / 'profile' / 'save-tx'
         self.files(tx, {'ready-7/option.sav': b'newer', 'ready-7/slot_00/progress.sav': b'p0 newer',
                         'work/option.sav': b'not committed'})
-        self.files(self.game, {'logs/nx2navi.log': b'log', 'nx2navi.ini': b'[graphics]'})
+        self.files(self.game, {'logs/ootpc.log': b'log', 'OOT-PC.ini': b'[graphics]'})
         r = saves.export_save(self.game, self.out, version='0.6.1', log=lambda m: None)
-        self.assertRegex(r['path'].name, r'^OOT-DEBUG-MENU-save-\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.zip$')
+        self.assertRegex(r['path'].name, r'^OOT-PC-save-\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.zip$')
         self.assertEqual(r['extras'], [])
         self.assertEqual([p.name for p in self.out.iterdir()], [r['path'].name])   # no .part left behind
         with zipfile.ZipFile(r['path']) as z:
@@ -4478,7 +4478,7 @@ class SaveShareTest(unittest.TestCase):
             self.assertEqual(names, ['manifest.json', 'save/option.sav', 'save/slot_00/progress.sav'])
             self.assertEqual(z.read('save/option.sav'), b'newer')   # the finished commit the game would load
             m = json.loads(z.read('manifest.json'))
-        self.assertEqual((m['format'], m['format_version'], m['title_id'], m['game_version'], m['nx2navi'],
+        self.assertEqual((m['format'], m['format_version'], m['title_id'], m['game_version'], m['ootpc'],
                           m['files'], m['bug_report']), (saves.FORMAT, 1, '0400486024dec000', '1.1.1', '0.6.1', 2,
                                                          False))
         self.assertRegex(m['exported'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$')
@@ -4487,15 +4487,15 @@ class SaveShareTest(unittest.TestCase):
 
     def test_a_bug_report_adds_the_log_and_settings_and_never_keys(self):
         self.game_with_save(self.game, dict(self.SAVE, **{'prod.keys': b'secret', 'sub/title.keys': b'secret'}))
-        self.files(self.game, {'logs/nx2navi.log': b'the log', 'logs/nx2navi.1.log': b'older', 'nx2navi.ini': b'[x]',
+        self.files(self.game, {'logs/ootpc.log': b'the log', 'logs/ootpc.1.log': b'older', 'OOT-PC.ini': b'[x]',
                                'prod.keys': b'secret'})
         r = saves.export_save(self.game, self.out, bug_report=True, log=lambda m: None)
         self.assertTrue(r['path'].name.endswith('-bug-report.zip'))
-        self.assertEqual(r['extras'], ['nx2navi.log', 'nx2navi.ini'])
+        self.assertEqual(r['extras'], ['ootpc.log', 'OOT-PC.ini'])
         with zipfile.ZipFile(r['path']) as z:
             names = z.namelist()
-            self.assertEqual(z.read('bug-report/nx2navi.log'), b'the log')
-            self.assertEqual(z.read('bug-report/nx2navi.ini'), b'[x]')
+            self.assertEqual(z.read('bug-report/ootpc.log'), b'the log')
+            self.assertEqual(z.read('bug-report/OOT-PC.ini'), b'[x]')
             self.assertTrue(json.loads(z.read('manifest.json'))['bug_report'])
             self.assertFalse(any(b'secret' in z.read(n) for n in names))
         self.assertFalse([n for n in names if 'keys' in n])
@@ -4503,14 +4503,14 @@ class SaveShareTest(unittest.TestCase):
 
     def test_a_bug_report_keeps_the_private_settings_values_out(self):
         """The private settings' values (a room's secret, a relay and a name that an earlier version's co-op left in
-        the file) are not in the nx2navi.ini a bug report carries; every other byte of the file is."""
+        the file) are not in the OOT-PC.ini a bug report carries; every other byte of the file is."""
         ini = (b'\xef\xbb\xbf[coop]\r\ncoop = 1\r\n  Coop_Room = H7K3WM-BCDFGH-234567\r\ncoop_server=relay.example:24680\r\n'
                b'# coop_name = in a comment\r\ncoop_name =\r\ncoop_accept = 1a2b3c4d\nfps_limit = 60')
         self.game_with_save(self.game, self.SAVE)
-        self.files(self.game, {'logs/nx2navi.log': b'the log', 'nx2navi.ini': ini})
+        self.files(self.game, {'logs/ootpc.log': b'the log', 'OOT-PC.ini': ini})
         r = saves.export_save(self.game, self.out, bug_report=True, log=lambda m: None)
         with zipfile.ZipFile(r['path']) as z:
-            got = z.read('bug-report/nx2navi.ini')
+            got = z.read('bug-report/OOT-PC.ini')
         self.assertEqual(got, b'\xef\xbb\xbf[coop]\r\ncoop = 1\r\n  Coop_Room = (set, not shown)\r\n'
                               b'coop_server= (set, not shown)\r\n# coop_name = in a comment\r\ncoop_name =\r\n'
                               b'coop_accept = (set, not shown)\nfps_limit = 60')
@@ -4533,7 +4533,7 @@ class SaveShareTest(unittest.TestCase):
         with self.assertRaises(saves.SaveError):
             saves.export_save(self.game, self.out, bug_report=True, log=lambda m: None)   # no log either: nothing
         self.assertFalse(self.out.exists() and list(self.out.iterdir()))
-        self.files(self.game, {'logs/nx2navi.log': b'FATAL: it stopped', 'nx2navi.ini': b'[x]', 'prod.keys': b'secret'})
+        self.files(self.game, {'logs/ootpc.log': b'FATAL: it stopped', 'OOT-PC.ini': b'[x]', 'prod.keys': b'secret'})
         with self.assertRaises(saves.SaveError):
             saves.export_save(self.game, self.out, log=lambda m: None)   # not a bug report: a save or nothing
         for account in (False, True):   # a game that never made its account, and an account without files
@@ -4541,14 +4541,14 @@ class SaveShareTest(unittest.TestCase):
                 saves.account_dir(self.game).mkdir(parents=True)
             with self.subTest(account=account):
                 r = saves.export_save(self.game, self.out, bug_report=True, version='0.7.1', log=lambda m: None)
-                self.assertRegex(r['path'].name, r'^OOT-DEBUG-MENU-log-.*-bug-report( \(\d+\))?\.zip$')   # (2): the same second
-                self.assertEqual((r['files'], r['extras']), (0, ['nx2navi.log', 'nx2navi.ini']))
+                self.assertRegex(r['path'].name, r'^OOT-PC-log-.*-bug-report( \(\d+\))?\.zip$')   # (2): the same second
+                self.assertEqual((r['files'], r['extras']), (0, ['ootpc.log', 'OOT-PC.ini']))
                 with zipfile.ZipFile(r['path']) as z:
-                    self.assertEqual(sorted(z.namelist()), ['bug-report/nx2navi.ini', 'bug-report/nx2navi.log',
+                    self.assertEqual(sorted(z.namelist()), ['bug-report/OOT-PC.ini', 'bug-report/ootpc.log',
                                                             'manifest.json'])
-                    self.assertEqual(z.read('bug-report/nx2navi.log'), b'FATAL: it stopped')
+                    self.assertEqual(z.read('bug-report/ootpc.log'), b'FATAL: it stopped')
                     m = json.loads(z.read('manifest.json'))
-                    self.assertEqual((m['format'], m['files'], m['bug_report'], m['nx2navi']),
+                    self.assertEqual((m['format'], m['files'], m['bug_report'], m['ootpc']),
                                      (saves.FORMAT, 0, True, '0.7.1'))
                 with self.assertRaises(saves.SaveError):   # nobody's save: an import says so and changes nothing
                     saves.import_zip(self.game_with_save(self.tmp / f'other{account}'), r['path'], log=lambda m: None)
@@ -4561,11 +4561,11 @@ class SaveShareTest(unittest.TestCase):
         acct = saves.account_dir(self.game)
         self.files(self.game / 'profile' / 'save-tx', {'ready-2/option.sav': b'mine newer'})
         r = saves.import_save(self.game, shared, log=lambda m: None)
-        self.assertEqual(r['manifest']['nx2navi'], '0.6.1')
+        self.assertEqual(r['manifest']['ootpc'], '0.6.1')
         self.assertIsNone(r['slot'])
         got = {p.relative_to(acct).as_posix(): p.read_bytes() for p in acct.rglob('*') if p.is_file()}
         self.assertEqual(got, self.SAVE)                                # every slot: slot_05 is gone too
-        self.assertFalse((acct / 'nx2navi.log').exists())               # the bug report files stay out
+        self.assertFalse((acct / 'ootpc.log').exists())               # the bug report files stay out
         self.assertEqual((r['backup'] / 'option.sav').read_bytes(), b'mine newer')
         self.assertEqual(r['backup'].parent, self.game / 'saves')
         self.assertEqual(list((self.game / 'profile' / 'save-tx').iterdir()), [])
@@ -4624,7 +4624,7 @@ class SaveShareTest(unittest.TestCase):
             'a drive': self.zip_of(dict(good, **{'save/C:/evil.sav': b'x'}), manifest),
             'a backslash': self.zip_of(dict(good, **{'save/..\\evil.sav': b'x'}), manifest),
             'not this game': self.zip_of({'save/save.dat': b'x', 'save/user/0001.bin': b'y'}, manifest),
-            'no save': self.zip_of({'bug-report/nx2navi.log': b'l'}, manifest),
+            'no save': self.zip_of({'bug-report/ootpc.log': b'l'}, manifest),
         }
         for why, path in cases.items():
             with self.subTest(why=why):
@@ -4685,7 +4685,11 @@ class IconTest(unittest.TestCase):
         except ImportError:
             self.skipTest('needs numpy')
         self.assertEqual(art.navi(2).shape, (42, 44, 4))
-        data = art.navi_ico()
+        for data in (art.navi_ico(), art.app_ico(), (ROOT / 'runtime' / 'ootpc.ico').read_bytes()):
+            self.check_ico(data)
+        self.assertEqual(art.app_icon_png()[:4], b'\x89PNG')
+
+    def check_ico(self, data):
         count = struct.unpack_from('<H', data, 4)[0]
         sizes = [data[6 + 16 * i] or 256 for i in range(count)]
         self.assertEqual(sizes[0], 16)
@@ -5012,6 +5016,116 @@ def have_display():
         return False
 
 
+class SteamLibTest(Tmp):
+    """launcher/steamlib.py: Steam's library file for co-op, found in the player's Steam library and put beside the
+    game. The files here are made up: the bytes a library's exported names leave in it, no code."""
+
+    def lib(self, path, old=False, mtime=None):
+        names = list(steamlib.NEEDS) + [group[-1] for group in steamlib.ONE_OF]
+        if old:   # a library from before the networking messages interface
+            names = [n for n in names if b'NetworkingMessages' not in n]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'MZ' + bytes(64) + b'\x00'.join(names) + b'\x00')
+        if mtime:
+            os.utime(path, (mtime, mtime))
+        return path
+
+    def steam(self):
+        """A Steam folder with a second library elsewhere, as libraryfolders.vdf lists it (backslashes doubled)."""
+        steam = self.tmp / 'Steam'
+        other = self.tmp / 'Games Drive' / 'SteamLibrary'
+        (steam / 'steamapps' / 'common').mkdir(parents=True)
+        (other / 'steamapps' / 'common').mkdir(parents=True)
+        one = chr(92)
+        rows = ''.join('\t"%d"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n' % (i, str(p).replace(one, one + one))
+                       for i, p in enumerate((steam, other)))
+        (steam / 'steamapps' / 'libraryfolders.vdf').write_text('"libraryfolders"\n{\n' + rows + '}\n', encoding='utf-8')
+        return steam, other
+
+    def test_a_library_is_suitable_only_with_every_call_co_op_uses(self):
+        self.assertTrue(steamlib.suitable(self.lib(self.tmp / 'a' / steamlib.NAME)))
+        self.assertFalse(steamlib.suitable(self.lib(self.tmp / 'b' / steamlib.NAME, old=True)))
+        (self.tmp / 'c').mkdir()
+        (self.tmp / 'c' / steamlib.NAME).write_bytes(b'not a library at all')
+        self.assertFalse(steamlib.suitable(self.tmp / 'c' / steamlib.NAME))
+        self.assertFalse(steamlib.suitable(self.tmp / 'missing' / steamlib.NAME))
+
+    def test_the_newest_suitable_signed_library_of_any_steam_library_is_found(self):
+        steam, other = self.steam()
+        now = time.time()
+        self.lib(steam / 'steamapps' / 'common' / 'Old Game' / steamlib.NAME, old=True, mtime=now)
+        mid = self.lib(steam / 'steamapps' / 'common' / 'Mid Game' / 'bin' / steamlib.NAME, mtime=now - 5000)
+        new = self.lib(other / 'steamapps' / 'common' / 'Unity Game' / 'Game_Data' / 'Plugins' / 'x86_64' / steamlib.NAME,
+                       mtime=now - 100)
+        unsigned = self.lib(other / 'steamapps' / 'common' / 'Replaced' / steamlib.NAME, mtime=now - 10)
+        self.lib(other / 'steamapps' / 'common' / 'Deep' / 'a' / 'b' / 'c' / 'd' / 'e' / 'f' / steamlib.NAME, mtime=now)
+        self.assertEqual([p.parent.name for p in steamlib.libraries(steam)], ['Steam', 'SteamLibrary'])
+        self.assertEqual(steamlib.find(steam, lambda p: Path(p) != unsigned), new)   # not the old, unsigned or too deep one
+        self.assertEqual(steamlib.find(steam, lambda p: Path(p) == mid), mid)
+        self.assertIsNone(steamlib.find(steam, lambda p: False))
+        self.assertIsNone(steamlib.find(self.tmp / 'no steam here', lambda p: True))
+
+    def test_the_library_is_put_beside_the_game_once(self):
+        steam, other = self.steam()
+        src = self.lib(other / 'steamapps' / 'common' / 'Some Game' / steamlib.NAME)
+        game = self.tmp / 'game'
+        game.mkdir()
+        lines = []
+        self.assertEqual(steamlib.ensure(game, None, steam, lines.append, lambda p: True), 'copied')
+        self.assertEqual((game / steamlib.NAME).read_bytes(), src.read_bytes())
+        self.assertIn('Some Game', lines[-1])
+        self.assertEqual(steamlib.ensure(game, None, self.tmp / 'gone', lines.append, lambda p: False), 'there')
+        # a file beside the game that is not a library co-op can use is replaced
+        (game / steamlib.NAME).write_bytes(b'MZ old')
+        self.assertEqual(steamlib.ensure(game, None, steam, lines.append, lambda p: True), 'copied')
+        self.assertTrue(steamlib.suitable(game / steamlib.NAME))
+
+    def test_a_library_the_release_ships_comes_first_and_none_is_said_once(self):
+        steam, other = self.steam()
+        kit_bin = self.tmp / 'kit' / 'bin'
+        shipped = self.lib(kit_bin / steamlib.NAME)
+        shipped.write_bytes(shipped.read_bytes() + b'shipped')
+        self.lib(other / 'steamapps' / 'common' / 'Some Game' / steamlib.NAME)
+        game = self.tmp / 'game'
+        game.mkdir()
+        self.assertEqual(steamlib.ensure(game, kit_bin, steam, lambda line: None, lambda p: True), 'copied')
+        self.assertTrue((game / steamlib.NAME).read_bytes().endswith(b'shipped'))
+        # nothing suitable anywhere: said in the log once, and not searched again by this process
+        empty = self.tmp / 'empty game'
+        empty.mkdir()
+        lines = []
+        nothing = self.tmp / 'Steam without games'
+        (nothing / 'steamapps' / 'common').mkdir(parents=True)
+        self.assertEqual(steamlib.ensure(empty, None, nothing, lines.append, lambda p: True), 'none')
+        self.assertEqual(steamlib.ensure(empty, None, steam, lines.append, lambda p: True), 'none')
+        self.assertEqual(len(lines), 1)
+        self.assertFalse((empty / steamlib.NAME).exists())
+
+
+class FeatureModTest(Tmp):
+    """launcher/mods.py: a mod that turns on a feature built into the game (its ootpc-feature.txt), as
+    tools/make_coop_mod.py writes the Steam Co-op one."""
+
+    def test_the_steam_co_op_mod_is_a_usable_mod_and_turns_co_op_on_while_it_is_on(self):
+        game = self.tmp / 'game'
+        folder = mods.make_feature_mod(mods.ensure_mods_dir(game) / 'Steam Co-op', mods.STEAM_COOP)
+        m = next(m for m in mods.scan(game, details=False) if m.name == 'Steam Co-op')
+        self.assertEqual((m.feature, m.problem), (mods.STEAM_COOP, ''))
+        self.assertTrue(mods._is_mod_top(folder))
+        self.assertTrue(mods.feature_on(game, mods.STEAM_COOP))
+        mods.set_enabled(game, 'Steam Co-op', False)
+        self.assertFalse(mods.feature_on(game, mods.STEAM_COOP))
+
+    def test_a_feature_this_version_does_not_have_is_named_as_the_problem(self):
+        game = self.tmp / 'game'
+        folder = mods.ensure_mods_dir(game) / 'Future'
+        folder.mkdir()
+        (folder / mods.FEATURE_FILE).write_text('\ufeff  time-travel \r\n', encoding='utf-8')
+        m = next(m for m in mods.scan(game, details=False) if m.name == 'Future')
+        self.assertEqual(m.feature, '')
+        self.assertIn('time-travel', m.problem)
+
+
 @unittest.skipUnless(have_display(), 'needs tkinter, numpy and a display')
 class SteamTest(Tmp):
     """launcher/steam.py on made-up Steam files: the binary shortcuts file read and written back unchanged, our
@@ -5032,9 +5146,9 @@ class SteamTest(Tmp):
         self.assertEqual(b[-4:], b'\x08\x08\x08\x08')   # tags, the shortcut, shortcuts, the file
         self.assertEqual(steam.vdf_dump(steam.vdf_load(b)), b)
         self.assertFalse(steam.has_shortcut(b))
-        new, sid = steam.add_shortcut(b, '"C:\\OOT-DEBUG-MENU\\python\\pythonw.exe"', '"C:\\OOT-DEBUG-MENU"',
-                                      '"C:\\OOT-DEBUG-MENU\\data\\steam_play.pyw"', 'C:\\grid\\x_icon.png')
-        self.assertEqual(sid, steam.appid('"C:\\OOT-DEBUG-MENU\\python\\pythonw.exe"', steam.NAME))
+        new, sid = steam.add_shortcut(b, '"C:\\OOT-PC\\python\\pythonw.exe"', '"C:\\OOT-PC"',
+                                      '"C:\\OOT-PC\\data\\steam_play.pyw"', 'C:\\grid\\x_icon.png')
+        self.assertEqual(sid, steam.appid('"C:\\OOT-PC\\python\\pythonw.exe"', steam.NAME))
         self.assertTrue(sid & 0x80000000)
         self.assertTrue(new.startswith(b[:-2]))   # the other shortcut stays byte for byte
         self.assertTrue(steam.has_shortcut(new))
@@ -5043,12 +5157,12 @@ class SteamTest(Tmp):
         ours = {k: v for _, k, v in items[1][2]}
         self.assertEqual(ours['AppName'], 'The Legend of Zelda Ocarina of Time')
         self.assertEqual(struct.unpack('<I', ours['appid'])[0], sid)
-        self.assertEqual(ours['LaunchOptions'], '"C:\\OOT-DEBUG-MENU\\data\\steam_play.pyw"')
+        self.assertEqual(ours['LaunchOptions'], '"C:\\OOT-PC\\data\\steam_play.pyw"')
         self.assertEqual(ours['AllowOverlay'], struct.pack('<I', 1))
-        again, _ = steam.add_shortcut(new, '"D:\\OOT-DEBUG-MENU\\python\\pythonw.exe"', '"D:\\OOT-DEBUG-MENU"', '', 'x')
+        again, _ = steam.add_shortcut(new, '"D:\\OOT-PC\\python\\pythonw.exe"', '"D:\\OOT-PC"', '', 'x')
         items = steam.vdf_load(again)[0][2]
         self.assertEqual(len(items), 2)   # moved launcher: the same shortcut, updated
-        self.assertEqual({k: v for _, k, v in items[1][2]}['StartDir'], '"D:\\OOT-DEBUG-MENU"')
+        self.assertEqual({k: v for _, k, v in items[1][2]}['StartDir'], '"D:\\OOT-PC"')
         with self.assertRaises(steam.SteamError):
             steam.vdf_load(b[:-5])
 
@@ -5086,7 +5200,7 @@ class WhilePlayingTest(Tmp):
         a.root.deiconify.assert_called_once()
 
     def test_the_games_settings_file_is_left_alone_while_it_runs(self):
-        """The game writes nx2navi.ini when a menu setting changes, so the launcher's Discord Status switch (the one
+        """The game writes OOT-PC.ini when a menu setting changes, so the launcher's Discord Status switch (the one
         setting of that file the Settings screen has) changes nothing while the game runs and says why; the mods'
         switches refuse the same way (switch_mod)."""
         try:
@@ -5095,14 +5209,14 @@ class WhilePlayingTest(Tmp):
             self.skipTest(f'no window toolkit: {e}')
         game = self.tmp / 'game'
         game.mkdir()
-        (game / 'nx2navi.ini').write_text('[discord]\ndiscord_rpc = 1\n', encoding='utf-8')
+        (game / 'OOT-PC.ini').write_text('[discord]\ndiscord_rpc = 1\n', encoding='utf-8')
         a = mock.MagicMock()
         a.message = ''
         a.game_busy.return_value = True
         row = App.discord_row(a, str(game))
-        before = (game / 'nx2navi.ini').read_bytes()
+        before = (game / 'OOT-PC.ini').read_bytes()
         row.on(False)
-        self.assertEqual((game / 'nx2navi.ini').read_bytes(), before)
+        self.assertEqual((game / 'OOT-PC.ini').read_bytes(), before)
         self.assertTrue(row.get())                                     # the switch still shows what the file says
         self.assertIn('Quit the game first', a.message)
         a.game_busy.return_value = False
@@ -5119,7 +5233,7 @@ class WhilePlayingTest(Tmp):
     def ended(self, code, log_text):
         """watch_game after the game ended with code, its log holding log_text; (the stand-in window, the log)."""
         from launcher.ui.app import App
-        log = self.tmp / 'logs' / 'nx2navi.log'
+        log = self.tmp / 'logs' / 'ootpc.log'
         log.parent.mkdir(exist_ok=True)
         if log_text is not None:
             log.write_text(log_text, encoding='utf-8')
@@ -5143,11 +5257,11 @@ class WhilePlayingTest(Tmp):
         a, log = self.ended(70, f'[host] log: x\nFATAL: an earlier one\n[host] more\nFATAL: {fatal}\n'
                                 '[host] fatal: memory commit: this process 9000 MB, the system 30000 of 32000 MB\n')
         self.assertEqual(a.message, f'The game ended with a fatal error (code 70): {fatal}. Its log is '
-                                    'logs\\nx2navi.log in the game folder.')
+                                    'logs\\ootpc.log in the game folder.')
         a.ctx.log.assert_called_once_with(f'the game ended with code 70; its log says: FATAL: {fatal}')
         self.assertIn('[launcher] the game ended with code 70', log.read_text(encoding='utf-8'))
         # the crash report's exit code, and a line longer than the home screen shows
-        long = 'access violation (0xc0000005) at host 0x7ff6 (nx2navi+0x1234), reading address 0x10 ' + 'x' * 300
+        long = 'access violation (0xc0000005) at host 0x7ff6 (ootpc+0x1234), reading address 0x10 ' + 'x' * 300
         a, log = self.ended(71, f'FATAL: {long}\n  a line of the report\n')
         self.assertIn('(code 71): access violation (0xc0000005)', a.message)
         self.assertIn('…. Its log is', a.message)
@@ -5159,7 +5273,7 @@ class WhilePlayingTest(Tmp):
         # any other exit code reads no FATAL line; no log at all is no error
         a, log = self.ended(0xC0000005, f'FATAL: {fatal}\n')
         self.assertEqual(a.message, 'The game ended with code 0xC0000005 (access violation). Its log is '
-                                    'logs\\nx2navi.log in the game folder.')
+                                    'logs\\ootpc.log in the game folder.')
         log.unlink()
         self.assertEqual(app.last_fatal(self.tmp), '')
         self.assertEqual(app.last_fatal(''), '')
@@ -5169,7 +5283,7 @@ class WhilePlayingTest(Tmp):
             from launcher.ui import app
         except ImportError as e:
             self.skipTest(f'no window toolkit: {e}')
-        log = self.tmp / 'logs' / 'nx2navi.log'
+        log = self.tmp / 'logs' / 'ootpc.log'
         log.parent.mkdir()
         log.write_bytes(b'FATAL: far back\n' + b'[host] a line\n' * 40000 + b'FATAL: near the end \xff\n[host] last\n')
         self.assertGreater(log.stat().st_size, app.FATAL_TAIL)
@@ -5306,7 +5420,7 @@ class ForcedCheckTest(Tmp):
             a.check_started = time.time() - 10
             App.check_now(a, force=True)
             check.assert_not_called()
-            self.assertEqual(a.message, 'OOT-DEBUG-MENU looked for updates less than a minute ago.')
+            self.assertEqual(a.message, 'OOT-PC looked for updates less than a minute ago.')
             a.show.assert_called_once_with('home', a.focus)
             a.check_started = time.time() - app.FORCED_CHECK_PAUSE - 1
             App.check_now(a, force=True)
@@ -5335,7 +5449,7 @@ class StartScriptTest(Tmp):
     def load(self, script):
         import importlib.machinery
         import importlib.util
-        loader = importlib.machinery.SourceFileLoader('nx2navi_start_script', str(script))
+        loader = importlib.machinery.SourceFileLoader('ootpc_start_script', str(script))
         mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
         loader.exec_module(mod)   # not as __main__: nothing starts
         return mod
@@ -5368,7 +5482,7 @@ class StartScriptTest(Tmp):
         script = self.release('0.7.2', broken=True)
         self.release('0.7.1')
         (root / 'app' / 'previous.txt').write_text('0.7.1\n')
-        env = dict(os.environ, NX2NAVI_LAUNCHER_ROOT=str(root))
+        env = dict(os.environ, OOTPC_LAUNCHER_ROOT=str(root))
         try:   # a message box would wait for a click: the timeout is the test that there is none
             r = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:
@@ -5380,7 +5494,7 @@ class StartScriptTest(Tmp):
     def test_a_version_that_starts_returns_its_code(self):
         root = self.tmp / 'root'
         script = self.release('0.7.2')
-        r = subprocess.run([sys.executable, str(script)], env=dict(os.environ, NX2NAVI_LAUNCHER_ROOT=str(root)),
+        r = subprocess.run([sys.executable, str(script)], env=dict(os.environ, OOTPC_LAUNCHER_ROOT=str(root)),
                            capture_output=True, text=True, timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse((root / 'data' / 'logs' / 'crash.log').exists())
@@ -5507,7 +5621,7 @@ class ModsTest(Tmp):
         self.mods.set_enabled(self.game, 'Alpha', True)
         self.assertEqual(gameini.get(self.game, 'MODS_ORDER'), 'beta| Lead|Alpha')
         self.assertEqual(gameini.get(self.game, 'MODS_DISABLED'), ' Lead')
-        self.assertIn('mods_disabled = " Lead"', (self.game / 'nx2navi.ini').read_text())   # as runtime/cfg.c quotes
+        self.assertIn('mods_disabled = " Lead"', (self.game / 'OOT-PC.ini').read_text())   # as runtime/cfg.c quotes
         found = self.mods.scan(self.game)
         self.assertEqual([(m.name, m.enabled) for m in found], [('beta', True), (' Lead', False), ('Alpha', True)])
         self.assertEqual(self.mods.overlaps(found), {'beta': [('Alpha', 1, True)], 'Alpha': [('beta', 1, False)]})
@@ -5652,7 +5766,7 @@ class ModsTest(Tmp):
         for d in ('tools', 'recomp', 'runtime', 'bin'):
             (kit / d).mkdir(parents=True)
         for f in ('tools/prepare_shaders.py', 'tools/cheats.py', 'tools/exefs_patches.py', 'tools/mod_files.py',
-                  'recomp/patches-v111.txt', 'bin/' + make_game.XLATE_NAME, 'bin/nx2navi_xlate.id', 'VERSION'):
+                  'recomp/patches-v111.txt', 'bin/' + make_game.XLATE_NAME, 'bin/ootpc_xlate.id', 'VERSION'):
             (kit / f).write_text('1\n')
 
         def keys():
@@ -5708,8 +5822,8 @@ class GameVersionsTest(Tmp):
 
     def test_a_new_version_goes_beside_the_game_folder(self):
         from launcher import installs
-        self.assertEqual(installs.default_dir(str(self.tmp / 'OOT-DEBUG-MENU'), '1.0.0'),
-                         str(self.tmp / 'OOT-DEBUG-MENU-1.0.0'))
+        self.assertEqual(installs.default_dir(str(self.tmp / 'OOT-PC'), '1.0.0'),
+                         str(self.tmp / 'OOT-PC-1.0.0'))
 
     def test_the_built_version_comes_from_the_build_state(self):
         from launcher import installs

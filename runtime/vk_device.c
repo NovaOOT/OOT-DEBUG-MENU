@@ -96,7 +96,7 @@ static void mesa_cache_beside_exe(void) {
 #ifdef __linux__
 // NVIDIA's Linux driver keeps the pipelines it compiles in a disk cache of its own, by default in ~/.cache/nvidia,
 // shared with every program. One process adds at most __GL_SHADER_DISK_CACHE_SIZE to it (1 GiB unless set), and a start
-// that finds more than that in several files deletes the later ones. nx2navi.exe --prepare-shaders builds the 42,142
+// that finds more than that in several files deletes the later ones. ocarina.exe --prepare-shaders builds the 42,142
 // variants of game 1.1.1 into it in one process: with the default limit it stored about 30,700 of them and the rest
 // were compiled again by the first start after it. So unless the environment sets them, the cache goes to nvidia-cache
 // beside the exe, which nothing else writes, with a limit of NV_CACHE_BYTES. The driver makes GLCache inside that
@@ -136,7 +136,7 @@ static void nvidia_cache_beside_exe(void) {
 // own only for a submission that waits on such a value. Every other vkQueueSubmit2, the command stream's checks and
 // the kernel's ioctl, runs on the replaying thread, once for every part the replay hands to the queue early (vk_exec.c
 // maybe_split). MESA_VK_ENABLE_SUBMIT_THREAD=1 sends every submission to the queue's thread: in Kokiri Forest on an
-// RX 6800 XT (Mesa 26.2) the replay took 13.9 ms a frame with it and 15.0 ms without. NX2NAVI_SUBMIT_THREAD (default
+// RX 6800 XT (Mesa 26.2) the replay took 13.9 ms a frame with it and 15.0 ms without. OOTPC_SUBMIT_THREAD (default
 // 1 on Linux, 0 on Windows) sets it unless the environment already sets it; 0 leaves the driver's own choice. Drivers
 // that do not read the variable ignore it. vk_driver_cache_env calls this before any thread can load the driver.
 static const char *submit_thread_why;   // create_device logs it on a Mesa driver
@@ -147,12 +147,12 @@ static void mesa_submit_thread(void) {
         submit_thread_why = "MESA_VK_ENABLE_SUBMIT_THREAD is set in the environment";
         return;
     }
-    if (!cfg_bool("NX2NAVI_SUBMIT_THREAD")) {
-        submit_thread_why = "NX2NAVI_SUBMIT_THREAD=0: the driver's own choice";
+    if (!cfg_bool("OOTPC_SUBMIT_THREAD")) {
+        submit_thread_why = "OOTPC_SUBMIT_THREAD=0: the driver's own choice";
         return;
     }
     plat_setenv("MESA_VK_ENABLE_SUBMIT_THREAD", "1");
-    submit_thread_why = "every one on the queue's own thread (NX2NAVI_SUBMIT_THREAD=0 leaves the driver's own choice)";
+    submit_thread_why = "every one on the queue's own thread (OOTPC_SUBMIT_THREAD=0 leaves the driver's own choice)";
 }
 
 // A driver may read these variables when it loads, and a thread can load the Vulkan driver before create_instance:
@@ -178,9 +178,9 @@ static int create_instance(void) {
     const char *ext[12];
     uint32_t n_ext = (uint32_t)gfx_window_vk_extensions(ext, 7);
     const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
-    int validate = cfg_bool("NX2NAVI_VK_VALIDATION");
+    int validate = cfg_bool("OOTPC_VK_VALIDATION");
     if (validate && !layer_present(layers[0])) {
-        rt_log("vk: NX2NAVI_VK_VALIDATION set but %s is not installed; continuing without", layers[0]);
+        rt_log("vk: OOTPC_VK_VALIDATION set but %s is not installed; continuing without", layers[0]);
         validate = 0;
     }
     // DLSS Frame Generation: Streamline's plugins call its naming functions even when they say it is off
@@ -190,8 +190,8 @@ static int create_instance(void) {
     if (vk_hdr_armed() && instance_ext_present(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME))   // HDR10 surface formats
         ext[n_ext++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
     vk_dlaa_instance_exts(ext, &n_ext, 12);
-    VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "NX2navi",
-                             .pEngineName = "NX2navi", .apiVersion = VK_API_VERSION_1_3};
+    VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "OOT-PC",
+                             .pEngineName = "OOT-PC", .apiVersion = VK_API_VERSION_1_3};
     VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app,
                                .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext,
                                .enabledLayerCount = validate ? 1 : 0, .ppEnabledLayerNames = layers};
@@ -246,7 +246,7 @@ static int name_has(const char *s, const char *sub) {
 }
 
 // First discrete GPU with Vulkan 1.3, the required extensions and a graphics+present queue (of one GPU listed by two
-// drivers, the newer driver's listing); NX2NAVI_GPU_INDEX (index) or NX2NAVI_GPU_NAME (case-insensitive part of the
+// drivers, the newer driver's listing); OOTPC_GPU_INDEX (index) or OOTPC_GPU_NAME (case-insensitive part of the
 // name) overrides.
 static int pick_device(void) {
     uint32_t n = 0;
@@ -254,9 +254,9 @@ static int pick_device(void) {
     if (!n) { rt_log("vk: no Vulkan device"); return 0; }
     VkPhysicalDevice *pd = calloc(n, sizeof *pd);
     vk_dlssg_enumerate(g_vk.instance, &n, pd);
-    const char *e = cfg_get("NX2NAVI_GPU_INDEX");   // no fixed default: the best device when unset
+    const char *e = cfg_get("OOTPC_GPU_INDEX");   // no fixed default: the best device when unset
     int want = e && *e ? atoi(e) : -1;
-    const char *name = cfg_get("NX2NAVI_GPU_NAME");
+    const char *name = cfg_get("OOTPC_GPU_NAME");
     int best = -1, best_score = -1, listed = 0;
     uint32_t best_driver = 0;   // the driver version of the best one so far
 retry:
@@ -297,8 +297,8 @@ retry:
     // A chosen GPU that is not usable or no longer there (the menu's GPU row, an unplugged card, a driver that lists the
     // devices in another order): the best usable one instead, so the game still starts and the choice can be changed
     if (best < 0 && (want >= 0 || (name && *name))) {
-        if (want >= 0) rt_log("vk: NX2NAVI_GPU_INDEX=%d is not usable (see above): the best usable gpu instead", want);
-        else rt_log("vk: no usable gpu matches NX2NAVI_GPU_NAME=%s (see above): the best usable gpu instead", name);
+        if (want >= 0) rt_log("vk: OOTPC_GPU_INDEX=%d is not usable (see above): the best usable gpu instead", want);
+        else rt_log("vk: no usable gpu matches OOTPC_GPU_NAME=%s (see above): the best usable gpu instead", name);
         want = -1, name = NULL, listed = 1;
         goto retry;
     }
@@ -348,9 +348,9 @@ retry:
 // the next memory type that allows it (the other device-local heap first), for every allocation: textures, render
 // targets, VRAM mirrors, pools. The limit is each device-local heap's budget when the device is made (VK_EXT_memory_budget,
 // what other programs leave) less a margin for memory VMA does not see (swapchain, FidelityFX): a tenth, at least
-// 256 MiB. NX2NAVI_VRAM_HEAP_LIMIT: auto (with low_end_gpu = 1), 0 (no limits, the default), or a number of MiB for the largest device-local heap.
+// 256 MiB. OOTPC_VRAM_HEAP_LIMIT: auto (with low_end_gpu = 1), 0 (no limits, the default), or a number of MiB for the largest device-local heap.
 static int vram_heap_limits(VkDeviceSize *limit) {
-    const char *e = cfg_get("NX2NAVI_VRAM_HEAP_LIMIT");
+    const char *e = cfg_get("OOTPC_VRAM_HEAP_LIMIT");
     long mb = !e || !*e ? 0 : strcmp(e, "auto") ? atol(e) : -1;   // unset: no limits, as before (low_end_gpu sets auto)
     if (!mb) return 0;
     VkPhysicalDeviceMemoryBudgetPropertiesEXT b = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
@@ -382,7 +382,7 @@ static int vram_heap_limits(VkDeviceSize *limit) {
         if (lim >= mp->memoryHeaps[h].size) continue;
         limit[h] = lim;
         rt_log("vk: memory heap %u (%llu MiB, budget %llu MiB): the allocator uses at most %llu MiB, then the next heap "
-               "(NX2NAVI_VRAM_HEAP_LIMIT)", h, (unsigned long long)(mp->memoryHeaps[h].size >> 20),
+               "(OOTPC_VRAM_HEAP_LIMIT)", h, (unsigned long long)(mp->memoryHeaps[h].size >> 20),
                (unsigned long long)(b.heapBudget[h] >> 20), (unsigned long long)(lim >> 20));
     }
     return 1;
@@ -416,6 +416,7 @@ typedef struct {
     VkPhysicalDevicePipelineBinaryFeaturesKHR pbin;
     VkPhysicalDevicePresentIdFeaturesKHR pid;
     VkPhysicalDeviceAntiLagFeaturesAMD antilag;
+    VkPhysicalDeviceIndexTypeUint8FeaturesKHR u8;
 } FeatureChain;
 
 // One line for a fatal error's report (dispatch.h rt_fatal_note_add): the card, its driver, and the settings in effect
@@ -456,6 +457,17 @@ static int create_device(void) {
     OPTIONAL_EXT(has_provoking_vertex, VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME, pv, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT);
     OPTIONAL_EXT(has_robustness2, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, rob2, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT);
     OPTIONAL_EXT(has_device_fault, VK_EXT_DEVICE_FAULT_EXTENSION_NAME, fault, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT);
+    // Byte indices bound as they are (vk_exec_draw.c op_draw_idx), not widened to 16 bits on the CPU each draw.
+    // OOTPC_INDEX_UINT8=0 leaves it off.
+    if (cfg_bool("OOTPC_INDEX_UINT8")) {
+        if (has_ext(ep, ne, VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME)) {
+            g_vk.has_index_uint8 = 1, ext[n_ext++] = VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME;
+            CHAIN(u8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_KHR);
+        } else if (has_ext(ep, ne, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME)) {
+            g_vk.has_index_uint8 = 1, ext[n_ext++] = VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME;
+            CHAIN(u8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_KHR);
+        }
+    }
     // The translator's SPIR-V declares fragment shader interlock whenever the host reports it (vk_pipeline.c spirv_fixup).
     OPTIONAL_EXT(has_fragment_shader_interlock, VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME, fsi,
                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT);
@@ -468,9 +480,9 @@ static int create_device(void) {
     OPTIONAL_EXT(has_maximal_reconvergence, VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME, mrc,
                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR);
     // Compiled pipelines kept under the runtime's own keys (vk_pipeline.c pipe_create): VK_KHR_pipeline_binary, which
-    // needs VK_KHR_maintenance5 (core only from Vulkan 1.4; the instance asks for 1.3). NX2NAVI_PIPE_BINARIES=0 leaves
+    // needs VK_KHR_maintenance5 (core only from Vulkan 1.4; the instance asks for 1.3). OOTPC_PIPE_BINARIES=0 leaves
     // both off.
-    if (cfg_bool("NX2NAVI_PIPE_BINARIES") && has_ext(ep, ne, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) &&
+    if (cfg_bool("OOTPC_PIPE_BINARIES") && has_ext(ep, ne, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) &&
         has_ext(ep, ne, VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {
         g_vk.has_pipeline_binary = 1;
         ext[n_ext++] = VK_KHR_MAINTENANCE_5_EXTENSION_NAME;
@@ -515,7 +527,7 @@ static int create_device(void) {
     }
     // GPU breadcrumbs for a lost device (vk_crumbs.c): AMD's drivers and RADV report it.
     if (has_ext(ep, ne, VK_AMD_BUFFER_MARKER_EXTENSION_NAME)) { g_vk.has_buffer_marker = 1; ext[n_ext++] = VK_AMD_BUFFER_MARKER_EXTENSION_NAME; }
-    // Pass marks on NVIDIA (vk_crumbs.c): checkpoints only with NX2NAVI_PASS_CRUMBS=1, since NVIDIA documents a cost for
+    // Pass marks on NVIDIA (vk_crumbs.c): checkpoints only with OOTPC_PASS_CRUMBS=1, since NVIDIA documents a cost for
     // the extension. NVIDIA's drivers report it, AMD's do not.
     if (vk_pass_marks_want_nv() && has_ext(ep, ne, VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)) {
         g_vk.has_nv_checkpoints = 1;
@@ -530,14 +542,14 @@ static int create_device(void) {
     // with it, or AMD's, whose calls need its feature. Each only where the driver lists it; a driver lists one of them
     // at most. Not on a device the DLSS Frame Generation proxies make (vk_dlssg_create_device): that path's own
     // low-latency plugin asks for what it needs there, and the direct path stays off for the run. And only in a run
-    // that starts with NX2NAVI_LOW_LATENCY on: with it off the device is made exactly as before the mode existed, and
+    // that starts with OOTPC_LOW_LATENCY on: with it off the device is made exactly as before the mode existed, and
     // a driver that lists one of the two is only remembered (lists_low_latency), so the menu can say that turning the
     // setting on takes a restart.
     g_vk.lists_low_latency = 0;
     if (!vk_dlssg_dpa() && n_ext + 2 <= sizeof ext / sizeof *ext) {
         int nv = has_ext(ep, ne, VK_NV_LOW_LATENCY_2_EXTENSION_NAME) && has_ext(ep, ne, VK_KHR_PRESENT_ID_EXTENSION_NAME);
         int amd = !nv && has_ext(ep, ne, VK_AMD_ANTI_LAG_EXTENSION_NAME);
-        if (cfg_int("NX2NAVI_LOW_LATENCY") <= 0) {
+        if (cfg_int("OOTPC_LOW_LATENCY") <= 0) {
             g_vk.lists_low_latency = nv || amd;
         } else if (nv) {
             g_vk.has_low_latency2 = 1;
@@ -593,9 +605,9 @@ static int create_device(void) {
     if (g_vk.has_mesh_shader) {
         // these two need features that are not enabled (multiview, primitive fragment shading rate)
         c->mesh.multiviewMeshShader = c->mesh.primitiveFragmentShadingRateMeshShader = VK_FALSE;
-        // Mesh queries for two diagnoses: NX2NAVI_GPU_PASSES (vk_crumbs.c) and the dump's primitive counts
+        // Mesh queries for two diagnoses: OOTPC_GPU_PASSES (vk_crumbs.c) and the dump's primitive counts
         // (vk_dump.c vk_dump_mesh_begin), which also need pipeline statistics and host query reset.
-        const char *gp = cfg_get("NX2NAVI_GPU_PASSES"), *dmp = cfg_get("NX2NAVI_DUMP");
+        const char *gp = cfg_get("OOTPC_GPU_PASSES"), *dmp = cfg_get("OOTPC_DUMP");
         int want = (gp && *gp && strcmp(gp, "0")) || (dmp && *dmp);
         g_vk.has_mesh_queries = want && c->mesh.meshShaderQueries && h->pipelineStatisticsQuery && c->f12.hostQueryReset;
         c->mesh.meshShaderQueries = g_vk.has_mesh_queries ? VK_TRUE : VK_FALSE;
@@ -603,9 +615,9 @@ static int create_device(void) {
         rt_log("vk: mesh shaders: %s", g_vk.has_mesh_shader ? "VK_EXT_mesh_shader" : "the extension is there, its task or mesh feature is not");
     }   // vkGetDeviceFaultInfoEXT needs the feature, not just the extension
     {   // mesh_fallback: auto (on a device without mesh shaders), 1 (on every device, for testing) or 0
-        // without mesh shaders the mesh emulation (NX2NAVI_MESH_EMULATION, on unless 0) draws them; mesh_emulation = 0
+        // without mesh shaders the mesh emulation (OOTPC_MESH_EMULATION, on unless 0) draws them; mesh_emulation = 0
         // leaves them to this fallback
-        const char *mf = cfg_value("NX2NAVI_MESH_FALLBACK"), *me = cfg_value("NX2NAVI_MESH_EMULATION");
+        const char *mf = cfg_value("OOTPC_MESH_FALLBACK"), *me = cfg_value("OOTPC_MESH_EMULATION");
         int emu = !g_vk.has_mesh_shader && strcmp(me, "0");
         g_vk.mesh_fallback = !emu && (!strcmp(mf, "1") || (strcmp(mf, "0") && !g_vk.has_mesh_shader));
         if (emu) rt_log("vk: mesh shaders: emulated with compute (mesh_emulation = 1); mesh_fallback is not used");
@@ -615,6 +627,8 @@ static int create_device(void) {
         else if (!g_vk.has_mesh_shader)
             rt_log("vk: mesh shaders: not supported and mesh_fallback = 0 (task/mesh draws are skipped)");
     }
+    if (g_vk.has_index_uint8 && !c->u8.indexTypeUint8) g_vk.has_index_uint8 = 0;
+    rt_log("vk: byte indices: %s", g_vk.has_index_uint8 ? "bound as they are (index_type_uint8)" : "widened on the CPU");
     if (g_vk.has_maximal_reconvergence && !c->mrc.shaderMaximalReconvergence) g_vk.has_maximal_reconvergence = 0;
     if (g_vk.has_pipeline_binary && !(c->pbin.pipelineBinaries && c->m5.maintenance5)) g_vk.has_pipeline_binary = 0;
     // The chain enables what the driver reported: a present carries a frame's number only with presentId, and
@@ -624,13 +638,13 @@ static int create_device(void) {
     g_vk.has_buffer_device_address = c->f12.bufferDeviceAddress;
     g_vk.has_astc_ldr = h->textureCompressionASTC_LDR;
     {
-        const char *e = cfg_get("NX2NAVI_FEEDBACK");
+        const char *e = cfg_get("OOTPC_FEEDBACK");
         int layout_ok = has_fbl && has_lr && c->fbl.attachmentFeedbackLoopLayout && c->lr.dynamicRenderingLocalRead;
         g_vk.feedback = e && !strcmp(e, "0") ? VK_FEEDBACK_OFF
                       : layout_ok && !(e && !strcmp(e, "restart")) ? VK_FEEDBACK_LAYOUT : VK_FEEDBACK_RESTART;
         rt_log("vk: feedback loops: %s (attachmentFeedbackLoopLayout %d, dynamicRenderingLocalRead %d)",
                g_vk.feedback == VK_FEEDBACK_LAYOUT ? "feedback layout + by-region barrier"
-               : g_vk.feedback == VK_FEEDBACK_RESTART ? "pass restart + full barrier" : "off (NX2NAVI_FEEDBACK=0)",
+               : g_vk.feedback == VK_FEEDBACK_RESTART ? "pass restart + full barrier" : "off (OOTPC_FEEDBACK=0)",
                has_fbl && c->fbl.attachmentFeedbackLoopLayout, has_lr && c->lr.dynamicRenderingLocalRead);
     }
 
@@ -928,13 +942,17 @@ int probe_vkdevice(void) {
     return g_errors_total ? 1 : 0;
 }
 
-// The GPU has mesh shaders: the mesh emulation (NX2NAVI_MESH_EMULATION) does nothing there (the low-end GPU rows of the menu's Game tab).
+// The GPU has mesh shaders: the mesh emulation (OOTPC_MESH_EMULATION) does nothing there (the low-end GPU rows of the menu's Game tab).
 int vk_mesh_shader_native(void) { return g_vk.has_mesh_shader; }
 
 // The card the low-end GPU mode (cfg.c LOWEND) was written for: one without mesh shaders, or one whose driver reports
 // a video memory budget under 8 GiB. The menu offers the mode only there (ui/menu.cpp tab_game): on a GeForce RTX 5090
 // the mode's own-memory rule for overwritten textures moved the 1600x1600 sun shadow map and the scene depth to memory
 // of their own, and the ground's shadow was a dark patch with straight edges that turned with the camera.
+// The GPU in use is the processor's own graphics (an integrated GPU): the menu's performance preset row recommends Low
+// there (ui/menu.cpp row_perf_preset).
+int vk_integrated_gpu(void) { return g_vk.phys && g_vk.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU; }
+
 int vk_low_end_card(void) {
     if (!g_vk.has_mesh_shader) return 1;
     uint64_t used = 0, budget = 0;

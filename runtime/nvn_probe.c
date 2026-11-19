@@ -1,6 +1,6 @@
-// nx2navi.exe --probe-nvn: the NVN front end and the null back end, called the way the
+// ocarina.exe --probe-nvn: the NVN front end and the null back end, called the way the
 // game calls them: through the real nvnp_* procs with a synthetic Cpu (AAPCS64 arguments in x0..x7 and v0..v7), on the
-// guest main thread, on the null back end whatever NX2NAVI_GPU says. Checks, in order:
+// guest main thread, on the null back end whatever OOTPC_GPU says. Checks, in order:
 //   - pool, buffer, texture, sampler, sync and event objects against the expected NVN semantics, the
 //     texture storage sizes against original-SDK goldens;
 //   - every op kind recorded through the CommandBuffer procs and parsed back with nvn_op_first/next/payload, and
@@ -8,7 +8,7 @@
 //   - the null back end's CPU-visible side effects (event write and add, counter report, buffer copy, uniform update,
 //     in stream order across handles) landing in guest memory at submit, and not before;
 //   - the proc table: every name of nvn_procs.inc resolves to its own synthetic address, an unknown name to NULL;
-//   - named fatal stubs stop with their name, each in a child process (this executable again, NX2NAVI_PROBE_NVN_CHILD).
+//   - named fatal stubs stop with their name, each in a child process (this executable again, OOTPC_PROBE_NVN_CHILD).
 // The 40 layout goldens themselves are run by --probe-nvn-tex against nvn_tex.c; here four of them go through the procs.
 // Contains code Copyright (c) 2026 jhaizhou (MIT; see THIRD_PARTY_NOTICES.md). The golden metadata holds no game bytes.
 #include <stdint.h>
@@ -21,7 +21,7 @@
 #include "nvn_api.h"
 #include "platform/platform.h"
 
-#define CHILD_ENV "NX2NAVI_PROBE_NVN_CHILD"
+#define CHILD_ENV "OOTPC_PROBE_NVN_CHILD"
 
 #define NVN_PROC(n) void nvnp_##n(Cpu *c);
 #include "nvn_procs.inc"
@@ -937,7 +937,7 @@ static void probe_children(void) {
 int probe_nvn(void) {
     const char *child = getenv(CHILD_ENV);
     if (child && *child) return run_as_child(child);
-    // The probe checks the null back end whatever NX2NAVI_GPU says; the choice is made once, at the first object call.
+    // The probe checks the null back end whatever OOTPC_GPU says; the choice is made once, at the first object call.
     ((RtConfig *)rt_config())->gpu = "null";
     nvn_procs_register();
     hostfn_seal();

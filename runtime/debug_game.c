@@ -3,7 +3,11 @@
 // load and then runs debug_warp.c dbg_game_frame on the game thread, where guest functions may be called. Also the
 // Force age hook (set dbgage, below). Built per install, as its address depends on the version's patch page.
 #include "debug_tools.h"
+#include "desert_roam.h"
 #include "host.h"
+#include "n64pose.h"
+#include "dark_link_fx.h"
+#include "n64sword.h"
 
 #if __has_include("patches.h")
 #include "patches.h"
@@ -15,6 +19,7 @@
 static void debug_frame(Cpu *c) {
     c->x[8] = LD64(c->x[0] + 0xa8);
     dbg_game_frame(c);
+    n64pose_game_frame();
 }
 
 __attribute__((constructor)) static void debug_frame_register(void) { rt_register_host(HOST_DEBUG_FRAME, debug_frame); }
@@ -45,6 +50,7 @@ __attribute__((constructor)) static void debug_resource_set_register(void) {
 // The model's skeleton world-matrix thunk takes the embedded ModelObj (FModel + 0xd8). The original thunk loads
 // its skeleton pointer and tail-calls the world's scale-mode dispatcher. The host wrapper keeps that call's ABI,
 // including the caller's link register, and restores local translations after the resulting world pose is ready.
+// N64 Graphics' N64 Link (n64pose.c) reads the player's world pose there too.
 #define HOST_DEBUG_LANK (RT_PATCH_PAGE + 0xe40)
 #define SKELETON_WORLD RT_OOT_ADDR(0x70014e01c0ull, 0x700149bb60ull)   // 1.1.1, 1.0.0
 static void debug_lank_world(Cpu *c) {
@@ -53,9 +59,26 @@ static void debug_lank_world(Cpu *c) {
     uint64_t skeleton = LD64(object + 0x20);
     rt_call(c, SKELETON_WORLD, 2, skeleton, matrix);
     if (changed) dbg_lank_after();
+    n64pose_world_ready(object - 0xd8, matrix);
+    n64sword_world_ready(object - 0xd8, matrix);
     c->x[30] = lr;
 }
 __attribute__((constructor)) static void debug_lank_register(void) { rt_register_host(HOST_DEBUG_LANK, debug_lank_world); }
+
+// N64 Graphics' sword walls (n64sword.c): the player's reaction scheduler (main+0x82bbb0) picks the AttackCollide
+// reaction, the weapon's rebound, when the hit state at [[player+0x270]+0x2b8] holds 8 at +0xf0 or +0xf4. Its
+// `ldp w8, w9, [x8, #0xf0]` there calls +0xe80: the host function makes the load, and gives 8 in w9 from a weapon's
+// strike on a wall until the rebound has started (n64sword_take). The function saved x30 in its prologue and reloads
+// x8 and x9 after a call.
+#define HOST_N64_SWORD_WALL (RT_PATCH_PAGE + 0xe80)
+static void n64_sword_wall(Cpu *c) {
+    uint64_t state = c->x[8];
+    uint32_t f0 = LD32(state + 0xf0), f4 = LD32(state + 0xf4);
+    c->x[8] = f0;
+    c->x[9] = n64sword_take(c, f0, f4) ? 8 : f4;
+    dark_link_fx_frame(c);   // the same scheduler runs once a frame for the player
+}
+__attribute__((constructor)) static void n64_sword_register(void) { rt_register_host(HOST_N64_SWORD_WALL, n64_sword_wall); }
 
 // Items at any age (debug_ages.c): the pause menu item table's entry reader (main+0x33a2500) calls +0xe30 in place of
 // its closing `mov w0, w21`, with the entry it has just read in x20; the host function notes it, then makes the move.
@@ -69,19 +92,26 @@ __attribute__((constructor)) static void debug_pouch_register(void) { rt_registe
 // No void-out (debug_move.c dbg_no_void_out): the abyss areas' shared per-frame method (main+0x31e4610, the
 // HoldSensorHitInfoGiveAbyss* nodes; the Condition one calls it once its condition holds) calls +0xe20 in place of
 // its `ldr w24, [x1, #0x30]`, the number of sensor hits in the list at x1. The host function makes the load, or gives
-// 0 while No void-out is on: the method then sends no abyss hit to anything in the area and returns 0, as it does for
-// an empty list. x30 is restored from the frame before the method returns.
+// 0 while No void-out is on, and in the desert while Desert free roam holds it back (desert_roam.c): the method then
+// sends no abyss hit to anything in the area and returns 0, as it does for an empty list. x30 is restored from the
+// frame before the method returns.
 #define HOST_DEBUG_ABYSS_HITS (RT_PATCH_PAGE + 0xe20)
-static void debug_abyss_hits(Cpu *c) { c->x[24] = dbg_no_void_out_on() ? 0 : LD32(c->x[1] + 0x30); }
+static void debug_abyss_hits(Cpu *c) {
+    uint32_t hits = LD32(c->x[1] + 0x30);
+    if (hits) dbg_abyss_note(DBG_ABYSS_ZONE);
+    c->x[24] = dbg_no_void_out_on() || (hits && desert_roam_holds()) ? 0 : hits;
+}
 
 // The player's own check (main+0x82c510, every frame from the reaction scheduler main+0x82bbb0) gathers every cause
 // of a void-out (the areas above, falls with nowhere to land, and the rest) into one abyss type, which it stores at
 // player+0x191c and in a game-wide record; a non-zero type makes the scheduler pick the PreAbyss reaction. Its
-// `str w8, [x19, #0x191c]` calls +0xe10: the host function stores 0 in place of the type while No void-out is on, and
-// leaves 0 in w8, so the game-wide record the function writes next reads no abyss either.
+// `str w8, [x19, #0x191c]` calls +0xe10: the host function stores 0 in place of the type while No void-out is on (or
+// Desert free roam holds it back, as above), and leaves 0 in w8, so the game-wide record the function writes next reads
+// no abyss either.
 #define HOST_DEBUG_ABYSS_TYPE (RT_PATCH_PAGE + 0xe10)
 static void debug_abyss_type(Cpu *c) {
-    if (dbg_no_void_out_on()) c->x[8] = 0;
+    dbg_abyss_note((uint32_t)c->x[8]);   // the cause, for the debug overlay and the console, before it is held back
+    if (dbg_no_void_out_on() || ((uint32_t)c->x[8] && desert_roam_holds())) c->x[8] = 0;
     ST32(c->x[19] + 0x191c, (uint32_t)c->x[8]);
 }
 

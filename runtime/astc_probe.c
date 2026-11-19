@@ -4,11 +4,11 @@
 // weight grid and quantization the random modes reach), then plain random blocks (mostly error blocks, HDR endpoint
 // modes among them). Each case decodes two regions into two mip levels of an RGBA8 image with cropped edges, and
 // compares both the decoder's texels (readback) and what the image holds afterwards. The same regions also go through
-// the BC3 encoder (NX2NAVI_ASTC_BC) into a BC3 image, whose blocks are decoded here and held to error bounds (bc_check).
+// the BC3 encoder (OOTPC_ASTC_BC) into a BC3 image, whose blocks are decoded here and held to error bounds (bc_check).
 // Then cut-out foliage at every footprint (cutout_case): full mip chains of transparent and opaque patches with sharp
 // alpha edges, through the encoder, where alpha 0 and 255 must stay exact and alpha tests keep their outline (cut_check).
 // Every block of both is also put to tex_astc.c astc_block_opaque, which must say what a decode says (opaque_check),
-// and with NX2NAVI_ASTC_BC1 the regions are encoded to BC1 as well: each BC1 block must be the colour half of the BC3
+// and with OOTPC_ASTC_BC1 the regions are encoded to BC1 as well: each BC1 block must be the colour half of the BC3
 // block made from the same texels (bc1_check), the four-colour block BC1 decodes alike.
 // Also times one 2048x2048 texture on the CPU (astc_decode_ldr_mt) and on the GPU (wall time of the upload batch).
 #include <math.h>
@@ -208,7 +208,7 @@ enum { MAX_LEVELS = 13 };   // a mip chain of up to 4096 texels a side
 static size_t bc_bytes(uint32_t w, uint32_t h) { return (size_t)((w + 3) / 4) * ((h + 3) / 4) * 16; }
 
 // Mip levels 0 .. levels-1 (w[i] x h[i] texels from the n[i] blocks that follow the previous level's in blk) decoded and
-// encoded to BC3 (bc 1, NX2NAVI_ASTC_BC) or BC1 (bc 2) by one vk_astc_record call into an image of that format; out:
+// encoded to BC3 (bc 1, OOTPC_ASTC_BC) or BC1 (bc 2) by one vk_astc_record call into an image of that format; out:
 // its blocks read back level after level, rows of 4x4 blocks. 0 on a Vulkan failure or when nothing was recorded.
 static int gpu_bc(VkCtx *c, const uint8_t *blk, const size_t *n, const uint32_t *w, const uint32_t *h, int levels,
                   uint32_t bw, uint32_t bh, int srgb, int bc, uint8_t *out) {
@@ -641,7 +641,7 @@ static int cutout_case(VkCtx *c, uint32_t bw, uint32_t bh, int srgb, uint32_t w0
 }
 
 // One 2048 x 2048 texture of valid blocks: the CPU worker-pool decode against the GPU time of the dispatches alone
-// (vk_astc.c timestamps, NX2NAVI_ASTC_TIME) and the wall time of the upload batch.
+// (vk_astc.c timestamps, OOTPC_ASTC_TIME) and the wall time of the upload batch.
 static void timing(VkCtx *c, uint32_t bw, uint32_t bh) {
     uint32_t w = 2048, h = 2048;
     size_t n = (size_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh);
@@ -669,14 +669,14 @@ static void timing(VkCtx *c, uint32_t bw, uint32_t bh) {
 }
 
 int probe_astc(void) {
-    cfg_setenv("NX2NAVI_ASTC_BC", "1");   // also builds the BC3 encoder; the RGBA8 cases pass bc 0 and do not use it
+    cfg_setenv("OOTPC_ASTC_BC", "1");   // also builds the BC3 encoder; the RGBA8 cases pass bc 0 and do not use it
     if (!vk_init()) { printf("probe-astc: FAIL vk_init\n"); return 1; }
     VkCtx *c = vk_ctx();
     printf("probe-astc: GPU %s, textureCompressionASTC_LDR %d, mode %d\n", c->props.deviceName, c->has_astc_ldr,
            vk_astc_mode());
     int bad = 0;
     if (!vk_astc_gpu()) {
-        printf("probe-astc: FAIL the compute decoder is not available (NX2NAVI_ASTC=cpu or pipeline creation failed)\n");
+        printf("probe-astc: FAIL the compute decoder is not available (OOTPC_ASTC=cpu or pipeline creation failed)\n");
         bad = 1;
     }
     for (int i = 0; i < 14 && !bad; i++)
@@ -701,7 +701,7 @@ int probe_astc(void) {
         if (!bad && vk_astc_bc1())
             printf("probe-astc: BC1 encode: %llu blocks, each the colour half of its BC3 block\n",
                    (unsigned long long)g_bc1_blocks);
-        else if (!bad) printf("probe-astc: BC1 encoder not on (NX2NAVI_ASTC_BC1 or the device's BC1 features): not checked\n");
+        else if (!bad) printf("probe-astc: BC1 encoder not on (OOTPC_ASTC_BC1 or the device's BC1 features): not checked\n");
     }
     if (!bad) bad = opaque_mt_case();
     if (!bad)

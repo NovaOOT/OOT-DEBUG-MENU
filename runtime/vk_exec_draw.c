@@ -26,8 +26,8 @@
 #include "nvn_hmap.h"
 #include "vk.h"
 
-#ifndef NX2NAVI_TONEMAP_STANDIN
-#define NX2NAVI_TONEMAP_STANDIN 1   // vk_tonemap.c, see untranslated_dispatch_fallback
+#ifndef OOTPC_TONEMAP_STANDIN
+#define OOTPC_TONEMAP_STANDIN 1   // vk_tonemap.c, see untranslated_dispatch_fallback
 #endif
 #include "vk_exec.h"
 #include "vk_gpa.h"
@@ -38,6 +38,10 @@
 #include "platform/platform.h"
 #include "vk_debug_cam.h"
 #include "motion_owner.h"
+#include "n64pose.h"
+#include "n64actors.h"
+#include "n64gfx.h"
+#include "n64world.h"
 #include "stutter_map.h"
 #include "vk_dlaa.h"
 #include "mesh_emu_spirv.h"
@@ -57,9 +61,9 @@
 // into a target that is neither recent nor steady (vk_target_frames.h: a volume, a lookup table, an icon, a target
 // made new at an area change); skipped, a target the game draws once stays as it was. A draw into per-frame targets
 // whose shaders write memory takes the same wait (writers_wait_on).
-// NX2NAVI_ONESHOT_BUDGET (default 1): the one-shot draws of a presented frame wait from that frame's wait pool
+// OOTPC_ONESHOT_BUDGET (default 1): the one-shot draws of a presented frame wait from that frame's wait pool
 // (frame_wait, shared with the full-screen draws), a mesh draw MESH_WAIT_MS at most. Until 0.7.1 each waited up to
-// NX2NAVI_ONESHOT_WAIT_MS (30 s) on the replay thread, which is what =0 still does: after a scene load every pass was
+// OOTPC_ONESHOT_WAIT_MS (30 s) on the replay thread, which is what =0 still does: after a scene load every pass was
 // new or not recent, so the first frame waited for one pipeline after another, and for the whole compile of each mesh
 // pipeline (0.2 to 1.3 s cold): 5-14 s on an RTX 4080 SUPER with no pipeline recorded, and frames of 0.7 to 1 s at
 // area changes of a played install (vk_target_frames.h "Steady targets"), while the pipeline workers sat idle. A
@@ -70,10 +74,10 @@
 static uint32_t oneshot_wait_ms(void) {
     static int64_t ms = -1;
     if (ms < 0) {
-        ms = strtoll(cfg_value("NX2NAVI_ONESHOT_WAIT_MS"), NULL, 10);
+        ms = strtoll(cfg_value("OOTPC_ONESHOT_WAIT_MS"), NULL, 10);
         if (ms < 0) ms = 0;
         if (ms != 30000) rt_log("vk_exec: a one-shot draw waits at most %lld ms for its pipeline, then is skipped "
-                                "(NX2NAVI_ONESHOT_WAIT_MS)", (long long)ms);
+                                "(OOTPC_ONESHOT_WAIT_MS)", (long long)ms);
     }
     return (uint32_t)ms;
 }
@@ -92,7 +96,7 @@ static int oneshot_budget_on(void) {
     if (on < 0) {
         on = rt_knob("ONESHOT_BUDGET", "1") == 1;
         if (!on) rt_log("vk_exec: a one-shot draw waits up to %u ms for its shaders and pipeline, outside the frame's wait "
-                        "pool (NX2NAVI_ONESHOT_BUDGET=0)", ONESHOT_WAIT_MS);
+                        "pool (OOTPC_ONESHOT_BUDGET=0)", ONESHOT_WAIT_MS);
     }
     return on;
 }
@@ -192,7 +196,7 @@ typedef struct {
 #define DS_SIG_BYTES (MAX_DESC * sizeof(VkDescSlot))
 typedef struct { uint32_t n[2], pn[2]; uint8_t sig[2][DS_SIG_BYTES], psig[2][DS_SIG_BYTES]; } DsSig;
 
-// NX2NAVI_BIND_STATS counters (bind_stats).
+// OOTPC_BIND_STATS counters (bind_stats).
 static struct {
     int on;
     uint64_t draws, bind[2], desc[2], push, push_skip, set_new, set_reuse, ac_miss, same_prog, same_all, bind_skip;
@@ -217,7 +221,7 @@ typedef struct {
     uint32_t ckn;                        // check mode: the last build's packed descriptors (bytes in ck)
     uint8_t ck[DS_SIG_BYTES];
 } RsState;
-static int rs_on = -1;                   // NX2NAVI_BIND_SKIP: 1 skip (default), 2 check, 0 off
+static int rs_on = -1;                   // OOTPC_BIND_SKIP: 1 skip (default), 2 check, 0 off
 
 // The bound-slot bytes of VkExec a pipeline's descriptors read, as ranges merged where they touch, built once per
 // pipeline info: c0's storage table, the uniform and storage ranges of the bound slots and the texture and image
@@ -265,7 +269,7 @@ typedef struct {
 // was resolved under: while its slot, the submission and the samplers are as they were (slot_still, as the texture
 // descriptor memo TD checks, without the lock) it holds what TD would give, and a hit takes no texture lock. The
 // replay workers' chunks waited for that lock at nearly every draw: 6.1 s of waits a minute in bind_resources alone
-// (Hyrule Field, 3 workers, NX2NAVI_LOCK_TIME, 2026-11-12).
+// (Hyrule Field, 3 workers, OOTPC_LOCK_TIME, 2026-11-12).
 #define TM_N 512
 typedef struct {
     uint64_t h, tok;
@@ -1105,7 +1109,7 @@ static void answers_for(VkExec *ex, int st, const uint8_t *ctl, uint32_t mask, G
         if (imiss)
             c->it[slot] = type_of_handle(hi), c->ifmt[slot] = format_of_handle(hi), c->img[slot] = hi, c->itok[slot] = it,
             c->igen[slot] = gen;
-        if (check && (type_of_handle(h) != c->tt[slot] || type_of_handle(hi) != c->it[slot]))   // NX2NAVI_SHADER_MEMO=check
+        if (check && (type_of_handle(h) != c->tt[slot] || type_of_handle(hi) != c->it[slot]))   // OOTPC_SHADER_MEMO=check
             rt_fatal("vk_exec: kept texture types of stage %d slot %d differ from a lookup", st, slot);
         a->tex_type[slot] = c->tt[slot], a->img_type[slot] = c->it[slot], a->img_format[slot] = c->ifmt[slot];
     }
@@ -1287,10 +1291,10 @@ void vk_c0_fill(uint8_t bank[VK_C0_BYTES], int stage, const p_bind_buf ssbo[16],
     memcpy(bank + 0x644, &base_instance, 4);
 }
 
-static int c0_on(void) {   // NX2NAVI_FIX_C0=0: c0 reads zeros instead of the driver constants
+static int c0_on(void) {   // OOTPC_FIX_C0=0: c0 reads zeros instead of the driver constants
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_FIX_C0");
+        on = cfg_bool("OOTPC_FIX_C0");
     }
     return on;
 }
@@ -1571,7 +1575,7 @@ static VkDescriptorBufferInfo ssbo_info(VkExec *ex, int st, const GfxShaderRes *
         vk_mem_shadow_table_read();
         // What the table names is mostly guest memory itself (pools without a mirror), which the GPU reads as it runs:
         // the submission's submit wait is the GPU's (vk_mem_take_live). Without this the staged mirror uploads
-        // (NX2NAVI_MIRROR_STAGE) ended the wait once the replay had submitted, and the game wrote the next frame's
+        // (OOTPC_MIRROR_STAGE) ended the wait once the replay had submitted, and the game wrote the next frame's
         // instances while the GPU still drew from them: the small grass and moss, which reach their instances through
         // the table, flickered and slid over the ground as the camera turned (RX 580, Kokiri Forest, 2026-11-11).
         // Not every bind comes here (the bind skip, the kept descriptors): gpa_reader notes it at each bind.
@@ -1631,7 +1635,7 @@ static VkDescriptorBufferInfo ssbo_info(VkExec *ex, int st, const GfxShaderRes *
 }
 
 // ---- feedback loops (maxwell.md 1.9, vk.h VkCtx.feedback)
-// NX2navi's G-buffer and terrain shaders sample targets of the pass that renders them, at their own pixel, after earlier
+// OOT-PC's G-buffer and terrain shaders sample targets of the pass that renders them, at their own pixel, after earlier
 // draws of the pass wrote them (albedo, normals, R32F linear depth). Maxwell reads see those writes; in Vulkan the read
 // is undefined without a barrier, and on the RX 9070 it showed as dark screen-aligned blocks on the island ground
 // and hid Tulin's sage spirit. Before a draw whose fragment shader samples an attachment of
@@ -1673,27 +1677,27 @@ static uint32_t attached_as(const VkExec *ex, const SubRange *r) {
 
 // Knobs the draw and dispatch paths test on every call, read once: each cfg lookup walks the settings table
 // (cfg.c raw_get), about 0.2 ms a frame of replay in Kokiri Forest when they ran per draw.
-static int knob_log_mesh(void) {   // NX2NAVI_LOG_MESH=1: the first mesh draws' state
+static int knob_log_mesh(void) {   // OOTPC_LOG_MESH=1: the first mesh draws' state
     static int on = -1;
     if (on < 0) on = rt_knob("LOG_MESH", "0");
     return on;
 }
-static int knob_tm_dispatch(void) {   // NX2NAVI_TM_DISPATCH: the scene upscaler stand-in's mode
+static int knob_tm_dispatch(void) {   // OOTPC_TM_DISPATCH: the scene upscaler stand-in's mode
     static int on = -1;
     if (on < 0) on = rt_knob("TM_DISPATCH", "1");
     return on;
 }
-static int knob_log_cs_binds(void) {   // NX2NAVI_LOG_CS_BINDS set: the compute bindings of each program's first dispatch
+static int knob_log_cs_binds(void) {   // OOTPC_LOG_CS_BINDS set: the compute bindings of each program's first dispatch
     static int on = -1;
-    if (on < 0) on = cfg_get("NX2NAVI_LOG_CS_BINDS") != NULL;
+    if (on < 0) on = cfg_get("OOTPC_LOG_CS_BINDS") != NULL;
     return on;
 }
 
-// NX2NAVI_TEX_MEMO (tex_info, feedback_scan): 0 off, 1 on, 2 (=check) computes every hit again and stops on a difference.
+// OOTPC_TEX_MEMO (tex_info, feedback_scan): 0 off, 1 on, 2 (=check) computes every hit again and stops on a difference.
 static int td_mode(void) {
     static int on = -1;
     if (on < 0) {
-        const char *e = cfg_value("NX2NAVI_TEX_MEMO");
+        const char *e = cfg_value("OOTPC_TEX_MEMO");
         on = !strcmp(e, "check") ? 2 : strcmp(e, "0") != 0;
     }
     return on;
@@ -1844,7 +1848,7 @@ static int tex_info_full(VkExec *ex, const GfxShaderRes *r, uint64_t h, int stor
 // for its storage check; a re-upload writes the same image, so the descriptor stays. Draws bind the same textures
 // thousands of times a frame (15,000 lookups a frame in the monsters fight); a hit skips the slot lookup, the view key
 // with its hash probe and the sampler lookup. Storage images, which note their binding per submission, are
-// not kept. Direct-mapped; texture lock held. NX2NAVI_TEX_MEMO=0 turns it off; =check computes every hit again and stops
+// not kept. Direct-mapped; texture lock held. OOTPC_TEX_MEMO=0 turns it off; =check computes every hit again and stops
 // on a difference.
 #define TD_N 8192
 static struct {
@@ -1968,7 +1972,7 @@ static int tex_info_full(VkExec *ex, const GfxShaderRes *r, uint64_t h, int stor
 // GPU runs a submission several milliseconds later, and Ocarina registers slots for its next submission right after
 // submitting: with one set, an in-flight submission sampled a texture registered for the next one, the lit materials
 // of distant characters read the wrong texture as their light or probe data, wrote NaN and bloom spread it (white
-// dialogue frames, a fifth of them; none once each submission waited for its GPU work, NX2NAVI_SUBMIT_FINISH). A
+// dialogue frames, a fifth of them; none once each submission waited for its GPU work, OOTPC_SUBMIT_FINISH). A
 // submission's first pool_sync takes the next set (pool_take_set), waits for the GPU only if that set's last
 // submission is still running, and brings it up to date from the change log (every entry written since the set was
 // last current; the whole set when the log has wrapped). Writes within a submission go to its own set at once, until a
@@ -1977,7 +1981,7 @@ static int tex_info_full(VkExec *ex, const GfxShaderRes *r, uint64_t h, int stor
 // Writing into it instead updated descriptors a pending command buffer reads, which Vulkan does not allow: the part
 // sampled textures registered after it went, and on RADV a texture whose memory was mapped after the part's submit is
 // absent from that submit's page tables, a GPU page fault on the 128x128 probe pass of Kokiri Forest's first frame
-// (RADV's radv_wait_for_vm_map_updates hid it, as did NX2NAVI_SPLIT_DRAWS=0).
+// (RADV's radv_wait_for_vm_map_updates hid it, as did OOTPC_SPLIT_DRAWS=0).
 volatile uint32_t vk_pool_kinds_used;
 // Per texture slot, what pool_fill keeps between refills: the descriptor hash of the registration it was read under,
 // and the lookup memo stamp its entries were last written from (0: none) with the kinds that write covered.
@@ -2130,11 +2134,11 @@ static VkDescriptorSetLayout pool_layout_make(void) {
     rt_log("vk: bindless texture pools: %d kinds x %d textures, %d samplers, %s, %d sets (one per submission in turn)%s",
            VK_POOL_KINDS, VK_POOL_TEX, VK_POOL_SAMP,
            PL.uab ? "update after bind" : "no update-after-bind on this GPU (entries written while bound are undefined)", PL.nsets,
-           marks ? "; shaders mark the slots they sample (NX2NAVI_TEX_DISUSE)" : "");
+           marks ? "; shaders mark the slots they sample (OOTPC_TEX_DISUSE)" : "");
     return l;
 }
 
-// ---- pool marks (NX2NAVI_TEX_DISUSE; vk_pipeline.c spirv_pool_mark writes them, vk_texture.c "disuse" reads them)
+// ---- pool marks (OOTPC_TEX_DISUSE; vk_pipeline.c spirv_pool_mark writes them, vk_texture.c "disuse" reads them)
 // A device buffer of a uint per texture slot at VK_POOL_MARK_BINDING of every pool set: a marked shader stores 1 into
 // the slot of every pool texture it samples. Every MARKS_EVERY submissions that recorded work, the end of the
 // submission copies the buffer into a host-visible read-back buffer and clears it; a copy is in the submission that
@@ -2251,15 +2255,15 @@ static uint16_t pool_kind_type(int k) {
 }
 
 #define POOL_WBATCH 512
-// Texture entries a pool sync may create (images and uploads), the rest at the next sync (NX2NAVI_POOL_CREATE_BUDGET,
+// Texture entries a pool sync may create (images and uploads), the rest at the next sync (OOTPC_POOL_CREATE_BUDGET,
 // default 16). The sync holds the texture lock throughout, and with 64 streaming in new textures made frames of 20-40 ms
 // with the replay and other threads waiting on that lock (24 ms of holds per slow frame in a dense area); 16 brought
 // that to 5 ms with no pop-in a player could see. The slots it leaves keep their stand-in until the next sync.
 // An area load is not streaming. It leaves thousands of slots at once (4,925 in the load measured below), and at the
 // streaming budget they came in over a hundred frames and more: the first seconds out of a load screen showed the
-// ground, the walls and the buildings as their black stand-ins. So while a sync leaves NX2NAVI_POOL_LOAD_BACKLOG slots
+// ground, the walls and the buildings as their black stand-ins. So while a sync leaves OOTPC_POOL_LOAD_BACKLOG slots
 // or more (default 512; 0: never) the pool is loading: the count budget is off, a frame's refreshes may take
-// NX2NAVI_POOL_LOAD_MS (default 50), and the presents of those frames are left out so the picture before the load
+// OOTPC_POOL_LOAD_MS (default 50), and the presents of those frames are left out so the picture before the load
 // stays up (vk_backend.c frame_hold, vk_exec_pool_loading) until fewer than POOL_LOAD_END slots are left. The load
 // screen lasts those few frames longer and the area appears whole.
 #define POOL_LOAD_END 64
@@ -2268,14 +2272,14 @@ static uint64_t pool_load_made, pool_load_frame0;
 int vk_exec_pool_loading(void) { return __atomic_load_n(&pool_loading, __ATOMIC_RELAXED); }
 static int pool_load_backlog(void) {
     static int n = -1;
-    if (n < 0) n = cfg_int("NX2NAVI_POOL_LOAD_BACKLOG");
+    if (n < 0) n = cfg_int("OOTPC_POOL_LOAD_BACKLOG");
     return n;
 }
 
 static int pool_create_budget(void) {
     static int n = -1;
     if (n < 0) {
-        n = cfg_int("NX2NAVI_POOL_CREATE_BUDGET");
+        n = cfg_int("OOTPC_POOL_CREATE_BUDGET");
         if (n < 1) n = 1;
     }
     return pool_loading ? 1 << 20 : n;
@@ -2284,7 +2288,7 @@ static int pool_create_budget(void) {
 // The refresh runs before every draw that binds the pools, not once per submission, so the count above held for each
 // draw: an area load made 4,925 entries (1.7 GB of uploads) in one 430 ms frame, and while slots were left over every
 // draw walked the whole table and looked each of them up again (key and hash), about 100 ms of that frame on its own.
-// Once a frame's refreshes have spent NX2NAVI_POOL_CREATE_MS (default 6; 0: no limit) making textures, its later ones
+// Once a frame's refreshes have spent OOTPC_POOL_CREATE_MS (default 6; 0: no limit) making textures, its later ones
 // create nothing, and skip the slots left earlier in the frame (pool_defer) instead of looking them up again; the
 // first refresh of each frame keeps its count budget. The slots left keep their stand-in, a few frames longer in a
 // large load.
@@ -2297,7 +2301,7 @@ static int pool_create_budget(void) {
 static uint64_t pool_create_ns(void) {
     static int64_t ns = -1, load_ns;
     if (ns < 0) {
-        int ms = cfg_int("NX2NAVI_POOL_CREATE_MS"), lms = cfg_int("NX2NAVI_POOL_LOAD_MS");
+        int ms = cfg_int("OOTPC_POOL_CREATE_MS"), lms = cfg_int("OOTPC_POOL_LOAD_MS");
         load_ns = (int64_t)(lms < 1 ? 1 : lms) * 1000000;
         ns = (int64_t)(ms < 0 ? 0 : ms) * 1000000;
     }
@@ -2446,9 +2450,9 @@ static void pool_catch_up(uint64_t from, uint64_t to) {
                (double)PL.n_walk[1] / (double)PL.switches, (double)PL.walk_visit[1] / (double)PL.switches,
                (double)PL.walk_refill[1] / (double)PL.switches, PL.walk_ns[1] / 1e6 / (double)PL.switches);
     if (PL.switches % 3600 == 0)
-        rt_log("vk: texture pool slot groups per switch (NX2NAVI_POOL_GROUP): %.0f walked, %.0f left alone with %.0f "
+        rt_log("vk: texture pool slot groups per switch (OOTPC_POOL_GROUP): %.0f walked, %.0f left alone with %.0f "
                "slots, %.0f first members refilled (%.0f changed), %.0f not known to hold one resolution; check "
-               "(NX2NAVI_POOL_GROUP_CHECK): %llu writes in %llu groups left alone so far, %llu more to members registered "
+               "(OOTPC_POOL_GROUP_CHECK): %llu writes in %llu groups left alone so far, %llu more to members registered "
                "since their last fill",
                (double)PL.n_gwalk / (double)PL.switches, (double)PL.n_gskip / (double)PL.switches,
                (double)PL.n_gskip_slots / (double)PL.switches, (double)PL.n_grep / (double)PL.switches,
@@ -2459,15 +2463,19 @@ static void pool_catch_up(uint64_t from, uint64_t to) {
 
 // Entry id of every kind in mask: the slot's view of that kind or the kind's stand-in. Texture lock held. 0: the
 // slot's texture was left to a later sync by the creation budget (pool_sync).
-// NX2NAVI_SKIP_SHADERS=<hash>,...: draws and dispatches whose shader's SPIR-V has one of these FNV-1a hashes (the "vs"/"fs"/
-// "cs" hashes of the frame dump's passes.txt) are skipped (diagnosis: which pass makes an effect).
+// OOTPC_SKIP_SHADERS=<hash>,...: draws and dispatches whose shader's SPIR-V has one of these FNV-1a hashes (the "vs"/"fs"/
+// "cs" hashes of the frame dump's passes.txt) are skipped (diagnosis: which pass makes an effect). Read again when a
+// setting changes (the remote console's cfg command), so one run can try one pass after another.
 static int shader_skipped(const GfxShader *sh) {
     static uint64_t list[16];
     static int n = -1;
+    static unsigned seen = ~0u;
     static struct { const GfxShader *s; uint8_t skip; } memo[256];
-    if (n < 0) {
+    if (n < 0 || seen != cfg_version()) {
+        seen = cfg_version();
         n = 0;
-        const char *e = cfg_get("NX2NAVI_SKIP_SHADERS");
+        memset(memo, 0, sizeof memo);
+        const char *e = cfg_get("OOTPC_SKIP_SHADERS");
         for (const char *p = e; p && *p && n < 16;) {
             char *end;
             uint64_t v = strtoull(p, &end, 16);
@@ -2475,7 +2483,7 @@ static int shader_skipped(const GfxShader *sh) {
             list[n++] = v;
             p = *end ? end + 1 : end;
         }
-        if (n) rt_log("vk: NX2NAVI_SKIP_SHADERS: %d shader hashes skipped", n);
+        if (n) rt_log("vk: OOTPC_SKIP_SHADERS: %d shader hashes skipped", n);
     }
     if (!n || !sh) return 0;
     uint32_t i = (uint32_t)(((uintptr_t)sh * 0x9E3779B97F4A7C15ull) >> 56);
@@ -2487,7 +2495,7 @@ static int shader_skipped(const GfxShader *sh) {
     return skip;
 }
 
-// NX2NAVI_POOL=0: draws and dispatches of pipelines that index the pools are skipped (A/B against bindless shaders).
+// OOTPC_POOL=0: draws and dispatches of pipelines that index the pools are skipped (A/B against bindless shaders).
 static int pool_on(void) {
     static int on = -1;
     if (on < 0) on = rt_knob("POOL", "1");
@@ -2498,7 +2506,7 @@ static int pool_on(void) {
 // transient render target registered over its storage, and every finalize and initialize of that target changes their
 // tokens, so a refill looked up the same texture ~400 times, ~15,000 lookups a frame in Kokiri Forest. An entry holds the
 // views one slot got, for the slots with its hash, address generation and entry generation.
-// Its stamp changes only when one of its views does (NX2NAVI_POOL_FAST, default on): a slot whose entries were written
+// Its stamp changes only when one of its views does (OOTPC_POOL_FAST, default on): a slot whose entries were written
 // from the entry at the stamp it has now (PoolSlot) holds those views already, so a refill that finds the entry so
 // compares and writes nothing. That is most refills: a transient render target released and taken back moves the
 // address generation of its storage, ~1,300 slots in Kokiri Forest, and every slot resolves as before (18,500 of 18,800
@@ -2683,7 +2691,7 @@ static void pool_sync(VkExec *ex);
 // A chunk of a parallel group (vk_exec.c "replay workers") binds the set as vk_exec_draw_group_begin left it, up to date
 // when the group began; the chunk that takes this submission's first set takes it in turn, under pool_mt. Elsewhere the
 // replay syncs the pools at every draw that binds them, as before, under pool_mt past a group whose chunks still record
-// (NX2NAVI_REPLAY_PIPE): the set is the submission's, read by the GPU when the part runs.
+// (OOTPC_REPLAY_PIPE): the set is the submission's, read by the GPU when the part runs.
 static void pool_sync_draw(VkExec *ex) {
     if (!vk_exec_shared()) return pool_sync(ex);
     if (!vk_exec_in_chunk()) {
@@ -2706,7 +2714,7 @@ uint32_t vk_exec_draw_group_begin(VkExec *ex) {
     if (vk_ctx()->has_mesh_shader && !vk_ctx()->mesh_fallback) mesh_ring_make();   // the chunks' indirect mesh draws
     if (!__atomic_load_n(&LIM.ubo_max, __ATOMIC_ACQUIRE)) limits_init();
     if (pool_on() && PL.cur_fence == ex->fence && !PL.sealed) {   // the set this submission took
-        int lk = vk_exec_shared();   // earlier groups may still record (NX2NAVI_REPLAY_PIPE)
+        int lk = vk_exec_shared();   // earlier groups may still record (OOTPC_REPLAY_PIPE)
         if (lk) plat_mutex_lock(&pool_mt);
         pool_sync(ex);
         if (lk) plat_mutex_unlock(&pool_mt);
@@ -2778,7 +2786,7 @@ static int pool_current(void) {
            vk_texture_slots_gen() == PL.gen && vk_texture_epoch() == PL.epoch && vk_sampler_gen() == PL.sgen;
 }
 
-// NX2NAVI_POOL_GROUP=1 (default), 0, ab: a dirty bucket's slot groups (vk_texture.c) are walked whole. The members of a
+// OOTPC_POOL_GROUP=1 (default), 0, ab: a dirty bucket's slot groups (vk_texture.c) are walked whole. The members of a
 // group resolve alike, so once a walk of the group brought every member to the current resolution (every fill done, an
 // entry for each) they all hold the same views, and later the group is left alone when its first member still holds the
 // current resolution: its token did not change (its views are what that token resolves to), or its refill wrote nothing.
@@ -2792,7 +2800,7 @@ static int pool_group(void) {
     return RT_KNOB_ON(mode);
 }
 
-// NX2NAVI_POOL_GROUP_CHECK=1: a group left alone is walked member by member all the same, and the writes that walk
+// OOTPC_POOL_GROUP_CHECK=1: a group left alone is walked member by member all the same, and the writes that walk
 // makes are counted (none when the rule holds; the pool log's slot groups line), but for the members registered since
 // their last fill: their registration's entry on the dirty ring refills them in the same walk (counted apart).
 static int pool_group_check(void) {
@@ -2872,7 +2880,7 @@ static void pool_sync_entries(VkExec *ex) {
         vk_texture_create_budget_locked(spent ? 0 : pool_create_budget());
         PL.n_frame_stops += (uint64_t)spent;
         // Only a slot change since the last sync (no new kinds, no new submission): the slots that
-        // changed (vk_texture_dirty_slots_locked), not the whole table. With NX2NAVI_POOL_FAST (default on) a new
+        // changed (vk_texture_dirty_slots_locked), not the whole table. With OOTPC_POOL_FAST (default on) a new
         // submission too: its freshness check goes through the entries the slots resolved to and the slots that
         // resolved to none (vk_texture_pool_fresh_locked, pool_unres), not every slot.
         PoolDirty pd = {ex, used, n, 0, spent};
@@ -2972,7 +2980,7 @@ static void pool_sync_entries(VkExec *ex) {
         __atomic_store_n(&pool_loading, 1, __ATOMIC_RELEASE);
     } else if (pool_loading && retry < POOL_LOAD_END) {
         __atomic_store_n(&pool_loading, 0, __ATOMIC_RELEASE);
-        rt_log("vk: texture pool: an area load of about %llu textures was made in %llu frames (NX2NAVI_POOL_LOAD_BACKLOG)",
+        rt_log("vk: texture pool: an area load of about %llu textures was made in %llu frames (OOTPC_POOL_LOAD_BACKLOG)",
                (unsigned long long)pool_load_made, (unsigned long long)(PL.frame - pool_load_frame0 + 1));
     }
     if (sg != PL.sgen) {
@@ -2990,13 +2998,13 @@ static void pool_sync_entries(VkExec *ex) {
 }
 
 // ---- depth twins: colour images under a compare sampler in a compute shader
-// NX2navi's compute passes sample an R32_SFLOAT texture through a shadow sampler. Maxwell compares any single-channel
+// OOT-PC's compute passes sample an R32_SFLOAT texture through a shadow sampler. Maxwell compares any single-channel
 // float or unorm texel; Vulkan only formats with SAMPLED_IMAGE_DEPTH_COMPARISON (VUID-vkCmdDispatch-None-06479), which
 // AMD's drivers do not give R32_SFLOAT, so the result there is undefined. Such an image gets a depth twin of the same
 // size and bits (R32_SFLOAT -> D32_SFLOAT, R16_UNORM -> D16_UNORM), copied through a buffer right before each dispatch
 // that samples it (a dispatch is outside any render pass), and the dispatch samples the twin. Draws keep the colour
 // image: a copy cannot go inside their pass.
-// NX2NAVI_DEPTH_TWIN=0: off.
+// OOTPC_DEPTH_TWIN=0: off.
 #define TWINS 8
 typedef struct { VkImage src, img; VmaAllocation mem; VkImageView view[2]; uint32_t w, h, layers; VkFormat fmt; } Twin;
 static Twin twins[TWINS];
@@ -3150,7 +3158,7 @@ static Twin *twin_update(VkExec *ex, const VkTexImage *img) {
     return t;
 }
 
-// What a network program run natively (NX2NAVI_NATIVE_TENSOR=1, native_tensor) binds at slot h, before its dispatch.
+// What a network program run natively (OOTPC_NATIVE_TENSOR=1, native_tensor) binds at slot h, before its dispatch.
 // Its input picture: the game's scene upscaler samples the post pass's picture through an RGB9E5 texture that lies at
 // the scene target's address. On the console the two are one memory, so the words the post pass stores through the
 // target's integer view are that texture's texels. Here they are two images (raw_9e5_twin), and the RGB9E5 one holds
@@ -3276,17 +3284,17 @@ static void support_in(const VkExec *ex, float in[3]) {   // what support_fill r
     in[2] = ex->point_size > 0 ? ex->point_size : 1.0f;
 }
 
-// NX2NAVI_PCSS (percent, 0 = off): the pcss field of the support buffer, which translator patch 0010 reads in every
+// OOTPC_PCSS (percent, 0 = off): the pcss field of the support buffer, which translator patch 0010 reads in every
 // explicit-LOD compare on a 2D array texture (the sun cascades). x: penumbra width in UV per unit of light-space depth
 // between receiver and blocker (0 keeps the game's single compare), y and z: the narrowest and widest disc radius,
-// w: the blocker search radius, all in UV of the cascade map. Radii are in UV, so they hold at any NX2NAVI_SHADOW_SCALE.
-// NX2NAVI_PCSS_K overrides the depth-to-penumbra factor at 100 percent, for tuning.
+// w: the blocker search radius, all in UV of the cascade map. Radii are in UV, so they hold at any OOTPC_SHADOW_SCALE.
+// OOTPC_PCSS_K overrides the depth-to-penumbra factor at 100 percent, for tuning.
 static const float *pcss_params(void) {
     static float p[4] = {-1, 0, 0, 0};
     if (p[0] < 0) {
-        int pct = cfg_int("NX2NAVI_PCSS");
+        int pct = cfg_int("OOTPC_PCSS");
         pct = pct < 0 ? 0 : pct > 200 ? 200 : pct;
-        const char *k = cfg_get("NX2NAVI_PCSS_K");
+        const char *k = cfg_get("OOTPC_PCSS_K");
         float k100 = k && *k ? (float)atof(k) : 0.5f;
         p[0] = k100 * (float)pct / 100.0f;
         p[1] = 0.35f / 960.0f, p[2] = 5.0f / 960.0f, p[3] = 4.0f / 960.0f;
@@ -3296,15 +3304,15 @@ static const float *pcss_params(void) {
 }
 
 // The shadow_spread field of the support buffer: the factor translator patch 0011 applies to the lighting shaders' sun
-// shadow filter offset (element 56 .xy of their lighting block), 1 / NX2NAVI_SHADOW_SCALE. The game spaces its four
-// compares for its own shadow map texels; with maps NX2NAVI_SHADOW_SCALE times larger, the same offset in UV spans that
+// shadow filter offset (element 56 .xy of their lighting block), 1 / OOTPC_SHADOW_SCALE. The game spaces its four
+// compares for its own shadow map texels; with maps OOTPC_SHADOW_SCALE times larger, the same offset in UV spans that
 // many more texels and the near cascade shows four separate copies of each edge. Dividing by the scale keeps the game's
 // spacing in texels. The offset is in UV of the shadow map, so the output resolution plays no part. The scale is read
 // once, as vk_texture.c shadow_scale reads it: the maps keep the size they were made with.
 static const float *shadow_spread_params(void) {
     static float p[4] = {0, 0, 0, 0};
     if (p[0] == 0) {
-        int scale = cfg_int("NX2NAVI_SHADOW_SCALE");
+        int scale = cfg_int("OOTPC_SHADOW_SCALE");
         scale = scale < 1 ? 1 : scale > 4 ? 4 : scale;
         p[0] = 1.0f / (float)scale;
     }
@@ -3328,14 +3336,14 @@ static void support_fill(uint8_t *b, float w, float h, float point_size) {
     }
 }
 
-// NX2NAVI_BIND_STATS=1: bindings and descriptors per draw of each stage (Task 2.2's choice of the pushed stage), and how
+// OOTPC_BIND_STATS=1: bindings and descriptors per draw of each stage (Task 2.2's choice of the pushed stage), and how
 // often a draw repeats the previous one, logged every 20000 draws: pushes recorded and skipped, allocated sets written
 // and reused, stage texture-type recomputations (answers_for), draws with the previous draw's program, bound state
 // and textures (shaders and pipeline would be the same) and those that also have its buffers and viewport (all
 // descriptors would be the same). BS is declared beside DS.
 static int bind_stats_on(void) {
     if (BS.on < 0) {
-        const char *e = cfg_get("NX2NAVI_BIND_STATS");
+        const char *e = cfg_get("OOTPC_BIND_STATS");
         BS.on = e && *e && strcmp(e, "0");
     }
     return BS.on;
@@ -3359,7 +3367,7 @@ static void bind_stats(const VkPipeInfo *info) {
     }
 }
 
-// The bound state a draw reads, compared with the previous draw's (NX2NAVI_BIND_STATS only).
+// The bound state a draw reads, compared with the previous draw's (OOTPC_BIND_STATS only).
 static void repeat_stats(const VkExec *ex, const VkPipeInfo *info) {
     static struct {
         const prog_t *prog;
@@ -3386,17 +3394,17 @@ static void repeat_stats(const VkExec *ex, const VkPipeInfo *info) {
     last = cur;
 }
 
-static int push_skip_on(void) {   // NX2NAVI_PUSH_SKIP=0: every graphics draw pushes its set again
+static int push_skip_on(void) {   // OOTPC_PUSH_SKIP=0: every graphics draw pushes its set again
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_PUSH_SKIP");
+        on = cfg_bool("OOTPC_PUSH_SKIP");
     }
     return on;
 }
 
 // A graphics draw whose descriptor inputs equal the previous graphics draw's in this command buffer skips building its
 // sets: every write would be the same, the push would be skipped and the allocated set reused without a bind (about a
-// quarter of field and monsters2 draws, NX2NAVI_BIND_STATS). The inputs, compared and stored in place, are what
+// quarter of field and monsters2 draws, OOTPC_BIND_STATS). The inputs, compared and stored in place, are what
 // bind_resources and its helpers read beyond the pipeline info's fixed bindings and Z's stand-ins:
 // - the info (bindings, layouts), the program and its serial (the compiler-constant range of UBO slot 1);
 // - vk_texture_slots_gen, vk_texture_epoch (a slot's image, view and once-per-submit storage check), vk_sampler_gen;
@@ -3411,11 +3419,11 @@ static int push_skip_on(void) {   // NX2NAVI_PUSH_SKIP=0: every graphics draw pu
 // the views cached per submission. The census counts are added again. A build that copied guest bytes into transient
 // memory (an unaligned host range) is never skipped after: the copy may differ. B.res_valid says the sets bound hold
 // the last build; vk_exec_draw_new_cb's memset clears it, and every build clears it until it ends.
-// NX2NAVI_BIND_SKIP=0 builds every draw; =check builds every draw and stops when a draw with equal inputs gets other
+// OOTPC_BIND_SKIP=0 builds every draw; =check builds every draw and stops when a draw with equal inputs gets other
 // writes, census counts or descriptor commands.
 static int bind_skip_on(void) {
     if (rs_on < 0) {
-        const char *e = cfg_value("NX2NAVI_BIND_SKIP");
+        const char *e = cfg_value("OOTPC_BIND_SKIP");
         rs_on = !strcmp(e, "check") ? 2 : strcmp(e, "0") != 0;
         if (rs_on != 1) rt_log("vk_exec: descriptor build skip %s", rs_on ? "check" : "off");
     }
@@ -3535,7 +3543,7 @@ static int bind_sig(const VkExec *ex, const VkPipeInfo *info) {
     return !diff && !bd;
 }
 
-// The binding profile in the NX2NAVI_TRACE=gfx frame line reads the clock around every descriptor; without the trace
+// The binding profile in the OOTPC_TRACE=gfx frame line reads the clock around every descriptor; without the trace
 // those reads would cost more than some of what they time, so they read 0.
 static inline uint64_t bt_now(void) { return rt_trace & RT_TRACE_GFX ? plat_now_ns() : 0; }
 
@@ -3553,14 +3561,14 @@ static inline uint64_t bt_now(void) { return rt_trace & RT_TRACE_GFX ? plat_now_
 // storage buffers the shader only reads that a stage slot names, and sampled textures; written storage, c0, pointer
 // tables, storage images and the support buffer resolve every time. A reuse counts its census bytes again, and a
 // resolution that copied guest bytes into transient memory is never kept. Off while per-object motion replaces uniform
-// bindings (mo_ovr_on). NX2NAVI_BIND_REUSE=0 resolves every descriptor; =check resolves every descriptor and stops on
+// bindings (mo_ovr_on). OOTPC_BIND_REUSE=0 resolves every descriptor; =check resolves every descriptor and stops on
 // one that resolves differently from its kept result with the same inputs.
 // The entries (PbEntry, DrawCtx.PB) and the build running (DrawCtx.pb_e) belong to the recording context.
 static int pb_mode = -1;
 
 static int pb_on(void) {
     if (pb_mode < 0) {
-        const char *e = cfg_value("NX2NAVI_BIND_REUSE");
+        const char *e = cfg_value("OOTPC_BIND_REUSE");
         pb_mode = !strcmp(e, "check") ? 2 : strcmp(e, "0") != 0;
         if (pb_mode != 1) rt_log("vk_exec: per-binding descriptor reuse %s", pb_mode ? "check" : "off");
     }
@@ -3685,7 +3693,7 @@ static _Thread_local const VkDescSlot *emu_d;   // set 0's descriptors of the la
 static uint32_t emu_d_bytes;
 // A pipeline that binds the device address table reads what it names, mostly guest memory itself (pools without a
 // mirror), as the GPU runs: the submission's submit wait is the GPU's (vk_mem_take_live). Without this the staged mirror
-// uploads (NX2NAVI_MIRROR_STAGE) ended the wait once the replay had submitted, and the game wrote the next frame's
+// uploads (OOTPC_MIRROR_STAGE) ended the wait once the replay had submitted, and the game wrote the next frame's
 // instances while the GPU still drew from them: the small grass and moss, which reach their instances through the
 // table, flickered and slid over the ground as the camera turned (RX 580, Kokiri Forest, 2026-11-11). Noted at every
 // bind, before the bind skip and the kept descriptors (bind_sig, pb_take), which leave ssbo_info out: noted only there,
@@ -3922,7 +3930,7 @@ static void bind_resources(VkExec *ex, const VkPipeInfo *info) {
     }
     if (skip) {
         cx->RS.rec = 0;
-        // An equal next draw records nothing when every push set holds its push (NX2NAVI_PUSH_SKIP on) and nothing made
+        // An equal next draw records nothing when every push set holds its push (OOTPC_PUSH_SKIP on) and nothing made
         // the build unrepeatable; allocated sets are always bound to the one written last.
         int valid = !cx->RS.volatile_ && !cx->RS.cnt_over && cx->RS.hn;
         for (uint32_t s = 0; s < n_sets; s++)
@@ -3972,7 +3980,7 @@ static VkViewport base_viewport(VkExec *ex) {
 
 static VkViewport draw_viewport(VkExec *ex) {
     VkViewport v = base_viewport(ex);
-    if (ex->mark) {   // NX2NAVI_PASS_TIMES: how much of the pass the draws cover
+    if (ex->mark) {   // OOTPC_PASS_TIMES: how much of the pass the draws cover
         if ((uint32_t)v.width > ex->mark->vw) ex->mark->vw = (uint32_t)v.width;
         if ((uint32_t)-v.height > ex->mark->vh) ex->mark->vh = (uint32_t)-v.height;
     }
@@ -3981,7 +3989,7 @@ static VkViewport draw_viewport(VkExec *ex) {
 }
 
 // The slope-scaled depth bias of a draw. The term is the bias per unit of depth slope across one pixel of the target,
-// and a shadow map made k times larger on each side (NX2NAVI_SHADOW_SCALE, vk_texture.c shadow_scale_of, pass_scale)
+// and a shadow map made k times larger on each side (OOTPC_SHADOW_SCALE, vk_texture.c shadow_scale_of, pass_scale)
 // has 1/k of the slope across each of its texels: the game's factor alone gives k times less bias than it asked for
 // on sloped surfaces, which is what shows as acne (stripes of self-shadow over slanted ground and walls). The
 // constant term counts the depth format's smallest steps, which do not change with the size, and keeps its value.
@@ -4002,14 +4010,14 @@ static void record_fixed(VkExec *ex) {
         ex->recorded++;
     }
     if (ex->dirty & VK_EXEC_DIRTY_DEPTH_BIAS) {
-        // NX2NAVI_DEPTH_BIAS_X scales the constant term (diagnostic): NVN's units are tuned for the Switch's
+        // OOTPC_DEPTH_BIAS_X scales the constant term (diagnostic): NVN's units are tuned for the Switch's
         // fixed-point depth buffer, and this back end draws into a 32-bit float one, where the same constant means a
         // far smaller offset. If decals z-fight here, this multiplier says whether the offset is the reason.
         static float bx = -1.0f;
         if (bx < 0.0f) {
-            const char *e = getenv("NX2NAVI_DEPTH_BIAS_X");
+            const char *e = getenv("OOTPC_DEPTH_BIAS_X");
             bx = e && *e ? (float)atof(e) : 1.0f;
-            if (bx != 1.0f) rt_log("vk: NX2NAVI_DEPTH_BIAS_X: constant depth bias multiplied by %.1f", bx);
+            if (bx != 1.0f) rt_log("vk: OOTPC_DEPTH_BIAS_X: constant depth bias multiplied by %.1f", bx);
         }
         vkCmdSetDepthBias(cb, ex->poly_offset.units * bx, ex->poly_offset.clamp, slope_bias(ex));
         ex->recorded++;
@@ -4082,7 +4090,7 @@ static void bind_vertex_buffers(VkExec *ex) {
     held->vb_valid = 1;
 }
 
-// NX2NAVI_FOLIAGE_SHADOW_CULL=<layer>[f] (0 to 3, default 1; 3 turns it off): the foliage's mesh draws into the sun's shadow cascades
+// OOTPC_FOLIAGE_SHADOW_CULL=<layer>[f] (0 to 3, default 1; 3 turns it off): the foliage's mesh draws into the sun's shadow cascades
 // from this layer on drop one side of their cards ("f": the front faces, else the back faces). The game draws them
 // double-sided, and stacks of alpha-tested cards seen from the sun reached about 1,000 million fragments in one draw of
 // the 2.5 million texel far cascade, where half the cards still cover the same texels. Cull mode is dynamic state, so
@@ -4090,7 +4098,7 @@ static void bind_vertex_buffers(VkExec *ex) {
 static void foliage_shadow_cull(const VkExec *ex, VkPipeState *s) {
     static int from = -1, face;
     if (from < 0) {
-        const char *e = cfg_get("NX2NAVI_FOLIAGE_SHADOW_CULL");
+        const char *e = cfg_get("OOTPC_FOLIAGE_SHADOW_CULL");
         from = e && *e ? atoi(e) : 1;
         face = e && strchr(e, 'f') ? NVN_FACE_FRONT : NVN_FACE_BACK;
     }
@@ -4098,7 +4106,7 @@ static void foliage_shadow_cull(const VkExec *ex, VkPipeState *s) {
         s->poly.cull = (unsigned)face;
 }
 
-// NX2NAVI_PIPE_SKIP: which draws are skipped, rather than waited for, while their shaders or pipeline build.
+// OOTPC_PIPE_SKIP: which draws are skipped, rather than waited for, while their shaders or pipeline build.
 // strict (0): only draws whose pass targets were all rendered in the previous presented frame; a pass with a target
 //   that was not counts as one-shot and waits.
 // any (1): also draws in a pass with at least one target rendered in the previous frame (a per-frame depth
@@ -4121,31 +4129,31 @@ static void foliage_shadow_cull(const VkExec *ex, VkPipeState *s) {
 static int pipe_skip_mode(void) {
     static int mode = -1;
     if (mode < 0) {
-        const char *e = cfg_value("NX2NAVI_PIPE_SKIP");
+        const char *e = cfg_value("OOTPC_PIPE_SKIP");
         mode = !strcmp(e, "strict") || !strcmp(e, "0") ? 0 : !strcmp(e, "fullscreen") || !strcmp(e, "2") ? 2 : 1;
-        static const char *const what[3] = {"only draws into per-frame passes (NX2NAVI_PIPE_SKIP=strict)",
+        static const char *const what[3] = {"only draws into per-frame passes (OOTPC_PIPE_SKIP=strict)",
                                             "draws into passes with a target the previous frame rendered; full-screen "
-                                            "draws wait (NX2NAVI_PIPE_SKIP=any)",
-                                            "those and full-screen draws (NX2NAVI_PIPE_SKIP=fullscreen)"};
+                                            "draws wait (OOTPC_PIPE_SKIP=any)",
+                                            "those and full-screen draws (OOTPC_PIPE_SKIP=fullscreen)"};
         rt_log("vk_exec: draws skipped while their pipeline builds: %s", what[mode]);
     }
     return mode;
 }
 
-// NX2NAVI_DRAW_WRITERS_WAIT (default 1; 0 = off): a draw whose shaders write memory waits for its shaders and
+// OOTPC_DRAW_WRITERS_WAIT (default 1; 0 = off): a draw whose shaders write memory waits for its shaders and
 // pipeline as a one-shot draw does, whatever its targets. A draw into per-frame targets may be left out while its
 // pipeline builds because the game renders those targets again in the next frame (pipe_skip_mode). A storage buffer
 // its shaders write, or an image they store into, is no such target: the write is a side effect of this draw that
 // later draws and frames read, and with the draw left out that memory keeps what it held. So the draw takes the wait
 // of a draw into targets that are not per-frame (prepare_draw_ex: from the frame's wait pool, or ONESHOT_WAIT_MS with
-// NX2NAVI_ONESHOT_BUDGET=0), and is skipped only at the end of it. draw_stats_tick's line counts the draws that waited
+// OOTPC_ONESHOT_BUDGET=0), and is skipped only at the end of it. draw_stats_tick's line counts the draws that waited
 // by this rule alone.
 static int writers_wait_on(void) {
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_DRAW_WRITERS_WAIT");
+        on = cfg_bool("OOTPC_DRAW_WRITERS_WAIT");
         if (!on) rt_log("vk_exec: a draw whose shaders write memory is skipped like any other while its pipeline builds "
-                        "(NX2NAVI_DRAW_WRITERS_WAIT=0)");
+                        "(OOTPC_DRAW_WRITERS_WAIT=0)");
     }
     return on;
 }
@@ -4167,7 +4175,7 @@ static int draw_writes(const GfxShader *vs, const GfxShader *ts, const GfxShader
     return writers_wait_on() && (stage_writes(vs) || stage_writes(ts) || stage_writes(fs));
 }
 
-// NX2NAVI_PIPE_LINK_MS (default 6; 0 = off): how long the draws of one presented frame may wait, in all, for the fast
+// OOTPC_PIPE_LINK_MS (default 6; 0 = off): how long the draws of one presented frame may wait, in all, for the fast
 // link of a pipeline that is missing, LINK_DRAW_MS at most each. A draw into a per-frame pass used to be skipped at
 // once and for as long as its pipeline built, also when its stage libraries were in the driver's cache and the link
 // took under a millisecond: geometry seen for the first time (ground, a wall, a character) was missing for a frame or
@@ -4175,7 +4183,7 @@ static int draw_writes(const GfxShader *vs, const GfxShader *ts, const GfxShader
 // cold it runs out after a few draws and the rest are skipped as before, so a burst of cold pipelines costs a frame
 // this much and no more. Measured on an RX 7900 XT, first walk through a village with no pipeline recorded: 2,349
 // draws skipped without the budget, with the libraries warm in both runs.
-// NX2NAVI_PIPE_LINK_DRAW_MS (default 3): the wait for one pipeline, counted from its first miss and shared by all its
+// OOTPC_PIPE_LINK_DRAW_MS (default 3): the wait for one pipeline, counted from its first miss and shared by all its
 // draws (prepare_draw_ex), so a pipeline whose libraries the driver has to compile costs its first frame this much and
 // the frames after it nothing; it was 3 ms for each draw, in every frame. A frame that has left a draw out already
 // waits for no fast link either (pending_draws): it is held back or shown without that draw whatever its other
@@ -4188,17 +4196,17 @@ static int draw_writes(const GfxShader *vs, const GfxShader *ts, const GfxShader
 // 15 frames over 25 ms against 17, but in play it felt worse to the player than the 3 ms it replaced, in two sessions
 // on the same install: a frame that takes 10 to 14 ms longer showed more than one that is left out. The waits stay
 // short; the settings take longer ones.
-// NX2NAVI_PIPE_FRAME_WAIT_MS (default 50; 0 to 500): the wait pool of one presented frame. Its full-screen draws and
-// its one-shot draws (NX2NAVI_ONESHOT_BUDGET) wait for their shaders and pipelines from it, each for what the ones
+// OOTPC_PIPE_FRAME_WAIT_MS (default 50; 0 to 500): the wait pool of one presented frame. Its full-screen draws and
+// its one-shot draws (OOTPC_ONESHOT_BUDGET) wait for their shaders and pipelines from it, each for what the ones
 // before left, and are skipped once it is spent, so the pipelines of one frame hold the replay thread this long in
 // all and no longer (beside the fast links' own small budget, link_budget, and FULLSCREEN_LAST_MS).
 static uint64_t *frame_wait(void) {
     static uint64_t frame = ~0ull, left, per_frame = ~0ull;
     if (per_frame == ~0ull) {
-        long long ms = cfg_int("NX2NAVI_PIPE_FRAME_WAIT_MS");
+        long long ms = cfg_int("OOTPC_PIPE_FRAME_WAIT_MS");
         per_frame = (uint64_t)(ms < 0 ? 0 : ms > 500 ? 500 : ms) * 1000000ull;
         rt_log("vk_exec: the full-screen and one-shot draws of a frame wait up to %llu ms in all for their shaders and "
-               "pipelines (NX2NAVI_PIPE_FRAME_WAIT_MS), then are skipped while a worker builds them",
+               "pipelines (OOTPC_PIPE_FRAME_WAIT_MS), then are skipped while a worker builds them",
                (unsigned long long)(per_frame / 1000000));
     }
     uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
@@ -4254,7 +4262,7 @@ static void wait_note(int kind, uint64_t t0, int left) {
 static uint32_t link_draw_ms(void) {
     static int ms = -1;
     if (ms < 0) {
-        long long v = cfg_int("NX2NAVI_PIPE_LINK_DRAW_MS");
+        long long v = cfg_int("OOTPC_PIPE_LINK_DRAW_MS");
         ms = v < 1 ? 1 : v > 50 ? 50 : (int)v;
     }
     return (uint32_t)ms;
@@ -4276,10 +4284,10 @@ static uint64_t *last_wait(void) {
 static uint64_t *link_budget(void) {
     static uint64_t frame = ~0ull, left, per_frame = ~0ull;
     if (per_frame == ~0ull) {
-        long long ms = cfg_int("NX2NAVI_PIPE_LINK_MS");
+        long long ms = cfg_int("OOTPC_PIPE_LINK_MS");
         per_frame = (uint64_t)(ms < 0 ? 0 : ms > 100 ? 100 : ms) * 1000000ull;
         rt_log("vk_exec: draws wait up to %llu ms a frame in all for the fast link of a missing pipeline "
-               "(NX2NAVI_PIPE_LINK_MS), %u ms at most each (NX2NAVI_PIPE_LINK_DRAW_MS)",
+               "(OOTPC_PIPE_LINK_MS), %u ms at most each (OOTPC_PIPE_LINK_DRAW_MS)",
                (unsigned long long)(per_frame / 1000000), LINK_DRAW_MS);
     }
     uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
@@ -4291,7 +4299,7 @@ static uint64_t *link_budget(void) {
 // texture and image handles and every slot's resolution (vk_texture_slots_gen, read unlocked: a registration racing
 // with it is ordered after this draw, as answers_for's own check would order it) stay the same: answers_for reads
 // nothing else, so shader_for would return the same shaders. About 65% of field draws repeat them
-// (NX2NAVI_BIND_STATS). NX2NAVI_SHADER_MEMO=0 turns it off; =check looks the shaders up on every hit too, and every slot's
+// (OOTPC_BIND_STATS). OOTPC_SHADER_MEMO=0 turns it off; =check looks the shaders up on every hit too, and every slot's
 // texture type in answers_for, and stops on a difference.
 // tex_serial (bumped by every texture and image bind) equal to the key's means the handles were not rebound since
 // they were compared, so the 1 KiB compare is skipped; a rebind to the same handles still matches by the compare.
@@ -4318,7 +4326,7 @@ static int memo_match(const VkExec *ex, uint32_t gen, MemoKey *k) {
 
 static int shader_memo_on(void) {
     if (sm_on < 0) {
-        const char *e = cfg_value("NX2NAVI_SHADER_MEMO");
+        const char *e = cfg_value("OOTPC_SHADER_MEMO");
         sm_on = !strcmp(e, "check") ? 2 : strcmp(e, "0") != 0;
     }
     return sm_on;
@@ -4327,7 +4335,7 @@ static int shader_memo_on(void) {
 static int pm_on = -1;   // the memo is DrawCtx.PM
 
 static int pipe_memo_on(void) {
-    if (pm_on < 0) pm_on = cfg_bool("NX2NAVI_PIPE_MEMO");
+    if (pm_on < 0) pm_on = cfg_bool("OOTPC_PIPE_MEMO");
     return pm_on;
 }
 
@@ -4337,13 +4345,14 @@ static int pipe_memo_on(void) {
 // skipped for each reason is logged with its program, and every DRAW_STATS_FRAMES presented frames one line sums up
 // the draws issued and skipped since the last line (only when something was skipped). A black screen with draws
 // skipped for "shader failed" or "pipeline failed" points at the translator or the pipeline; draws issued and still
-// nothing on screen point at the shaders' results (NX2NAVI_DUMP).
+// nothing on screen point at the shaders' results (OOTPC_DUMP).
 const char *const vk_draw_skip_names[SK_COUNT] = {
     "rendering disabled", "empty scissor", "no program bound",
     "no vertex (or mesh) stage in the program", "shader still translating",
     "shader failed to translate (see gfx_shader: translation failed)", "replaced by the upscaler",
-    "pipeline still building", "pipeline could not be created", "uses the texture pools (NX2NAVI_POOL=0)",
-    "excluded by NX2NAVI_SKIP_PROG", "excluded by NX2NAVI_SKIP_SHADERS", "hidden by the debug menu's Hide meshes"};
+    "pipeline still building", "pipeline could not be created", "uses the texture pools (OOTPC_POOL=0)",
+    "excluded by OOTPC_SKIP_PROG", "excluded by OOTPC_SKIP_SHADERS", "hidden by the debug menu's Hide meshes",
+    "the player's body, drawn by N64 Graphics instead"};
 #define DRAW_STATS_FRAMES 600
 static struct { uint64_t issued[2], skipped[2][SK_COUNT], frame; uint32_t first[2]; } DRS;
 
@@ -4366,7 +4375,7 @@ static void draw_stats_tick(void) {
                               (unsigned long long)WS.left[k]);
         snprintf(line + o, sizeof line - o, " %llu lookups found only steady targets and skipped a draw that would have "
                  "waited as one-shot; %llu draws into per-frame targets waited as one-shot because their shaders write "
-                 "memory (NX2NAVI_DRAW_WRITERS_WAIT)", (unsigned long long)(vk_exec_steady_passes - steady_logged),
+                 "memory (OOTPC_DRAW_WRITERS_WAIT)", (unsigned long long)(vk_exec_steady_passes - steady_logged),
                  (unsigned long long)WS.writers);
         rt_log("%s", line);
         steady_logged = vk_exec_steady_passes;
@@ -4397,10 +4406,10 @@ uint32_t vk_exec_pending_draws_take(void) {
     return n;
 }
 
-// Hide meshes (the debug menu's View group, NX2NAVI_DEBUG_HIDE_MESHES): the draws into the scene's depth target, with
+// Hide meshes (the debug menu's View group, OOTPC_DEBUG_HIDE_MESHES): the draws into the scene's depth target, with
 // the depth test or write on, are skipped, so the level, the actors and the sky leave the picture and the collision
 // overlay shows on its own. The passes after them (lighting, post-processing) run on what is left, and the HUD, drawn
-// without that target, stays. With Hide player off (NX2NAVI_DEBUG_HIDE_PLAYER=0) the player's own draws stay: those
+// without that target, stays. With Hide player off (OOTPC_DEBUG_HIDE_PLAYER=0) the player's own draws stay: those
 // whose vertex blocks are the player's or its equipment's models (vk_fg_pose.inc pose_owner; motion_owner.c tracks
 // them while this is so). 0 off, 1 everything, 2 all but the player. Parsed again when cfg_version changes.
 static int pose_owner(VkExec *ex, MotionOwner *out);
@@ -4409,7 +4418,7 @@ static int hide_meshes_now(void) {
     static volatile int on;
     unsigned v = cfg_version();
     if (v != seen)
-        on = cfg_bool("NX2NAVI_DEBUG_HIDE_MESHES") ? (cfg_bool("NX2NAVI_DEBUG_HIDE_PLAYER") || !RT_OOT ? 1 : 2) : 0,
+        on = cfg_bool("OOTPC_DEBUG_HIDE_MESHES") ? (cfg_bool("OOTPC_DEBUG_HIDE_PLAYER") || !RT_OOT ? 1 : 2) : 0,
         seen = v;
     return on;
 }
@@ -4438,14 +4447,14 @@ static int draw_skipped(const VkExec *ex, int mesh, int why) {
     return 0;
 }
 
-// NX2NAVI_SKIP_PROG=<serial>[,<serial>...]: diagnostics. Drops every draw whose program serial is listed, so something
+// OOTPC_SKIP_PROG=<serial>[,<serial>...]: diagnostics. Drops every draw whose program serial is listed, so something
 // on screen can be attributed to one program by elimination: pass the programs of the pass it appears in, then half of
 // them, and so on. Environment only, and nothing is skipped without it. Read once: a getenv on every draw scanned the
 // whole environment block and was a sixth of the replay thread's samples in a play profile.
 static int skip_prog_list[32], n_skip_prog = -1;
 static int skip_prog_wanted(uint64_t serial) {
     if (n_skip_prog < 0) {
-        const char *e = getenv("NX2NAVI_SKIP_PROG");
+        const char *e = getenv("OOTPC_SKIP_PROG");
         n_skip_prog = 0;
         while (e && *e && n_skip_prog < 32) {
             char *end;
@@ -4454,14 +4463,14 @@ static int skip_prog_wanted(uint64_t serial) {
             skip_prog_list[n_skip_prog++] = (int)v;
             e = *end == ',' ? end + 1 : end;
         }
-        if (n_skip_prog) rt_log("vk: NX2NAVI_SKIP_PROG: dropping draws of %d program(s)", n_skip_prog);
+        if (n_skip_prog) rt_log("vk: OOTPC_SKIP_PROG: dropping draws of %d program(s)", n_skip_prog);
     }
     for (int i = 0; i < n_skip_prog; i++)
         if ((uint64_t)skip_prog_list[i] == serial) return 1;
     return 0;
 }
 
-// NX2NAVI_PROG_LEAD=1 (diagnostics): how long before its first draw the game made each program
+// OOTPC_PROG_LEAD=1 (diagnostics): how long before its first draw the game made each program
 // (nvnProgramSetShaders, nvn_api_obj.c nvn_prog_made_ns): the head start a build begun at that moment would have over
 // one begun at the draw, which is where shaders are looked up and pipelines built today. A line for vertex, mesh and
 // compute programs (their first dispatch) each, after every 200 programs first used.
@@ -4469,7 +4478,7 @@ static int skip_prog_wanted(uint64_t serial) {
 static struct { int on; uint64_t seen[PROG_LEAD_N]; uint64_t n[3][6], logged; } PLD = {-1};
 
 static int prog_lead_on(void) {
-    if (PLD.on < 0) PLD.on = cfg_get("NX2NAVI_PROG_LEAD") != NULL && strcmp(cfg_get("NX2NAVI_PROG_LEAD"), "0") != 0;
+    if (PLD.on < 0) PLD.on = cfg_get("OOTPC_PROG_LEAD") != NULL && strcmp(cfg_get("OOTPC_PROG_LEAD"), "0") != 0;
     return PLD.on;
 }
 
@@ -4490,7 +4499,7 @@ static void prog_lead(const prog_t *p, int mesh) {
     static const char *const kind[3] = {"vertex", "mesh", "compute"};
     for (int m = 0; m < 3; m++)
         rt_log("vk: %s programs were made before their first use by: under 17 ms %llu, 17-100 ms %llu, 0.1-1 s %llu, 1-5 s "
-               "%llu, 5-30 s %llu, longer %llu (NX2NAVI_PROG_LEAD)", kind[m], (unsigned long long)PLD.n[m][0],
+               "%llu, 5-30 s %llu, longer %llu (OOTPC_PROG_LEAD)", kind[m], (unsigned long long)PLD.n[m][0],
                (unsigned long long)PLD.n[m][1], (unsigned long long)PLD.n[m][2], (unsigned long long)PLD.n[m][3],
                (unsigned long long)PLD.n[m][4], (unsigned long long)PLD.n[m][5]);
 }
@@ -4557,7 +4566,7 @@ static int prepare_draw_ex(VkExec *ex, int prim, int32_t count, int restart, int
         if (!oneshot)   // skipped until ready
             return perf_count(PERF_CNT_SHADER_SKIP), draw_skipped(ex, mesh, SK_SHADER_PENDING);
         perf_count(PERF_CNT_ONESHOT_WAIT);
-        // from the frame's wait pool (NX2NAVI_ONESHOT_BUDGET=0: until each is translated); a shader the pool does not
+        // from the frame's wait pool (OOTPC_ONESHOT_BUDGET=0: until each is translated); a shader the pool does not
         // reach stays at the front of the translators' queue, and the draw is skipped like a per-frame one
         uint64_t *pool = oneshot_budget_on() ? frame_wait() : NULL, x0 = kern_now_ns();
         uint32_t ms;
@@ -4589,8 +4598,8 @@ static int prepare_draw_ex(VkExec *ex, int prim, int32_t count, int restart, int
     int pending;
     // A draw of at most 6 vertices over half the render area or more (a full-screen triangle or quad, a tile) waits for
     // its pipeline: skipping it can leave a black tile. Those waits and the one-shot draws' come from the frame's wait
-    // pool (frame_wait; NX2NAVI_PIPE_SKIP=fullscreen skips the full-screen draws instead, and with
-    // NX2NAVI_ONESHOT_BUDGET=0 a one-shot draw waits up to ONESHOT_WAIT_MS outside the pool). Everything else waits
+    // pool (frame_wait; OOTPC_PIPE_SKIP=fullscreen skips the full-screen draws instead, and with
+    // OOTPC_ONESHOT_BUDGET=0 a one-shot draw waits up to ONESHOT_WAIT_MS outside the pool). Everything else waits
     // for its fast link from the small budget of link_budget and is skipped while its pipeline is built.
     uint32_t wait_ms = 0;
     uint64_t t0 = 0;
@@ -4616,7 +4625,7 @@ static int prepare_draw_ex(VkExec *ex, int prim, int32_t count, int restart, int
         linking = wait_ms != 0;
         if (!wait_ms) budget = NULL;
     }
-    // The previous draw's pipeline while its state repeats (PM, NX2NAVI_PIPE_MEMO=0 turns it off): the cache key is made
+    // The previous draw's pipeline while its state repeats (PM, OOTPC_PIPE_MEMO=0 turns it off): the cache key is made
     // from the state alone, and a pipeline once found only changes from its fast link to its optimised build, read
     // from the info the cache entry keeps.
     VkPipeline p;
@@ -4708,14 +4717,14 @@ static int prepare_draw_ex(VkExec *ex, int prim, int32_t count, int restart, int
     if (info->pool && !pool_on()) return draw_skipped(ex, mesh, SK_POOL_OFF);
     bind_pipeline(ex, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     if (!cx->B.st_valid || memcmp(&cx->B.st, &s, sizeof s)) {
-        // Only the dynamic states whose values changed (vk_pipeline_set_dynamic_delta); NX2NAVI_DYN_DELTA=0 records
+        // Only the dynamic states whose values changed (vk_pipeline_set_dynamic_delta); OOTPC_DYN_DELTA=0 records
         // them all after every pipeline bind, as before.
         static int delta = -1;
         if (delta < 0) {
-            delta = cfg_bool("NX2NAVI_DYN_DELTA");
-            if (!delta) rt_log("vk_exec: every dynamic state recorded after each pipeline bind (NX2NAVI_DYN_DELTA=0)");
+            delta = cfg_bool("OOTPC_DYN_DELTA");
+            if (!delta) rt_log("vk_exec: every dynamic state recorded after each pipeline bind (OOTPC_DYN_DELTA=0)");
         }
-        // an emulated mesh draw (NX2NAVI_MESH_EMULATION) binds a vertex pipeline: its topology, primitive restart and
+        // an emulated mesh draw (OOTPC_MESH_EMULATION) binds a vertex pipeline: its topology, primitive restart and
         // vertex input are dynamic and are set as for any vertex draw
         if (delta) vk_exec_frame.dyn_calls += (uint64_t)vk_pipeline_set_dynamic_delta(ex->cb, &s, &cx->B.dyn, mesh && !fb && !info->emu,
                                                                                        &vk_exec_frame.dyn_left);
@@ -4723,7 +4732,7 @@ static int prepare_draw_ex(VkExec *ex, int prim, int32_t count, int restart, int
         ex->recorded++;
         cx->B.st = s, cx->B.st_valid = 1;
         if (ex->mark && vk_exec_frame.draws == ex->mark_draws0) ex->mark->first[0] = vs, ex->mark->first[1] = fs;
-        if (vk_draw_marks_on)   // NX2NAVI_DRAW_CRUMBS: a lost device then names these shaders (vk_crumbs.c vk_draw_mark)
+        if (vk_draw_marks_on)   // OOTPC_DRAW_CRUMBS: a lost device then names these shaders (vk_crumbs.c vk_draw_mark)
             vk_draw_mark(ex->cb, ex->mark, vs, fs, (uint32_t)(vk_exec_frame.draws - ex->mark_draws0));
     }
     vk_pipeline_line_width(ex->cb, &s, ex->line_width);   // a draw of lines: the game's width; else nothing
@@ -4736,6 +4745,13 @@ static int prepare_draw_ex(VkExec *ex, int prim, int32_t count, int restart, int
     // after the camera is taken, which the collision overlay needs; before anything is bound for the draw
     int hide = hide_meshes_now();
     if (hide && scene_geometry(ex, &s) && !(hide == 2 && player_draw(ex))) return draw_skipped(ex, mesh, SK_HIDE_MESHES);
+    if (!hide && n64gfx_part(N64_PART_ACTORS)) {
+        // N64 Graphics draws a character's N64 model in its place (n64actors.c): the remake model's draws go.
+        MotionOwner o;
+        if (pose_owner(ex, &o) && (o.flags & MOTION_OWNER_N64_ACTOR) && scene_geometry(ex, &s) &&
+            n64actors_stands_in(o.model))
+            return draw_skipped(ex, mesh, SK_STAND_IN);
+    }
     if (!hide && motion_owner_transformed()) {
         // A transformation's body stands in for the player's: the player and its other equipment go, and the pause
         // menu preview's player body (MOTION_OWNER_PREVIEW), which is drawn to a target of its own.
@@ -4743,6 +4759,24 @@ static int prepare_draw_ex(VkExec *ex, int prim, int32_t count, int restart, int
         if (pose_owner(ex, &o) && !(o.flags & MOTION_OWNER_TRANSFORM) &&
             ((o.flags & MOTION_OWNER_PREVIEW) || scene_geometry(ex, &s)))
             return draw_skipped(ex, mesh, SK_HIDE_MESHES);
+    } else if (!hide && (n64pose_active() || n64pose_preview_active())) {
+        // N64 Graphics' N64 Link stands in for the player's body and draws his own sword, shield, sheath, tunic and,
+        // when his file has them, items (n64pose.c): those of the remake go. What N64 Link has no model for
+        // (MOTION_OWNER_KEPT without MOTION_OWNER_N64_ITEM) stays. The pause menu's preview body goes too while an N64
+        // Link is posed for it.
+        MotionOwner o;
+        if (pose_owner(ex, &o) && scene_geometry(ex, &s)) {
+            int gone = !(o.flags & MOTION_OWNER_KEPT) || ((o.flags & MOTION_OWNER_N64_ITEM) && n64pose_items()) ||
+                       ((o.flags & MOTION_OWNER_N64_WEAR) && n64pose_wear());
+            if (o.flags & MOTION_OWNER_PREVIEW) {
+                int body = o.model == n64pose_preview_body(), gear = o.kind == MOTION_OWNER_PREVIEW_KIND;
+                if ((body || (gear && gone)) && n64pose_preview_active()) {
+                    if (body) n64pose_preview_drawn();
+                    return draw_skipped(ex, mesh, SK_STAND_IN);
+                }
+            } else if (gone && n64pose_active())
+                return draw_skipped(ex, mesh, SK_STAND_IN);
+        }
     }
     vk_dlaa_jitter_check(ex);   // a draw with another jitter than the viewport recorded last records it again
     record_fixed(ex);
@@ -4872,7 +4906,7 @@ void vk_exec_ahead_op(VkExec *sx, uint32_t op, const void *payload) {
 // uniform blocks, the jittered viewport and the scene depth, tested with the game's own test and its equal case
 // (LEQUAL, GEQUAL) without writes, so only the visible surface writes its vector. Last frame's blocks:
 // vk_mvprev_find and mo_prev_block; the camera: vk_dlaa_prev_camera. A draw whose variant or pipeline is still
-// building, or whose last-frame blocks are not in the snapshot, keeps the camera's motion. NX2NAVI_DLAA_OBJMV=0 turns it
+// building, or whose last-frame blocks are not in the snapshot, keeps the camera's motion. OOTPC_DLAA_OBJMV=0 turns it
 // off (vk_mvprev.c).
 #include "mvobj_fs_spv.h"
 #include "link_motion_spv.h"
@@ -5212,7 +5246,7 @@ static void mvobj_draw(VkExec *ex, const p_draw_idx *d, VkBuffer ib, VkDeviceSiz
         if (!(vk_dlaa_available() || vk_dlaa_fg_only()) || (!pose_enabled() && !skin_enabled())) return;
     } else if (!vk_mvprev_on()) return;
     static int timed = -1;
-    if (timed < 0) timed = rt_knob("MVOBJ_TIMES", "0");   // NX2NAVI_MVOBJ_TIMES=1: the summary's times (the clock reads cost)
+    if (timed < 0) timed = rt_knob("MVOBJ_TIMES", "0");   // OOTPC_MVOBJ_TIMES=1: the summary's times (the clock reads cost)
     uint64_t t0 = timed ? kern_now_ns() : 0;
     const GfxShader *vs;
     uint32_t banks;
@@ -5226,7 +5260,7 @@ static void mvobj_draw(VkExec *ex, const p_draw_idx *d, VkBuffer ib, VkDeviceSiz
     if (lk) plat_mutex_unlock(&mo_lock);
 }
 
-// NX2NAVI_MVOBJ_BANKS=1 (test): for scene draws, the words of each other uniform bank (c3, c6, c8-c16) that changed
+// OOTPC_MVOBJ_BANKS=1 (test): for scene draws, the words of each other uniform bank (c3, c6, c8-c16) that changed
 // since the same shader's draw last frame, logged at frame 3000: where the time that moves wind and water lives
 static void mvobj_banks(VkExec *ex) {
     DrawCtx *const cx = ex->dc;
@@ -5264,7 +5298,7 @@ static void mvobj_banks(VkExec *ex) {
 }
 
 // 1: old is cur a little changed or the same (every float within 10 %, at least 1.0 and at most 4.0); *changed: not
-// the same. The cap: NX2navi's world positions are in the thousands, and 10 % of them let another object's block a few
+// the same. The cap: OOT-PC's world positions are in the thousands, and 10 % of them let another object's block a few
 // units away pass as this one moved; nothing moves 4 units in a frame.
 static int mo_similar(const uint8_t *cur, const uint8_t *old, uint64_t n, int *changed) {
     *changed = 0;
@@ -5293,16 +5327,16 @@ static int mo_prev_block(int index, const p_bind_buf *u, VkDescriptorBufferInfo 
     int how;
     *changed = 0;
     // c9 and c11 keep this frame's block. With the copies the address rule finds for c11 and last frame's c9, the
-    // c4 c7 c9 c11 draws (walls, cliffs, arches) got several pixels of motion under a still camera (NX2NAVI_MV_CHECK,
+    // c4 c7 c9 c11 draws (walls, cliffs, arches) got several pixels of motion under a still camera (OOTPC_MV_CHECK,
     // those draws alone: 34 % of the picture moving; with c11 kept, 0.8 %). With c11 kept, their c9 still changes every
     // frame while nothing moves (the check's per-draw line: about 120 such draws a frame changed in c9 alone), the
     // object scale the picture shows is 0.6-0.8 of theirs, and with Link stopped against a cliff 40-77 % of the picture
     // got 1-3 px of motion that flipped direction, three times the warp error of the camera's vectors. With c9 kept too,
     // the turning run is as good (object warp error 0.46 of the camera's). Why their copies are wrong is not known.
-    // NX2NAVI_MVPREV_SKIP=<hex bank mask> (test) replaces the default a00 (bit n: cn).
+    // OOTPC_MVPREV_SKIP=<hex bank mask> (test) replaces the default a00 (bit n: cn).
     static long skip = -2;
     if (skip == -2) {
-        const char *e = cfg_get("NX2NAVI_MVPREV_SKIP");
+        const char *e = cfg_get("OOTPC_MVPREV_SKIP");
         skip = e && *e ? strtol(e, NULL, 16) : 1L << 9 | 1L << 11;
     }
     if (skip >> (index + 3) & 1) return 0;
@@ -5318,9 +5352,9 @@ static int mo_prev_block(int index, const p_bind_buf *u, VkDescriptorBufferInfo 
     MO.cyc[1] += c2 - c1;
     if (!cur) return 0;
     const uint8_t *old = map + out->offset;
-    static long trust = -2;   // NX2NAVI_MVPREV_TRUST=<hex bank mask> (test): the copy found is taken without the check
+    static long trust = -2;   // OOTPC_MVPREV_TRUST=<hex bank mask> (test): the copy found is taken without the check
     if (trust == -2) {
-        const char *e = cfg_get("NX2NAVI_MVPREV_TRUST");
+        const char *e = cfg_get("OOTPC_MVPREV_TRUST");
         trust = e && *e ? strtol(e, NULL, 16) : 0;
     }
     if (trust >> (index + 3) & 1) {
@@ -5454,33 +5488,33 @@ static int mvobj_pick(VkExec *ex, const p_draw_idx *d, const GfxShader **vs_out,
     }
     // a position without the scene camera (c4) has a view of its own (c8 c9 c10 [c13]: its c8 is at a new address every
     // frame, last frame's is never found): drawn again it would get this frame's view and no camera motion
-    // (NX2NAVI_MV_CHECK while turning: 6.2 px end-point error against the camera vectors' 1.7)
+    // (OOTPC_MV_CHECK while turning: 6.2 px end-point error against the camera vectors' 1.7)
     static int noc4 = -1;
-    if (noc4 < 0) noc4 = rt_knob("MVOBJ_NOC4", "0");   // NX2NAVI_MVOBJ_NOC4=1 (test): drawn again all the same
+    if (noc4 < 0) noc4 = rt_knob("MVOBJ_NOC4", "0");   // OOTPC_MVOBJ_NOC4=1 (test): drawn again all the same
     if (!(banks >> 4 & 1) && !noc4) {
         __atomic_add_fetch(&MO.no_out, 1, __ATOMIC_RELAXED);
         return skin_pick_left(skin_out, SKIN_BANKS_OTHER);
     }
     // only positions that read an object's own blocks: bones (c5), place (c7) or c6. The rest (terrain and grass: c14
-    // c15 c16, with or without c9) measured no better than the camera's motion (NX2NAVI_MV_CHECK, turning, those draws
+    // c15 c16, with or without c9) measured no better than the camera's motion (OOTPC_MV_CHECK, turning, those draws
     // alone: object warp error 0.112 against the camera's 0.113, the object part 0.4 of what the picture shows) and
-    // were half the draws checked and listed. NX2NAVI_MVOBJ_ALL=1 (test) takes them again.
+    // were half the draws checked and listed. OOTPC_MVOBJ_ALL=1 (test) takes them again.
     static int all = -1;
     if (all < 0) all = rt_knob("MVOBJ_ALL", "0");
     if (!all && !(banks & (1u << 5 | 1u << 6 | 1u << 7))) {
         __atomic_add_fetch(&MO.no_out, 1, __ATOMIC_RELAXED);
         return skin_pick_left(skin_out, SKIN_BANKS_OTHER);
     }
-    // NX2NAVI_MVOBJ_ONLY=<hex bank mask> (test): only draws whose position reads no bank outside the mask (bit n: cn)
+    // OOTPC_MVOBJ_ONLY=<hex bank mask> (test): only draws whose position reads no bank outside the mask (bit n: cn)
     static long only = -2;
     if (only == -2) {
-        const char *e = cfg_get("NX2NAVI_MVOBJ_ONLY");
+        const char *e = cfg_get("OOTPC_MVOBJ_ONLY");
         only = e && *e ? strtol(e, NULL, 16) : -1;
     }
     if (only >= 0 && banks & ~(uint32_t)only & ~(1u << 4)) return skin_pick_left(skin_out, SKIN_BANKS_OTHER);
-    static long exact = -2;   // NX2NAVI_MVOBJ_EXACT=<hex bank mask> (test): only draws with exactly these position banks
+    static long exact = -2;   // OOTPC_MVOBJ_EXACT=<hex bank mask> (test): only draws with exactly these position banks
     if (exact == -2) {
-        const char *e = cfg_get("NX2NAVI_MVOBJ_EXACT");
+        const char *e = cfg_get("OOTPC_MVOBJ_EXACT");
         exact = e && *e ? strtol(e, NULL, 16) : -1;
     }
     if (exact >= 0 && banks != (uint32_t)exact) return skin_pick_left(skin_out, SKIN_BANKS_OTHER);
@@ -5571,7 +5605,7 @@ static void mvobj_draw_(VkExec *ex, const p_draw_idx *d, VkBuffer ib, VkDeviceSi
     ms.chmask.mask = 0x3;   // r and g of target 0
     ms.ms.a2c = 0;
     // the game's own test with its equal case (LESS -> LEQUAL, GREATER -> GEQUAL): the surface the draw left in the
-    // scene depth passes, anything nearer hides it (NX2NAVI_MVOBJ_EQUAL=1: EQUAL, for comparison)
+    // scene depth passes, anything nearer hides it (OOTPC_MVOBJ_EQUAL=1: EQUAL, for comparison)
     static int eq = -1;
     if (eq < 0) eq = rt_knob("MVOBJ_EQUAL", "0");
     int df = cx->B.st.ds.df;
@@ -5744,7 +5778,7 @@ int vk_mvobj_execute(VkExec *ex, uint64_t cam, VkImageView mv, VkImageView depth
                (unsigned long long)MO.storage, (unsigned long long)MO.no_fs, (unsigned long long)MO.other_cam);
     if (!MQ.n) return 0;
     static int exec = -1;
-    if (exec < 0) exec = rt_knob("MVOBJ_EXEC", "1");   // NX2NAVI_MVOBJ_EXEC=0: listed, never recorded (test)
+    if (exec < 0) exec = rt_knob("MVOBJ_EXEC", "1");   // OOTPC_MVOBJ_EXEC=0: listed, never recorded (test)
     if (!exec) {
         mo_drop();
         return 0;
@@ -5823,7 +5857,7 @@ static PFN_vkCmdDrawMeshTasksIndirectEXT draw_mesh_ind_fn(void) {
     return fn;
 }
 
-// NX2NAVI_FOLIAGE_SHADOW_VRS (0 to 3, default 2): the foliage's mesh draws in the shadow cascades from this one on shade one
+// OOTPC_FOLIAGE_SHADOW_VRS (0 to 3, default 2): the foliage's mesh draws in the shadow cascades from this one on shade one
 // fragment per 2x2 pixels; 3 turns it off. A leaf's alpha test then runs a quarter as often, and the far cascade's texels
 // are metres across the forest floor, where the coarser cut-out does not show. A mesh pipeline has the rate as dynamic
 // state, so every mesh draw sets it.
@@ -5831,7 +5865,7 @@ static void mesh_shading_rate(VkExec *ex) {
     static PFN_vkCmdSetFragmentShadingRateKHR fn;
     static int looked, from;
     if (!__atomic_load_n(&looked, __ATOMIC_ACQUIRE)) {   // as draw_mesh_fn: the pointer before the flag
-        const char *e = cfg_get("NX2NAVI_FOLIAGE_SHADOW_VRS");
+        const char *e = cfg_get("OOTPC_FOLIAGE_SHADOW_VRS");
         from = e && *e ? atoi(e) : 2;
         if (vk_ctx()->has_vrs)
             fn = (PFN_vkCmdSetFragmentShadingRateKHR)vkGetDeviceProcAddr(vk_ctx()->device, "vkCmdSetFragmentShadingRateKHR");
@@ -5925,12 +5959,12 @@ static void mfb_make(MfbCs *e) {
     __atomic_store_n(&e->state, ok ? 1 : -1, __ATOMIC_RELEASE);
 }
 
-// The programs queued at their first draws are made by NX2NAVI_MESH_FALLBACK_WORKERS threads (auto: one for each 4
+// The programs queued at their first draws are made by OOTPC_MESH_FALLBACK_WORKERS threads (auto: one for each 4
 // logical processors, 1 to 4). A place's mesh programs all arrive in its first frames and each one's draws are left
 // out until its compute pipelines are built (up to seconds each on some drivers), so with one thread the foliage of a
 // first visit filled in one program at a time. The first time the queue empties the log says how long it took.
 static int mfb_worker_count(void) {
-    const char *v = cfg_value("NX2NAVI_MESH_FALLBACK_WORKERS");
+    const char *v = cfg_value("OOTPC_MESH_FALLBACK_WORKERS");
     int n = strcmp(v, "auto") ? atoi(v) : (int)plat_cpu_usable() / 4;
     return n < 1 ? 1 : n > 4 ? 4 : n;
 }
@@ -5949,7 +5983,7 @@ static void mfb_worker(void *arg) {
         plat_mutex_lock(&MFB.lock);
         if (!--MFB.busy && !MFB.head && !MFB.drained++)
             rt_log("vk: mesh fallback: %llu programs made (%llu refused) on %d threads, the queue empty %llu ms after the "
-                   "first program was queued (NX2NAVI_MESH_FALLBACK_WORKERS)", (unsigned long long)MFB.made,
+                   "first program was queued (OOTPC_MESH_FALLBACK_WORKERS)", (unsigned long long)MFB.made,
                    (unsigned long long)MFB.failed, MFB.threads, (unsigned long long)(plat_now_ms() - MFB.first_ms));
         plat_mutex_unlock(&MFB.lock);
     }
@@ -6134,7 +6168,7 @@ static int mesh_emu_on(void) {
     static int on = -1;
     if (on < 0) {
         on = !vk_ctx()->has_mesh_shader && rt_knob("MESH_EMULATION", "0");
-        if (on) rt_log("vk: mesh shaders emulated with compute (NX2NAVI_MESH_EMULATION)");
+        if (on) rt_log("vk: mesh shaders emulated with compute (OOTPC_MESH_EMULATION)");
     }
     return on;
 }
@@ -6147,7 +6181,7 @@ static void op_draw_mesh(VkExec *ex, const p_draw_mesh *d) {
         return;
     }
     static int on = -1;
-    if (on < 0) on = rt_knob("MESH", "1");   // NX2NAVI_MESH=0: mesh draws are skipped (diagnosis)
+    if (on < 0) on = rt_knob("MESH", "1");   // OOTPC_MESH=0: mesh draws are skipped (diagnosis)
     if (!d->count || !on) return;
     if (vk_ctx()->mesh_fallback) {
         if (d->first) warn_once(W_MESH, "a mesh draw from workgroup %u: drawn from workgroup 0", d->first);
@@ -6181,7 +6215,7 @@ static VkBuffer mesh_ring;
 static VmaAllocation mesh_ring_alloc;
 static uint32_t mesh_ring_next;
 
-// NX2NAVI_GPU_PASSES: the workgroup counts of the indirect mesh draws of the timed frames, copied to host memory.
+// OOTPC_GPU_PASSES: the workgroup counts of the indirect mesh draws of the timed frames, copied to host memory.
 int vk_gpu_passes_capturing(void);
 enum { MESH_COUNTS = 4096 };
 static VkBuffer mesh_count_buf;
@@ -6216,7 +6250,7 @@ static void mesh_count_note(VkExec *ex, VkCommandBuffer cb, const VkMemSpan *src
     if (cb == ex->cb) ex->recorded++;
 }
 
-// NX2NAVI_MESH_AHEAD (default 1; 0 = each draw by itself, "ab" switches with the A/B blocks): the copy of a record
+// OOTPC_MESH_AHEAD (default 1; 0 = each draw by itself, "ab" switches with the A/B blocks): the copy of a record
 // cannot be recorded inside a pass, so every indirect mesh draw ended its pass, and a pass that draws its meshes one
 // after another was cut into as many pieces (a village: 45 of them a frame, each with a gap of its own on the GPU).
 // The first such draw of a run now fills the entries of the ones that follow it as well, with nothing but state,
@@ -6315,7 +6349,7 @@ static int mesh_ring_entry(VkExec *ex, VkCommandBuffer cb, const p_draw_mesh_ind
     return 1;
 }
 
-// NX2NAVI_FOLIAGE (full, reduced, off; default full; the low-end GPU rows of the menu's Game tab): Ocarina draws its foliage with
+// OOTPC_FOLIAGE (full, reduced, off; default full; the low-end GPU rows of the menu's Game tab): Ocarina draws its foliage with
 // DrawMeshTasksIndirect, the instances its compute passes culled on the GPU. With a task stage: the small grass and moss
 // that carpet the ground; without one: ferns, leaves, clover and the other plants. Its other mesh draws (DrawMeshTasks
 // with a count: terrain, rocks, buildings, doors) are not foliage. reduced skips the indirect draws with a task stage,
@@ -6324,23 +6358,27 @@ static int mesh_ring_entry(VkExec *ex, VkCommandBuffer cb, const p_draw_mesh_ind
 static int foliage_skip(VkExec *ex) {
     static int mode = -1, shadows;
     if (mode < 0) {
-        const char *v = cfg_get("NX2NAVI_FOLIAGE");
+        const char *v = cfg_get("OOTPC_FOLIAGE");
         mode = v && !strcmp(v, "off") ? 2 : v && !strcmp(v, "reduced") ? 1 : 0;
-        v = cfg_get("NX2NAVI_FOLIAGE_SHADOWS");
+        v = cfg_get("OOTPC_FOLIAGE_SHADOWS");
         shadows = v && !strcmp(v, "off") ? 2 : v && !strcmp(v, "reduced") ? 1 : 0;
         const char *names[] = {"full", "reduced", "off"};
         rt_log("vk: foliage %s, foliage shadows %s", names[mode], names[shadows]);
     }
-    if (!mode && !shadows) return 0;
+    // N64 Graphics' levels (n64world_foliage): the N64 rooms had no such plants, so while an area is drawn with N64
+    // textures its own setting stands in for OOTPC_FOLIAGE
+    int m = mode, sh = shadows, w = n64world_foliage();
+    if (w >= 0 && w > m) m = w, sh = w > sh ? w : sh;
+    if (!m && !sh) return 0;
     // Use the current command's attachments, not cached images from a previous pass.
     int depth_only = ex->rt.depth != NULL;
     for (int i = 0; i < ex->rt.n && i < 8; ++i) if (ex->rt.color[i]) depth_only = 0;
-    if (!mode && !depth_only) return 0;
-    if (mode == 2 || (depth_only && shadows == 2)) return 1;
+    if (!m && !depth_only) return 0;
+    if (m == 2 || (depth_only && sh == 2)) return 1;
     const uint8_t *ctl, *code;
     uint32_t len;
     int task = ex->prog && find_stage(ex->dc, ex->prog, NVN_STAGE_TASK, &ctl, &code, &len);
-    return foliage_detail_skip(1, task, depth_only, mode, shadows);
+    return foliage_detail_skip(1, task, depth_only, m, sh);
 }
 
 // DrawMeshTasksIndirect: one draw from its ring entry (mesh_ring_entry); x2-x4 of the call vary like leftovers, so they
@@ -6390,13 +6428,13 @@ static void op_draw_mesh_ind(VkExec *ex, const p_draw_mesh_ind *d) {
     VK_MEM_BOUND(ip);
 }
 
-// ---- NX2NAVI_MESH_EMULATION: mesh draws on GPUs without VK_EXT_mesh_shader
+// ---- OOTPC_MESH_EMULATION: mesh draws on GPUs without VK_EXT_mesh_shader
 // Each mesh draw (prepared like one, prepare_draw_ex, for its layout, descriptors and graphics state) runs its task
 // and mesh stages as compute pipelines (vk_pipeline_mesh_emu) outside the pass: they write vertices and triangles into
 // the arena (mesh_emu_spirv.h) and the draw record's DrawIndexedIndirect, which the generated vertex shader and the
 // game's fragment shader then draw. The arena's counters are zeroed at the first emulated draw of each submission;
-// the draw records go round a ring of MESH_EMU_DRECS. NX2NAVI_MESH_EMU_MB sizes the arena (default 256 MiB),
-// NX2NAVI_MESH_EMU_TASKS its task records per submission (default 16384, 3 KiB each). Before the counters start over
+// the draw records go round a ring of MESH_EMU_DRECS. OOTPC_MESH_EMU_MB sizes the arena (default 256 MiB),
+// OOTPC_MESH_EMU_TASKS its task records per submission (default 16384, 3 KiB each). Before the counters start over
 // they are copied to a readback ring; the perf log reports the most a submission asked for against the capacities.
 #define ME_RB 64
 static struct {
@@ -6437,7 +6475,7 @@ static int me_alloc_pipe(void) {
 static int me_arena(void) {
     if (ME.buf) return 1;
     if (ME.failed) return 0;
-    const char *v = cfg_get("NX2NAVI_MESH_EMU_MB"), *t = cfg_get("NX2NAVI_MESH_EMU_TASKS");
+    const char *v = cfg_get("OOTPC_MESH_EMU_MB"), *t = cfg_get("OOTPC_MESH_EMU_TASKS");
     int mb = v && atoi(v) >= 32 ? atoi(v) : 256;
     if (mb > 2048) mb = 2048;
     ME.trecs = t && atoi(t) >= 256 ? (uint32_t)atoi(t) : 16384;
@@ -6492,7 +6530,7 @@ static void me_barrier(VkCommandBuffer cb, VkPipelineStageFlags2 ss, VkAccessFla
 }
 
 // The stages of the emulated draws whose records were filled, waiting to be recorded (me_flush): the draws of a pass
-// with NX2NAVI_MESH_EMU_BATCH, which run in the part's pre-pass command buffer when it ends (vk_exec_mesh_flush, from
+// with OOTPC_MESH_EMU_BATCH, which run in the part's pre-pass command buffer when it ends (vk_exec_mesh_flush, from
 // vk_sync.c), or the one draw that runs in the part. Recorded by stage, with one barrier between stages for all the
 // draws: the fills, the allocation (task records; index ranges of draws without a task stage), every task stage, the
 // allocation of the other index ranges, every mesh stage. Each draw's indices are a range of its own and its task
@@ -6610,7 +6648,7 @@ static int mesh_emu_draw(VkExec *ex, uint32_t count, const VkMemSpan *ind, const
     int push = info->push, pool = info->pool;
     VkDescriptorUpdateTemplate tpl_c = info->emu_tpl_c;
     VkDescriptorSet set0 = ex->dc->B.ds_bound[0];
-    // NX2NAVI_MESH_EMU_BATCH (default on): the stages run in the part's pre-pass command buffer (vk_sync_pre), which
+    // OOTPC_MESH_EMU_BATCH (default on): the stages run in the part's pre-pass command buffer (vk_sync_pre), which
     // the queue runs before the part, and the pass is not split for them. At the first emulated draw of a pass the part
     // is cut there (vk_sync_cut: ended, but handed to the queue only with the next part, so the texture pool set stays;
     // a split there took a new set, and each took 2.3 ms of the replay to refresh), so that the pass begins the next
@@ -6621,7 +6659,7 @@ static int mesh_emu_draw(VkExec *ex, uint32_t count, const VkMemSpan *ind, const
     static int batch = -1;
     if (batch < 0) {
         batch = rt_knob("MESH_EMU_BATCH", "1");
-        rt_log("vk: mesh emulation: the stages of a pass's emulated draws %s (NX2NAVI_MESH_EMU_BATCH=%d)",
+        rt_log("vk: mesh emulation: the stages of a pass's emulated draws %s (OOTPC_MESH_EMU_BATCH=%d)",
                batch ? "run before the pass, in a command buffer of their own" : "split the pass", batch);
     }
     VkCommandBuffer pre = VK_NULL_HANDLE;
@@ -6795,7 +6833,7 @@ static void op_draw(VkExec *ex, const p_draw *d) {
 // Primitive restart of an indexed draw. NVN restarts strips wherever an index equals the SetPrimitiveRestart value;
 // Vulkan restarts only at the all-ones value of the bound index type, and only strips and fans without
 // primitiveTopologyListRestart. Byte indices are widened to 16 bits, so their restart value becomes 0xffff
-// (op_draw_idx). Without restart the 0xffff entries of NX2NAVI's terrain and cliff strips fetch vertex 65535 + base and
+// (op_draw_idx). Without restart the 0xffff entries of OOTPC's terrain and cliff strips fetch vertex 65535 + base and
 // the triangles around them drop out.
 static int restart_for(const VkExec *ex, int prim, int itype) {
     if (!ex->prim_restart.enable) return 0;
@@ -6811,17 +6849,17 @@ static int restart_for(const VkExec *ex, int prim, int itype) {
     return 0;
 }
 
-// NX2NAVI_QUAD_INDEX (default 0): an indexed quad list is drawn as two triangles per quad and an indexed line loop as a
+// OOTPC_QUAD_INDEX (default 0): an indexed quad list is drawn as two triangles per quad and an indexed line loop as a
 // strip that comes back to its first vertex, from the game's indices (vk_index_rewrite.h), as the non-indexed ones are
 // (op_draw). Off, they go to the GPU with the game's indices under the triangle list and line strip topologies, and the
 // first such draw is logged either way. Read once.
 static int quad_index_on(void) {
     static int on = -1;
-    if (on < 0) on = cfg_bool("NX2NAVI_QUAD_INDEX");
+    if (on < 0) on = cfg_bool("OOTPC_QUAD_INDEX");
     return on;
 }
 
-// An indexed quad list or line loop, drawn with indices made from the game's (NX2NAVI_QUAD_INDEX). 0: not one of those,
+// An indexed quad list or line loop, drawn with indices made from the game's (OOTPC_QUAD_INDEX). 0: not one of those,
 // or left as it was (setting off, indices the CPU cannot read, a loop with primitive restart); the caller draws it.
 static int draw_idx_rewritten(VkExec *ex, const p_draw_idx *d, const VkMemSpan *sp, int restart) {
     static const uint32_t isize[3] = {1, 2, 4};
@@ -6851,7 +6889,7 @@ static int draw_idx_rewritten(VkExec *ex, const p_draw_idx *d, const VkMemSpan *
     free(ix);
     static int told;
     if (!told++)
-        rt_log("vk: an indexed %s of %u indices drawn as %u indices of a %s (NX2NAVI_QUAD_INDEX)", quads ? "quad list" : "line loop",
+        rt_log("vk: an indexed %s of %u indices drawn as %u indices of a %s (OOTPC_QUAD_INDEX)", quads ? "quad list" : "line loop",
                n, m, quads ? "triangle list" : "line strip");
     vkCmdDrawIndexed(ex->cb, m, d->instances > 0 ? (uint32_t)d->instances : 1, 0, d->base_vertex, (uint32_t)d->base_instance);
     ex->recorded++;
@@ -6869,7 +6907,14 @@ static void op_draw_idx(VkExec *ex, const p_draw_idx *d) {
     VkMemSpan sp;
     if (!vk_mem_resolve(d->ibuf, bytes, &sp)) return warn_once(W_INDEX, "index buffer %#llx is not backed: draws with it are skipped", (unsigned long long)d->ibuf);
     if (draw_idx_rewritten(ex, d, &sp, restart)) return;
-    if (d->itype == NVN_INDEX_TYPE_UNSIGNED_BYTE) {   // no uint8 index type here: widen (host-readable backing only)
+    if (d->itype == NVN_INDEX_TYPE_UNSIGNED_BYTE && vk_ctx()->has_index_uint8) {
+        // bound as they are (VK_KHR_index_type_uint8): no copy, and indices the GPU wrote read as written; 0xff is the
+        // restart index of 8-bit indices
+        VK_MEM_USE(sp);
+        bind_index_buffer(ex, sp.buffer, sp.offset, VK_INDEX_TYPE_UINT8_KHR);
+        vk_mem_count(sp.cls, VK_MUSE_IB, bytes);
+        VK_MEM_BOUND(sp);
+    } else if (d->itype == NVN_INDEX_TYPE_UNSIGNED_BYTE) {   // no uint8 index type here: widen (host-readable backing only)
         if (sp.alloc) return warn_once(W_INDEX, "byte indices in device-local memory: draw skipped");
         vk_mem_count(sp.cls, VK_MUSE_CPU_READ, bytes);
         vk_mem_count(VK_MCLS_SCRATCH, VK_MUSE_IB, 2 * bytes);
@@ -6926,7 +6971,7 @@ static void op_draw_idx_ind(VkExec *ex, const p_draw_idx_ind *d) {
 // has no model for. Instead of leaving the outputs untouched (black), the largest bound storage image receives a
 // linear blit of the largest bound sampled RGBA8 texture that is a different image and no larger (the networks'
 // 10-bit intermediates are only partly meaningful as pictures, so they are not a source): what an upscaler
-// approximates. In-place passes (the output also sampled) are left alone. NX2NAVI_CS_FALLBACK=0 turns it off.
+// approximates. In-place passes (the output also sampled) are left alone. OOTPC_CS_FALLBACK=0 turns it off.
 // sRGB-ness of the RGBA8 formats the fallback blits: a blit converts between encodings, the game's network writes the
 // bits through a UNORM view, so a UNORM source and an sRGB target go through a scratch image in the source's format
 // (blit, scaling only) and then a raw copy.
@@ -6999,7 +7044,7 @@ static int uses_tensor_ops(const VkExec *ex) {
     return v;
 }
 
-// NX2NAVI_NATIVE_TENSOR=1: tensor-core programs run their translation (HMMA, LDSM and MOVM lowered to warp shuffles in
+// OOTPC_NATIVE_TENSOR=1: tensor-core programs run their translation (HMMA, LDSM and MOVM lowered to warp shuffles in
 // tools/xlate/AmpereLowering.cs Hmma, Ldsm, Movm). The lowering gives the hardware's results: its SPIR-V, run by the
 // driver, matches what the same SM86 kernels compute natively, bit for bit, on single instructions and on a network
 // pass over four warps (tests/tensor_gpu_check.py). The infinities and noise the scene upscaler wrote came from its
@@ -7012,7 +7057,7 @@ static int native_tensor(const VkExec *ex) {
     return on || !uses_tensor_ops(ex);
 }
 
-// Everything an untranslated program binds (NX2NAVI_LOG_CS_BINDS): what a stand-in could use instead. Texture lock held.
+// Everything an untranslated program binds (OOTPC_LOG_CS_BINDS): what a stand-in could use instead. Texture lock held.
 static void log_cs_bindings_locked(const VkExec *ex) {
     char line[1600];
     int o = 0;
@@ -7038,7 +7083,7 @@ static void log_cs_bindings_locked(const VkExec *ex) {
     rt_log("vk_exec:   its bindings (control: %d texture, %d image entries):%s", ntex, nimg, line);
 }
 
-// NX2NAVI_LOG_CS_BINDS: an untranslated program the fallback leaves alone, so its output keeps what it held (black when
+// OOTPC_LOG_CS_BINDS: an untranslated program the fallback leaves alone, so its output keeps what it held (black when
 // nothing else wrote it): why, and what it binds. in_place -1: not a tensor program (its translation failed). Each
 // (program, output) once, 256 at most. Texture lock held.
 static void log_fallback_skip_locked(const VkExec *ex, const VkTexImage *out, int in_place) {
@@ -7088,7 +7133,7 @@ static uint64_t cs_guest_hash(const prog_t *p) {
 // The anti-aliasing setting (vk_aa.c): while it asks for something other than the game's SMAA, the game's edge and
 // weight passes are left out and its composition is replaced by vk_aa_record, from the same composite (the sampled
 // R11G11B10F image of the output's size) into the same scene target, through the integer storage view the game's own
-// pass writes it with. 1: the dispatch is handled (left out or replaced). NX2NAVI_AA_LOG=1 logs each compute program's
+// pass writes it with. 1: the dispatch is handled (left out or replaced). OOTPC_AA_LOG=1 logs each compute program's
 // guest code hash once, with its dispatch size and output, to find the passes in another game version.
 static int aa_dispatch(VkExec *ex, int x, int y, int z) {
     int mode = vk_aa_mode();
@@ -7170,6 +7215,40 @@ static int aa_dispatch(VkExec *ex, int x, int y, int z) {
     }
     vk_aa_composed(ok);
     return ok;
+}
+
+// The game's optional effects (vk_game_fx.c): a pass of one turned off is left out and the storage images it would
+// have written are cleared to the value meaning "no effect". 1: the dispatch is handled.
+static int game_fx_dispatch(VkExec *ex) {
+    float fill = 0;
+    if (!ex->prog || !vk_game_fx_skip(cs_guest_hash(ex->prog), &fill)) return 0;
+    VkImage imgs[8];
+    VkImageSubresourceRange rng[8];
+    int n = 0;
+    vk_texture_lock();
+    for (int i = 0; i < 32 && n < 8; i++) {
+        uint64_t h = ex->img[NVN_STAGE_CS][i];
+        view_t v; int hv = 0;
+        const VkTexImage *t = h ? vk_texture_by_id_locked(NVN_HANDLE_TEX(h), &v, &hv) : NULL;
+        if (!t || !t->image || t->samples != 1) continue;
+        int dup = 0;
+        for (int k = 0; k < n; k++) dup |= imgs[k] == t->image;
+        if (dup) continue;
+        vk_texture_storage_bound_locked(t);   // written by this submission, as the pass would have
+        imgs[n] = t->image;
+        rng[n] = (VkImageSubresourceRange){VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+        n++;
+    }
+    vk_texture_unlock();
+    static int told;
+    if (!told++) rt_log("game fx: an effect turned off: its pass is left out and %d image%s filled with %g", n, n == 1 ? "" : "s", fill);
+    if (!n) return 1;
+    VkClearColorValue cv = {.float32 = {fill, fill, fill, fill}};
+    vk_exec_barrier(ex);   // ends the pass; earlier reads and writes of the images are done
+    for (int k = 0; k < n; k++) vkCmdClearColorImage(ex->cb, imgs[k], VK_IMAGE_LAYOUT_GENERAL, &cv, 1, &rng[k]);
+    ex->recorded++;
+    vk_exec_barrier(ex);   // the passes after it read the cleared images
+    return 1;
 }
 
 static void untranslated_dispatch_fallback(VkExec *ex) {
@@ -7265,7 +7344,7 @@ static void untranslated_dispatch_fallback(VkExec *ex) {
     if (!si || !di) return;
     static int logged;
     if (!logged++) rt_log("vk_exec: untranslated compute dispatch: its output image (%ux%u) gets a linear blit of its "
-                          "largest input (%ux%u) instead (NX2NAVI_CS_FALLBACK=0 turns this off)", dw, dh, sw, sh);
+                          "largest input (%ux%u) instead (OOTPC_CS_FALLBACK=0 turns this off)", dw, dh, sw, sh);
     vk_exec_pass_end(ex);
     vk_exec_barrier(ex);
     VkImageBlit bl = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}};
@@ -7293,7 +7372,7 @@ static void untranslated_dispatch_fallback(VkExec *ex) {
         vkCmdPipelineBarrier2(ex->cb, &dep);
         si = e5;
     }
-#if NX2NAVI_TONEMAP_STANDIN
+#if OOTPC_TONEMAP_STANDIN
     // The square decode of the stored picture (vk_tonemap.c). Builds of round 24 lost the device with it: its descriptor
     // push did not go through the recorder (vk_rec.h rec_push; PORT-HANDOFF 7.12 item 11), which it now does.
     // Its edge-adaptive filter is for the picture the screen shows: while DLSS or FSR 3.1 runs (vk_dlaa_active) that
@@ -7364,9 +7443,10 @@ static void op_dispatch(VkExec *ex, const p_dispatch *d) {
     cb_res(ex);
     dummies_init();
     if (aa_dispatch(ex, d->x, d->y, d->z)) return;   // the game's SMAA left out or replaced (vk_aa.c)
-    // A tensor-core program runs the stand-in while NX2NAVI_NATIVE_TENSOR is off, so ask that before translating it.
+    if (game_fx_dispatch(ex)) return;   // an optional effect turned off (vk_game_fx.c)
+    // A tensor-core program runs the stand-in while OOTPC_NATIVE_TENSOR is off, so ask that before translating it.
     // Translating it anyway recorded four AI-upscaler compute shaders of 0.87-4.4M SPIR-V words that this game never
-    // dispatches natively, and building them cost gigabytes of memory at boot (NX2NAVI_LIB_PREBUILD_BIG, bg_main).
+    // dispatches natively, and building them cost gigabytes of memory at boot (OOTPC_LIB_PREBUILD_BIG, bg_main).
     if (!native_tensor(ex)) { untranslated_dispatch_fallback(ex); return; }
     int present;
     const GfxShader *cs = shader_for(ex, NVN_STAGE_CS, &present, NULL, 0);   // synchronous: a skipped dispatch changes results
@@ -7391,7 +7471,7 @@ static void op_dispatch(VkExec *ex, const p_dispatch *d) {
     const VkPipeInfo *info = NULL;
     VkPipeline p = vk_pipeline_compute(cs, &info);
     if (!p || !info) return warn_once(W_PIPELINE, "a compute pipeline could not be created: dispatches with it are skipped");
-    if ((info->pool && !pool_on()) || shader_skipped(cs)) return;   // NX2NAVI_POOL=0, NX2NAVI_SKIP_SHADERS
+    if ((info->pool && !pool_on()) || shader_skipped(cs)) return;   // OOTPC_POOL=0, OOTPC_SKIP_SHADERS
     vk_exec_barrier_dispatch(ex);   // ends the pass; earlier writes are visible to the shader
     bind_pipeline(ex, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     cx->c0_dim[0] = (uint32_t)d->x, cx->c0_dim[1] = (uint32_t)d->y, cx->c0_dim[2] = (uint32_t)d->z;
@@ -7422,6 +7502,7 @@ static void op_dispatch_ind(VkExec *ex, const p_dispatch_ind *d) {
     cb_res(ex);
     dummies_init();
     if (aa_dispatch(ex, 0, 0, 0)) return;   // as in op_dispatch
+    if (game_fx_dispatch(ex)) return;
     if (!native_tensor(ex)) { untranslated_dispatch_fallback(ex); return; }   // as in op_dispatch: never translate it
     int present;
     const GfxShader *cs = shader_for(ex, NVN_STAGE_CS, &present, NULL, 0);
@@ -7429,7 +7510,7 @@ static void op_dispatch_ind(VkExec *ex, const p_dispatch_ind *d) {
     const VkPipeInfo *info = NULL;
     VkPipeline p = vk_pipeline_compute(cs, &info);
     if (!p || !info) return warn_once(W_PIPELINE, "a compute pipeline could not be created: dispatches with it are skipped");
-    if ((info->pool && !pool_on()) || shader_skipped(cs)) return;   // NX2NAVI_POOL=0, NX2NAVI_SKIP_SHADERS
+    if ((info->pool && !pool_on()) || shader_skipped(cs)) return;   // OOTPC_POOL=0, OOTPC_SKIP_SHADERS
     vk_exec_barrier_dispatch(ex);
     VK_MEM_USE(ip);
     bind_pipeline(ex, VK_PIPELINE_BIND_POINT_COMPUTE, p);
@@ -7613,10 +7694,10 @@ static void op_draw_impl(VkExec *ex, uint32_t op, const void *payload) {
     }
 }
 
-// The last executed list's draws as " <position banks>/<changed banks>:<draws>" (bit n: cn), for NX2NAVI_MV_CHECK's lines.
+// The last executed list's draws as " <position banks>/<changed banks>:<draws>" (bit n: cn), for OOTPC_MV_CHECK's lines.
 const char *vk_mvobj_frame_masks(void) { return fm_last; }
 
-// NX2NAVI_REPLAY_TIME (default 0, off): times each op so the frame-time summary can say how the replay splits between
+// OOTPC_REPLAY_TIME (default 0, off): times each op so the frame-time summary can say how the replay splits between
 // draws, binds and transfers. The clock reads cost a fraction of a millisecond a frame, which is why it is off by
 // default and why the wrapper is the only thing between the walk and the switch.
 static int op_is_draw(uint32_t op) {
@@ -7634,14 +7715,14 @@ static int op_is_draw(uint32_t op) {
 void vk_exec_op_draw(VkExec *ex, uint32_t op, const void *payload) {
     if (!ex->dc) ex->dc = dc;
     static int on = -1;
-    if (on < 0) on = cfg_bool("NX2NAVI_REPLAY_TIME");
+    if (on < 0) on = cfg_bool("OOTPC_REPLAY_TIME");
     if (!on) { op_draw_impl(ex, op, payload); return; }
     uint64_t t0 = plat_now_ns();
     op_draw_impl(ex, op, payload);
     perf_replay_op_at(op_is_draw(op) ? PERF_RP_DRAW : PERF_RP_BIND, op, plat_now_ns() - t0);
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): the image view cache (under the texture lock), the spare descriptor pools
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): the image view cache (under the texture lock), the spare descriptor pools
 // and transient chunks, and the continuations held for event order.
 void vk_exec_sizes(PerfSizes *s) {
     vk_texture_lock();

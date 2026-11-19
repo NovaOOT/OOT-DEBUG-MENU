@@ -27,7 +27,7 @@ class Context:
             self._file = open(path, 'a', encoding='utf-8', errors='replace')
         except OSError:
             self._file = None
-        self.log(f'--- OOT-DEBUG-MENU launcher {self.version} ({"checkout" if self.layout.dev else "release"}) in '
+        self.log(f'--- OOT-PC launcher {self.version} ({"checkout" if self.layout.dev else "release"}) in '
                  f'{self.layout.root}')
         from .toolchain import zstd_missing
         self.zstd_missing = zstd_missing(self.layout)

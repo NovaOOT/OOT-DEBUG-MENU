@@ -1,4 +1,4 @@
-// Two-pane settings pages (option_rows.h): rows on the left, the selected or hovered row's description on the right.
+// Full-width settings pages (option_rows.h), with the selected or hovered row's description in the help strip below.
 //
 // Contains code Copyright (c) 2026 Revivedx and the Savage Wind Recomp contributors, Copyright (c) 2026 Peiikai (MIT; see
 // THIRD_PARTY_NOTICES.md).
@@ -71,9 +71,27 @@ static float row_margin(void) { return ceilf(skin_cursor_reach(g_scale) * 0.85f)
 
 // The description pane: this frame's hovered and selected rows, the page's first row, and the last one shown (of the
 // page g_page: another page starts from its first row's, however it was opened).
-struct Desc { char text[UI_DESC_BYTES]; };
+struct Desc { char text[UI_DESC_BYTES]; char title[160]; };
 static Desc g_hover, g_focus, g_first, g_shown;
 static ImGuiID g_page;
+static float g_help_height;
+static float g_content_x;
+static struct Section { ImGuiID first; float y; } g_sections[64];
+static int g_section_count, g_section_current = -1, g_section_last, g_section_step;
+
+void opt_section_step(int step) { g_section_step = step; }
+
+static void section_start(void) {
+    if (g_section_count < (int)(sizeof g_sections / sizeof *g_sections))
+        g_sections[g_section_count++] = {0, ImGui::GetCursorPosY()};
+}
+
+static void section_row(void) {
+    if (!g_section_count) return;
+    Section &s = g_sections[g_section_count - 1];
+    if (!s.first) s.first = ImGui::GetItemID();
+    if (ImGui::IsItemFocused()) g_section_current = g_section_count - 1;
+}
 
 // disabled: the note of a row opt_disable_next greyed out, else NULL.
 static void desc_set(Desc &d, const char *desc, const char *key, const CfgMeta *m, const char *disabled) {
@@ -107,7 +125,13 @@ void opt_begin(const char *id, float scale) {
     g_take_first = g_focus_req;
     g_focus_req = false;
     g_hover.text[0] = g_focus.text[0] = g_first.text[0] = 0;
-    if (ImGuiID page = ImGui::GetID(id); page != g_page) g_page = page, g_shown.text[0] = 0;
+    if (ImGuiID page = ImGui::GetID(id); page != g_page) {
+        g_page = page;
+        g_shown.text[0] = 0;
+        g_section_last = 0;
+    }
+    g_section_count = 0;
+    g_section_current = -1;
     // opt_focus_resume: a page shown for the first time has no kept row, so it starts from its first one
     g_resume = false;
     if (g_resume_req) {
@@ -124,9 +148,12 @@ void opt_begin(const char *id, float scale) {
     ImVec2 avail = ImGui::GetContentRegionAvail();
     avail.y -= g_bottom;
     ImGui::PushID(id);
-    ImGui::BeginChild("##rows", ImVec2(avail.x * 0.58f, avail.y), ImGuiChildFlags_NavFlattened);
+    g_content_x = ImGui::GetCursorScreenPos().x;
+    // Full-width settings above a fixed help strip. Long descriptions scroll independently of the settings.
+    g_help_height = fminf(160 * scale, fmaxf(80 * scale, avail.y * .28f));
+    ImGui::BeginChild("##rows", ImVec2(avail.x, fmaxf(60 * scale, avail.y - g_help_height - 12 * scale)), ImGuiChildFlags_NavFlattened);
     // the rows sit far enough apart that the selected row's cursor frame clears its neighbours' boxes
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 9 * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 3 * scale));
     ImGui::Dummy(ImVec2(0, row_margin()));   // and the first row's cursor stays inside the pane
     g_cursor.on = false;
     // three layers: the cursor's glow under the rows, the rows, the cursor's frame over them (opt_end draws the cursor)
@@ -142,6 +169,21 @@ void opt_end(void) {
             take_cursor(g_resume_fallback);
         }
     }
+    if (g_section_current >= 0) g_section_last = g_section_current;
+    if (g_section_step && g_section_count) {
+        int from = g_section_last < g_section_count ? g_section_last : g_section_count - 1;
+        int direction = g_section_step > 0 ? 1 : -1;
+        for (int target = from + direction; target >= 0 && target < g_section_count; target += direction) {
+            if (!g_sections[target].first) continue;
+            ImGui::NavMoveRequestCancel();
+            take_cursor(g_sections[target].first);
+            ImGui::SetScrollY(fmaxf(0, g_sections[target].y - row_margin()));
+            g_section_last = target;
+            menu_sound_play(MENU_SOUND_CURSOR);
+            break;
+        }
+    }
+    g_section_step = 0;
     ImDrawList *dl = ImGui::GetWindowDrawList();
     if (g_cursor.on) {
         dl->ChannelsSetCurrent(0);
@@ -152,21 +194,19 @@ void opt_end(void) {
     dl->ChannelsMerge();
     ImGui::PopStyleVar();
     ImGui::EndChild();
+    ImGui::SetCursorScreenPos(ImVec2(g_content_x, ImGui::GetCursorScreenPos().y));
     // the hovered row (mouse) wins, else the selected one (controller), else the last shown, else the first row
     if (g_hover.text[0]) g_shown = g_hover;
     else if (g_focus.text[0]) g_shown = g_focus;
     else if (!g_shown.text[0]) g_shown = g_first;
-    ImGui::SameLine(0, 0);
     ImVec2 p = ImGui::GetCursorScreenPos(), avail = ImGui::GetContentRegionAvail();
-    avail.y -= g_bottom;
-    float gap = 24 * g_scale;
-    // the description on a dark panel framed like the rows' buttons
-    skin_panel(ImGui::GetWindowDrawList(), ImVec2(p.x + gap * 0.5f, p.y), ImVec2(p.x + avail.x, p.y + avail.y), g_scale);
-    ImGui::SetCursorScreenPos(ImVec2(p.x + gap, p.y));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * g_scale, 20 * g_scale));
-    ImGui::BeginChild("##desc", ImVec2(0, avail.y), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoNav);
+    skin_filigree(ImGui::GetWindowDrawList(), p.x + row_margin(), p.x + avail.x - row_margin(), p.y + 4*g_scale, g_scale);
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + 14*g_scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14 * g_scale, 9 * g_scale));
+    ImGui::BeginChild("##desc", ImVec2(0, g_help_height - 16*g_scale), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_NoNavFocus);
     ImGui::PopStyleVar();
     ImGui::PushTextWrapPos(0);
+    if (g_shown.title[0]) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(SKIN_GOLD), "%s", g_shown.title);
     ImGui::TextUnformatted(g_shown.text);
     ImGui::PopTextWrapPos();
     ImGui::EndChild();
@@ -182,6 +222,7 @@ struct RowView {
     float col;           // the width of the widest value the row can show (value_width); 0: this value's
     bool end_l, end_r;   // the value is the first / last one: that arrow is drawn faint and does nothing
     bool list;           // A or a click opens a list of the values (opt_text_choice): a down arrow right of the value
+    bool toggle, on;     // switches use one compact track; the whole row toggles it for mouse and controller alike
 };
 
 // The width of the widest of n values at the current font size: a stepper's left arrow stands that far from the right
@@ -201,14 +242,14 @@ static void arrow_box(ImDrawList *dl, ImVec2 a, ImVec2 b, bool left, bool hot, b
     const int al = dim ? 70 : hot ? 255 : 215;
     const ImU32 white = IM_COL32(255, 255, 255, al);
     if (hot && !dim) dl->AddRectFilled(a, b, IM_COL32(255, 255, 255, down ? 96 : 44), 4 * s);
-    dl->AddRect(a, b, white, 4 * s, 0, fmaxf(1.0f, (hot && !dim ? 2.2f : 1.6f) * s));
+    if (hot && !dim) dl->AddRect(a, b, white, 4 * s, 0, 1.0f * s);
     float cx = (a.x + b.x) * 0.5f, cy = (a.y + b.y) * 0.5f, aw = (b.y - a.y) * 0.38f, ah = aw * 0.8f;
     float tip = left ? -aw * 0.55f : aw * 0.55f, back = left ? aw * 0.45f : -aw * 0.45f;
     dl->AddTriangleFilled(ImVec2(cx + tip, cy), ImVec2(cx + back, cy - ah), ImVec2(cx + back, cy + ah), white);
 }
 
-// ---- test hook. NX2NAVI_MENU_TEST_CLICK=<key>:<part>[,<key>:<part>...], with NX2NAVI_MENU_TEST opening the menu on the
-// page that has the rows (menu.cpp): mouse clicks on steppers by their setting's name (without NX2NAVI_), part l (the
+// ---- test hook. OOTPC_MENU_TEST_CLICK=<key>:<part>[,<key>:<part>...], with OOTPC_MENU_TEST opening the menu on the
+// page that has the rows (menu.cpp): mouse clicks on steppers by their setting's name (without OOTPC_), part l (the
 // left arrow), r (the right arrow) or b (the row's body, on its label). One click after another, each over a dozen
 // frames: the pointer goes there, the button goes down and up, and the log says what the setting is then. So a run
 // checks that the arrows step a setting and that an arrow at its end and a click on the body do not, with the fonts
@@ -219,12 +260,12 @@ static void click_test(const char *key, ImVec2 la, ImVec2 lb, ImVec2 ra, ImVec2 
     ClickTest &t = g_click;
     if (!t.parsed) {
         t.parsed = 1;
-        const char *s = cfg_get("NX2NAVI_MENU_TEST_CLICK");
+        const char *s = cfg_get("OOTPC_MENU_TEST_CLICK");
         while (s && *s && t.n < 24) {
             size_t n = strcspn(s, ",");
             const char *colon = (const char *)memchr(s, ':', n);
             if (colon) {
-                snprintf(t.c[t.n].key, sizeof t.c[0].key, "NX2NAVI_%.*s", (int)(colon - s), s);
+                snprintf(t.c[t.n].key, sizeof t.c[0].key, "OOTPC_%.*s", (int)(colon - s), s);
                 t.c[t.n++].part = colon[1];
             }
             s += n;
@@ -271,10 +312,13 @@ static int row_text(const char *key, const char *label, const char *desc, const 
     // top (negative y), so the page grew a pixel per row scrolled out and a row scrolled to the bottom was cut off
     // at least a pixel wide: InvisibleButton asserts on a zero size (a narrow window), and ImGui reads a negative one as
     // "up to that far before the right edge", away from the box drawn
-    float fs = ImGui::GetFontSize(), w = fmaxf(ImGui::GetContentRegionAvail().x - margin, 1.0f), h = floorf(fs * 2.2f);
+    float fs = ImGui::GetFontSize(), w = fmaxf(ImGui::GetContentRegionAvail().x - margin, 1.0f);
+    const bool has_note = disabled || cfg_from_env(key) || (m && !m->live && cfg_pending(key)) || (v.note && *v.note);
+    float h = floorf(fs * (has_note ? 2.35f : 1.85f));
     ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));   // the row's own border shows the selection
     bool clicked = ImGui::InvisibleButton("##row", ImVec2(w, h), ImGuiButtonFlags_EnableNav);
     ImGui::PopStyleColor();
+    section_row();
     bool to_key = g_focus_key[0] && !strcmp(key, g_focus_key);
     if (g_take_first || to_key) {
         take_cursor(ImGui::GetItemID());
@@ -320,20 +364,24 @@ static int row_text(const char *key, const char *label, const char *desc, const 
                 step = 4;
         }
     }
-    if (foc) desc_set(g_focus, desc, key, m, disabled);
-    if (hov) desc_set(g_hover, desc, key, m, disabled);
-    if (!g_first.text[0]) desc_set(g_first, desc, key, m, disabled);
+    auto description = [&](Desc &d) {
+        desc_set(d, desc, key, m, disabled);
+        snprintf(d.title, sizeof d.title, "%s", label);
+    };
+    if (foc) description(g_focus);
+    if (hov) description(g_hover);
+    if (!g_first.text[0]) description(g_first);
 
     ImDrawList *dl = ImGui::GetWindowDrawList();
     ImFont *font = ImGui::GetFont();
-    float pad = 20 * g_scale, small = fs * 0.72f;
-    // the save menu's brown button, brighter while selected or hovered; the white cursor goes round it in opt_end
-    skin_button(dl, p, ImVec2(p.x + w, p.y + h), g_scale, foc || lit ? 1.0f : hov ? 0.6f : 0.0f, off);
+    float pad = 28 * g_scale, small = fs * 0.72f;
+    // The authored emerald plate sits under the row's text; the navigation frame is drawn above every row in opt_end.
+    skin_option(dl, p, ImVec2(p.x + w, p.y + h), g_scale, foc || lit, hov, off);
     if (foc || lit || (hov && !g_cursor.on)) {
         g_cursor.on = true, g_cursor.a = p, g_cursor.b = ImVec2(p.x + w, p.y + h);
         g_cursor.alpha = (foc || lit ? 1.0f : 0.55f) * (off ? 0.5f : 1.0f);
     }
-    float ty = p.y + fs * 0.25f, ny = p.y + fs * 1.3f;   // the label line and the note line under it
+    float ty = p.y + (has_note ? fs * .22f : (h-fs)*.5f), ny = p.y + fs * 1.3f;
     float right = p.x + w - pad;                         // the value's right edge
     float value_left = right;
     // The value and its note take at most 60 % of the row: a longer value (a graphics card's full name) is drawn smaller,
@@ -345,7 +393,15 @@ static int row_text(const char *key, const char *label, const char *desc, const 
         tv = fminf(font->CalcTextSizeA(vfs, FLT_MAX, 0, v.value).x, cap);
     }
     float value_mid = -1;   // a stepper's value and its note are centred here, between the arrows
-    if (v.arrows) {         // [<] value [>]: the arrows are drawn (the font has no arrow glyphs), each in a white frame
+    if (v.toggle) {
+        const float tw=48*g_scale, th=24*g_scale, tx=right-tv-20*g_scale-tw, cy=ty+fs*.5f;
+        ImVec2 a(tx,cy-th*.5f), b(tx+tw,cy+th*.5f);
+        dl->AddRectFilled(a,b,off?IM_COL32(44,52,42,255):v.on?IM_COL32(58,105,54,255):IM_COL32(36,49,39,255),th*.5f);
+        dl->AddRect(a,b,off?kGrey:SKIN_GOLD,th*.5f,0,.8f*g_scale);
+        dl->AddCircleFilled(ImVec2(v.on?b.x-th*.5f:a.x+th*.5f,cy),th*.36f,off?kGrey:SKIN_TEXT,20);
+        value_left=tx;
+    }
+    if (v.arrows && !v.toggle) {         // fixed hit targets on either side of the value
         // The frames stand in fixed places: the right one at the row's right edge, the left one the width of the row's
         // widest value before it. They fit over the note line, in the label line's height.
         const float bw = floorf(fs * 1.3f), bh = floorf(fs * 1.02f), gap = floorf(fs * 0.4f), cy = floorf(ty + fs * 0.52f);
@@ -403,10 +459,10 @@ static int row_text(const char *key, const char *label, const char *desc, const 
         dl->AddText(font, vfs, ImVec2(vx, ty + (fs - vfs) * 0.5f),
                     off ? kGrey : v.is_default ? IM_COL32(232, 222, 198, 255) : IM_COL32(255, 255, 255, 255), v.value, NULL,
                     0, &vclip);
-        if (!v.arrows && !movable) value_left = vx;
+        if (!v.arrows && !movable && !v.toggle) value_left = vx;
     }
     float note_right = p.x + w - pad;   // where the label's own note stops: short of the value's note, when there is one
-    if (v.note || v.is_default) {   // under the value, right-aligned with it; its start shows when it is too long
+    if (v.note && *v.note) {   // exceptional state only; ordinary defaults do not add noise to every row
         const char *t = v.note ? v.note : menu_text(UI_MENU_DEFAULT_MARK);
         float tw = fminf(font->CalcTextSizeA(small, FLT_MAX, 0, t).x, cap);
         // a stepper's note is centred under its value, as far as the row's right edge lets it
@@ -442,14 +498,15 @@ int opt_text_row(const char *id, const char *label, const char *value, const cha
     return row_text(id, label, desc, v, movable);
 }
 
-// ---- writing a setting: at once in memory (live settings follow), to nx2navi.ini a moment later (opt_save_tick)
+// ---- writing a setting: at once in memory (live settings follow), to OOT-PC.ini a moment later (opt_save_tick)
 static uint64_t g_save_at;   // plat_now_ns deadline of the pending write; 0 none
 static bool g_save_logged;
+bool opt_saving(void) { return g_save_at != 0; }
 
 static void apply(const char *key, const char *value) {
     if (*value) {
         cfg_set(key, value);
-    } else {   // the automatic choice: the key unset, its line removed from nx2navi.ini
+    } else {   // the automatic choice: the key unset, its line removed from OOT-PC.ini
         const char *k = key;
         cfg_reset(&k, 1);
     }
@@ -464,7 +521,7 @@ int opt_save_tick(int force) {
     g_save_at = 0;
     if (!cfg_save() && !g_save_logged) {
         g_save_logged = true;
-        rt_log("menu: could not write nx2navi.ini; the changed settings hold for this session");
+        rt_log("menu: could not write OOT-PC.ini; the changed settings hold for this session");
     }
     return 0;
 }
@@ -481,7 +538,8 @@ bool opt_toggle(const char *key, UiTextId label, UiTextId desc, bool inverted) {
     const char *d = cfg_default(key);
     bool set = cfg_bool(key) != 0, def = d && *d && strcmp(d, "0") != 0;
     bool on = set != inverted;   // what the row shows
-    RowView v = {menu_text(on ? UI_MENU_ON : UI_MENU_OFF), set == def, true, NULL, on_off_width()};
+    RowView v = {menu_text(on ? UI_MENU_ON : UI_MENU_OFF), set == def, false, NULL, on_off_width()};
+    v.toggle = true; v.on = on;
     if (!row(key, label, desc, v)) return false;   // any step flips it
     apply(key, set ? "0" : "1");
     return true;
@@ -492,7 +550,8 @@ bool opt_toggle_value(const char *key, UiTextId label, UiTextId desc, const char
     // when it is an on value, so turning the switch off and on again puts the profile's own value back
     const char *d = cfg_default(key);
     bool on = strcmp(cfg_value(key), off_value) != 0, def = d && strcmp(d, off_value) != 0;
-    RowView v = {menu_text(on ? UI_MENU_ON : UI_MENU_OFF), on == def, true, note, on_off_width()};
+    RowView v = {menu_text(on ? UI_MENU_ON : UI_MENU_OFF), on == def, false, note, on_off_width()};
+    v.toggle = true; v.on = on;
     if (!row(key, label, desc, v)) return false;   // any step flips it
     apply(key, on ? off_value : def && *d ? d : on_value);
     return true;
@@ -534,6 +593,7 @@ static void column_text(const char *text, const ImVec4 *col, bool indented) {
 static const ImVec4 kWarn(0.95f, 0.66f, 0.40f, 1);
 
 void opt_group_text(const char *title) {
+    section_start();
     group_divider();
     const ImVec4 gold = ImGui::ColorConvertU32ToFloat4(SKIN_GOLD);
     column_text(title, &gold, true);
@@ -542,7 +602,9 @@ void opt_group_text(const char *title) {
 void opt_text_str(const char *text, bool warn) { column_text(text, warn ? &kWarn : nullptr, false); }
 
 void opt_group(UiTextId title) {
-    group_divider();
+    section_start();
+    ImGui::Spacing();
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + row_margin());
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(SKIN_GOLD), "%s", menu_text(title));
 }
 
@@ -637,7 +699,7 @@ bool opt_slider(const char *key, UiTextId label, float lo, float hi, UiTextId de
     char out[32];
     if (step >= 1) snprintf(out, sizeof out, "%d", (int)lround(n));
     else snprintf(out, sizeof out, "%g", round(n / step) * step);
-    // Landing on the fallback's value unsets the key (its line leaves nx2navi.ini), so the row follows the fallback again.
+    // Landing on the fallback's value unsets the key (its line leaves OOT-PC.ini), so the row follows the fallback again.
     apply(key, fallback && fabs(n - cfg_double(fallback)) < step * 0.01 ? "" : out);
     return true;
 }
@@ -712,6 +774,7 @@ int opt_bind_row(const char *key, const char *label, const char *desc, const cha
         ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));   // the cell's own border shows the selection
         bool clicked = ImGui::InvisibleButton("##cell", ImVec2(cw, h), ImGuiButtonFlags_EnableNav);
         ImGui::PopStyleColor();
+        section_row();
         char id[80];
         snprintf(id, sizeof id, "%s#%d", key, c);
         bool to_key = g_focus_key[0] && !strcmp(id, g_focus_key);
@@ -741,7 +804,7 @@ int opt_bind_row(const char *key, const char *label, const char *desc, const cha
         ImGui::PopID();
     }
     char k[64];
-    snprintf(k, sizeof k, "NX2NAVI_%s", key);
+    snprintf(k, sizeof k, "OOTPC_%s", key);
     if (row_foc) desc_set(g_focus, desc, k, NULL, NULL);
     if (row_hov) desc_set(g_hover, desc, k, NULL, NULL);
     if (!g_first.text[0]) desc_set(g_first, desc, k, NULL, NULL);

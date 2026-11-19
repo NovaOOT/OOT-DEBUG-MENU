@@ -139,7 +139,7 @@ static void ov_vi_hdr_status(Cpu *c) {
     // Native HDR (vk_hdr.c vk_hdr_native): an HDR10 display (format 1, which makes the game present PQ in 10 bits) of
     // the settings' peak; otherwise SDR, as a desktop window is
     int hdr = vk_hdr_native();
-    int nits = cfg_int("NX2NAVI_HDR_PEAK_NITS");
+    int nits = cfg_int("OOTPC_HDR_PEAK_NITS");
     if (on) *on = (uint8_t)hdr;
     if (format) *format = hdr ? 1 : 0;
     if (peak) *peak = hdr ? (uint16_t)(nits > 0 && nits < 65535 ? nits : 1000) : 0;
@@ -150,7 +150,7 @@ static void ov_vi_hdr_status(Cpu *c) {
 // Result QueryDisplayHdrPaperWhite(uint16_t *nits, const Display *): the SDR reference white
 static void ov_vi_paper_white(Cpu *c) {
     uint16_t *nits = arg_p(c, 0);
-    int w = cfg_int("NX2NAVI_HDR_GAME_NITS");   // native HDR: the paper white of the settings
+    int w = cfg_int("OOTPC_HDR_GAME_NITS");   // native HDR: the paper white of the settings
     if (nits) *nits = (uint16_t)(vk_hdr_native() && w > 0 && w < 10000 ? w : 203);
     ret_x(c, 0);
 }
@@ -159,7 +159,7 @@ static void ov_vi_paper_white(Cpu *c) {
 static void ov_vi_refresh_rate(Cpu *c) {
     uint32_t *rate = arg_p(c, 0);
     uint8_t *variable = arg_p(c, 1);
-    const char *hz = cfg_get("NX2NAVI_VI_HZ"), *vrr = cfg_get("NX2NAVI_VI_VRR");
+    const char *hz = cfg_get("OOTPC_VI_HZ"), *vrr = cfg_get("OOTPC_VI_VRR");
     if (rate) *rate = hz && *hz ? (uint32_t)atoi(hz) : 60;
     if (variable) *variable = vrr && !strcmp(vrr, "1");
     static int logged;
@@ -169,7 +169,7 @@ static void ov_vi_refresh_rate(Cpu *c) {
 // Result QueryDisplayVrrSupported(bool *supported, const Display *)
 static void ov_vi_vrr_supported(Cpu *c) {
     uint8_t *out = arg_p(c, 0);
-    const char *vrr = cfg_get("NX2NAVI_VI_VRR");
+    const char *vrr = cfg_get("OOTPC_VI_VRR");
     if (out) *out = vrr && !strcmp(vrr, "1");
     static int logged;
     if (!logged++) rt_log("vi: QueryDisplayVrrSupported -> %d", out ? *out : -1);

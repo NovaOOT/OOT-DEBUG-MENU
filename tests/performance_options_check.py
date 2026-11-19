@@ -43,25 +43,25 @@ int main(void) {
         function=next(n for n in module.body if isinstance(n,ast.FunctionDef) and n.name=='guest_opt_ini')
         scope={'os':os,'Path':Path}
         exec(compile(ast.Module(body=[function],type_ignores=[]),'guest_opt_ini','exec'),scope)
-        old=os.environ.pop('NX2NAVI_GUEST_OPT',None)
+        old=os.environ.pop('OOTPC_GUEST_OPT',None)
         try:
             with tempfile.TemporaryDirectory() as t:
                 p=Path(t)
-                for text in ('[performance]\nguest_opt = 2\n','low_end_gpu=0\nguest_opt=2 # faster code\n','NX2NAVI_GUEST_OPT=2\n'):
-                    os.environ.pop('NX2NAVI_GUEST_OPT',None)
-                    (p/'nx2navi.ini').write_text(text)
+                for text in ('[performance]\nguest_opt = 2\n','low_end_gpu=0\nguest_opt=2 # faster code\n','OOTPC_GUEST_OPT=2\n'):
+                    os.environ.pop('OOTPC_GUEST_OPT',None)
+                    (p/'OOT-PC.ini').write_text(text)
                     scope['guest_opt_ini'](p)
-                    self.assertEqual(os.environ.get('NX2NAVI_GUEST_OPT'),'2')
-                os.environ['NX2NAVI_GUEST_OPT']='1'
+                    self.assertEqual(os.environ.get('OOTPC_GUEST_OPT'),'2')
+                os.environ['OOTPC_GUEST_OPT']='1'
                 scope['guest_opt_ini'](p)
-                self.assertEqual(os.environ['NX2NAVI_GUEST_OPT'],'1')
-                os.environ.pop('NX2NAVI_GUEST_OPT')
-                (p/'nx2navi.ini').write_text('guest_opt=invalid\n')
+                self.assertEqual(os.environ['OOTPC_GUEST_OPT'],'1')
+                os.environ.pop('OOTPC_GUEST_OPT')
+                (p/'OOT-PC.ini').write_text('guest_opt=invalid\n')
                 scope['guest_opt_ini'](p)
-                self.assertNotIn('NX2NAVI_GUEST_OPT',os.environ)
+                self.assertNotIn('OOTPC_GUEST_OPT',os.environ)
         finally:
-            os.environ.pop('NX2NAVI_GUEST_OPT',None)
-            if old is not None: os.environ['NX2NAVI_GUEST_OPT']=old
+            os.environ.pop('OOTPC_GUEST_OPT',None)
+            if old is not None: os.environ['OOTPC_GUEST_OPT']=old
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--cc',required=True)

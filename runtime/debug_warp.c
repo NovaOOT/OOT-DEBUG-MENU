@@ -1,4 +1,5 @@
-// Warps, the age switch and guest calls on the game thread for the debug menu (debug_tools.h). Game build 1.1.1 only.
+// Warps, the age switch and guest calls on the game thread for the debug menu (debug_tools.h). Game builds 1.1.1
+// and 1.0.0.
 //
 // An area change in this game goes through a few flags. A loading zone's event (Dm_SY_BancChangeGo) reserves the change:
 // it writes the next area (Sequence_ReservedNextBanc, the name of a stage file such as KakarikoVillage_Adult), the actor
@@ -257,7 +258,7 @@ static _Atomic uint64_t age_hold_until;
 static void age_load(void) {
     static _Atomic int done;
     if (atomic_load(&done) || atomic_exchange(&done, 1)) return;
-    const char *v = cfg_value("NX2NAVI_DEBUG_FORCE_AGE");
+    const char *v = cfg_value("OOTPC_DEBUG_FORCE_AGE");
     atomic_store(&warp_age, !strcmp(v, "child") ? DBG_AGE_CHILD : !strcmp(v, "adult") ? DBG_AGE_ADULT : DBG_AGE_ANY);
 }
 
@@ -265,7 +266,7 @@ void dbg_warp_set_age(int age) {
     age_load();
     age = age == DBG_AGE_CHILD || age == DBG_AGE_ADULT ? age : DBG_AGE_ANY;
     atomic_store(&warp_age, age);
-    dbg_keep("NX2NAVI_DEBUG_FORCE_AGE", age == DBG_AGE_CHILD ? "child" : age == DBG_AGE_ADULT ? "adult" : "off");
+    dbg_keep("OOTPC_DEBUG_FORCE_AGE", age == DBG_AGE_CHILD ? "child" : age == DBG_AGE_ADULT ? "adult" : "off");
 }
 int dbg_warp_get_age(void) { age_load(); return atomic_load(&warp_age); }
 
@@ -338,10 +339,15 @@ uint32_t dbg_resource_age(uint64_t set, uint32_t child) {
 const char *dbg_warp_note(void) { return warp_note; }
 int dbg_warp_armed(void) { return atomic_load(&warp_state) != W_IDLE ? atomic_load(&warp_target) : -1; }
 
+// A forced change (force_change) runs: its event reserves the area from parameters it was not given, empty, so the
+// destination is written whatever is reserved.
+static _Atomic int forcing;
+
 // Writes the destination over a reserved change. Returns 1 when something was reserved (and is now ours).
 static int redirect_apply(const struct Warp *w) {
     char cur[64];
-    if (!dbg_flag_get_string(K_NEXT_BANC, cur) || !cur[0]) return 0;
+    if (!dbg_flag_get_string(K_NEXT_BANC, cur)) return 0;
+    if (!cur[0] && !atomic_load(&forcing)) return 0;
     char start[64];
     if (!strcmp(cur, w->banc) && dbg_flag_get_string(K_START, start) && !strcmp(start, w->start)) return 1;
     dbg_flag_set_string(K_NEXT_BANC, w->banc);
@@ -369,6 +375,7 @@ static void redirect_step(void) {
     char cur[64];
     int arrived = atomic_load(&warp_saw_loading) && loading == 0 && dbg_flag_get_string(K_CURRENT_BANC, cur) && !strcmp(cur, w->banc);
     if (arrived || plat_now_ns() - atomic_load(&warp_since) > ENFORCE_NS) {
+        atomic_store(&forcing, 0);
         if (arrived) atomic_store(&age_hold_until, plat_now_ns() + AGE_HOLD_NS);
         atomic_store(&warp_state, W_IDLE);
         snprintf(warp_note, sizeof warp_note, arrived ? "Arrived: %s" : "Warp to %s timed out", w->banc);
@@ -512,6 +519,7 @@ int dbg_boss_warp(int i) {
 }
 
 void dbg_warp_cancel(void) {
+    atomic_store(&forcing, 0);
     atomic_store(&warp_state, W_IDLE);
     snprintf(warp_note, sizeof warp_note, "Warp cancelled");
 }
@@ -697,6 +705,24 @@ void dbg_frame_teleport(Cpu *c, const float pos[3], const float *face) {
 
 static void teleport_run(Cpu *c) { dbg_frame_teleport(c, tp_pos, tp_has_face ? tp_face : NULL); }
 
+void dbg_frame_warp_actor(Cpu *c, uint64_t actor, const float pos[3], const float ax[9]) {
+    static _Alignas(16) float m[12];
+    const float r[12] = {ax[0], ax[3], ax[6], pos[0], ax[1], ax[4], ax[7], pos[1], ax[2], ax[5], ax[8], pos[2]};
+    memcpy(m, r, sizeof r);
+    uint64_t a[8] = {actor, (uint64_t)(uintptr_t)m, 0};
+    call_saved(c, GUEST_WARP_ACTOR, a);
+}
+
+// The game's request to delete an actor (actor, 0): what the AI node OneShotGenericDeleteThisActor calls. It does
+// nothing for an actor already being deleted (its state word at +0x2c from 7 to 11).
+#define GUEST_DELETE_ACTOR RT_OOT_ADDR(0x70000a6490ull, 0x70000c4fa0ull)
+void dbg_frame_delete_actor(Cpu *c, uint64_t actor) {
+    uint64_t a[8] = {actor, 0};
+    call_saved(c, GUEST_DELETE_ACTOR, a);
+}
+
+uint64_t dbg_frame_seen_ns(void) { return atomic_load(&frame_seen_ns); }
+
 int dbg_player_facing(float face[3]) {
     uint64_t actor = dbg_player_actor();
     float ax[9];
@@ -736,36 +762,72 @@ int dbg_actor_named(uint64_t actor, const char *name) { return actor_named(actor
 
 // Every actor of the generic actor class, in heap order, with its name (a helper thread's job: about a second). fn
 // returns 0 to stop. Returns how many were passed to fn.
-int dbg_each_actor(int (*fn)(uint64_t actor, const char *name, void *ctx), void *ctx) {
-    enum { CHUNK = 1 << 20 };
-    static uint64_t buf[CHUNK / 8];
-    static PlatMutex lock;   // zero is unlocked; buf is shared by the callers' threads
+//
+// A full pass reads the whole heap (gigabytes, through ReadProcessMemory). It also marks the 1 MB chunks of the heap
+// that held an actor, with their neighbours, and dbg_each_actor_marked reads only those: the actors of an area come
+// from a few heaps, so a rescan that repeats every second or two (the debug views, debug_view.c view_thread) reads a
+// few hundred megabytes instead of the whole heap.
+enum { SCAN_CHUNK = 1 << 20, SCAN_CHUNKS = (int)((HEAP_TO - HEAP_FROM) / SCAN_CHUNK) };
+static uint8_t chunk_mark[SCAN_CHUNKS];   // written by full passes, under scan_lock
+static int chunk_marks;                   // marked chunks; 0 until a full pass found an actor
+static PlatMutex scan_lock;               // zero is unlocked; scan_buf is shared by the callers' threads
+
+// Every actor in [from, to), committed read-write memory only. *go turns 0 when fn asks to stop.
+static int scan_range(uint64_t from, uint64_t to, int mark, int (*fn)(uint64_t, const char *, void *), void *ctx, int *go) {
+    static uint64_t scan_buf[SCAN_CHUNK / 8];
     const uint64_t cls = MOD_MAIN_BASE + ACTOR_CLASS;
-    int n = 0, go = 1;
-    plat_mutex_lock(&lock);
-    for (uint64_t addr = HEAP_FROM; addr < HEAP_TO && go;) {
+    int n = 0;
+    for (uint64_t addr = from; addr < to && *go;) {
         uint64_t end = 0;
-        int st = plat_mem_state(addr, HEAP_TO, &end);
+        int st = plat_mem_state(addr, to, &end);
         if (end <= addr) break;
-        for (uint64_t at = addr; st == PLAT_PROT_RW && at < end && go; at += CHUNK) {
-            uint64_t len = end - at < CHUNK ? end - at : CHUNK;
-            if (!plat_mem_read(at, buf, len)) continue;
-            for (uint64_t i = 0; i < len / 8 && go; i++) {
+        for (uint64_t at = addr; st == PLAT_PROT_RW && at < end && *go; at += SCAN_CHUNK) {
+            uint64_t len = end - at < SCAN_CHUNK ? end - at : SCAN_CHUNK;
+            if (!plat_mem_read(at, scan_buf, len)) continue;
+            for (uint64_t i = 0; i < len / 8 && *go; i++) {
                 uint64_t name = 0;
                 char text[80];
-                if (buf[i] != cls || !plat_mem_read(at + i * 8 + 0x20, &name, 8) || !name ||
+                if (scan_buf[i] != cls || !plat_mem_read(at + i * 8 + 0x20, &name, 8) || !name ||
                     !plat_mem_read(name, text, sizeof text))
                     continue;
                 text[sizeof text - 1] = 0;
                 n++;
-                go = fn(at + i * 8, text, ctx);
+                if (mark) {
+                    int c = (int)((at + i * 8 - HEAP_FROM) / SCAN_CHUNK);
+                    for (int k = c - 1; k <= c + 1; k++)
+                        if (k >= 0 && k < SCAN_CHUNKS && !chunk_mark[k]) chunk_mark[k] = 1, chunk_marks++;
+                }
+                *go = fn(at + i * 8, text, ctx);
             }
         }
         addr = end;
     }
-    plat_mutex_unlock(&lock);
     return n;
 }
+
+static int each_actor(int marked, int (*fn)(uint64_t actor, const char *name, void *ctx), void *ctx) {
+    int n = 0, go = 1;
+    plat_mutex_lock(&scan_lock);
+    if (marked && chunk_marks) {
+        for (int c = 0; c < SCAN_CHUNKS && go;) {
+            if (!chunk_mark[c]) { c++; continue; }
+            int e = c;
+            while (e < SCAN_CHUNKS && chunk_mark[e]) e++;
+            n += scan_range(HEAP_FROM + (uint64_t)c * SCAN_CHUNK, HEAP_FROM + (uint64_t)e * SCAN_CHUNK, 0, fn, ctx, &go);
+            c = e;
+        }
+    } else {
+        memset(chunk_mark, 0, sizeof chunk_mark);
+        chunk_marks = 0;
+        n = scan_range(HEAP_FROM, HEAP_TO, 1, fn, ctx, &go);
+        if (!go) memset(chunk_mark, 0, sizeof chunk_mark), chunk_marks = 0;   // a pass cut short marks only part
+    }
+    plat_mutex_unlock(&scan_lock);
+    return n;
+}
+
+int dbg_each_actor(int (*fn)(uint64_t actor, const char *name, void *ctx), void *ctx) { return each_actor(0, fn, ctx); }
+int dbg_each_actor_marked(int (*fn)(uint64_t actor, const char *name, void *ctx), void *ctx) { return each_actor(1, fn, ctx); }
 
 // Objects of any class laid out as an actor (a method table in the executable at +0, a pointer to the name at +0x20)
 // with this name, as dbg_find_actors finds those of the generic class: thrown bombs are of another. Two passes over
@@ -949,6 +1011,63 @@ static int entrance_cb(const DbgPlacement *pl, void *ctx) {
 #define ENTRANCE_LOAD_NS 1500000000ull   // for the actors round a far entrance to load
 #define ENTRANCE_ZONE_M 40.0f            // a zone's trigger is this close to its entrance
 
+// ---- a forced area change, for an area without a loading zone (the trophy hall, a boss arena)
+// The game's sequence node SeqOneShotRequestEvent (1.1.1 0x32db1a0) starts an event by its name: it builds a request
+// (EVENT_REQ_SIZE bytes, made by EVENT_REQ_INIT), copies the name into the request's text at EVENT_REQ_NAME (a char *,
+// its capacity an int32 right after), and passes it to the event manager's request (EVENT_REQUEST, the manager the
+// object EVENT_MGR_REF points to). The event Dm_SY_BancChangeGo is the one a loading zone starts: it changes the area
+// to the reserved one, so the destination is reserved first and the redirect keeps it while the change runs.
+#define EVENT_REQ_INIT RT_OOT_ADDR(0x7000d79f10ull, 0x7000d3c9a0ull)
+#define EVENT_REQUEST RT_OOT_ADDR(0x7000d7a820ull, 0x7000d3d2b0ull)
+#define EVENT_MGR_REF RT_OOT_ADDR(0x7004c7e090ull, 0x7004c183e8ull)
+#define EVENT_REQ_SIZE 0x1b20
+#define EVENT_REQ_NAME 0x1a90
+#define FORCE_EVENT "Dm_SY_BancChangeGo"
+#define GUEST_CALL_NS 2000000000ull
+
+// A call on the game thread (the frame hook), waited for: 1 when it ran.
+static int guest_call_wait(uint64_t fn, const uint64_t a[8], uint64_t *result) {
+    uint64_t t0 = plat_now_ns(), r = 0;
+    while (!dbg_guest_call(fn, a)) {
+        if (plat_now_ns() - t0 > GUEST_CALL_NS) return 0;
+        plat_sleep_ns(5000000ull);
+    }
+    while (!dbg_guest_result(&r)) {
+        if (plat_now_ns() - t0 > GUEST_CALL_NS) return 0;   // the call still runs at the next frame; its result is dropped
+        plat_sleep_ns(2000000ull);
+    }
+    if (result) *result = r;
+    return 1;
+}
+
+static int force_change(void) {
+    const struct Warp *w = warp_of(atomic_load(&warp_target));
+    uint64_t ref = 0, mgr = 0;
+    if (!w || !plat_mem_read(EVENT_MGR_REF, &ref, 8) || !ref || !plat_mem_read(ref, &mgr, 8) || !mgr) return 0;
+    _Static_assert(EVENT_REQ_SIZE <= sizeof gscratch, "the event request fits the scratch");
+    uint8_t *req = gscratch;
+    memset(req, 0, EVENT_REQ_SIZE);
+    uint64_t a[8] = {(uint64_t)(uintptr_t)req};
+    if (!guest_call_wait(EVENT_REQ_INIT, a, NULL)) return 0;
+    uint64_t text;
+    int32_t cap;
+    memcpy(&text, req + EVENT_REQ_NAME, 8);
+    memcpy(&cap, req + EVENT_REQ_NAME + 8, 4);
+    // the game's memory is the process's own: the text is written in place, as the node's copy does
+    if (!text || cap < (int32_t)sizeof FORCE_EVENT || !plat_mem_readable(text, sizeof FORCE_EVENT)) return 0;
+    memcpy((void *)(uintptr_t)text, FORCE_EVENT, sizeof FORCE_EVENT);
+    // the destination, reserved as a loading zone's event would, and kept by the redirect from now on
+    dbg_flag_set_string(K_NEXT_BANC, w->banc);
+    dbg_flag_set_string(K_START, w->start);
+    dbg_flag_set_string(K_BOOT, w->boot);
+    dbg_flag_set_string(K_STARTER, w->start);
+    atomic_store(&forcing, 1);
+    uint64_t b[8] = {mgr, (uint64_t)(uintptr_t)req}, ok = 0;
+    int ran = guest_call_wait(EVENT_REQUEST, b, &ok);
+    rt_log("debug warp: forced %s to %s: %s", FORCE_EVENT, w->banc, !ran ? "the call did not run" : ok & 1 ? "accepted" : "refused");
+    return ran && (ok & 1);
+}
+
 static void warp_now_thread(void *arg) {
     (void)arg;
     float home[3];
@@ -970,8 +1089,25 @@ static void warp_now_thread(void *arg) {
     }
     if (!started && !warp_started()) {
         if (tried) dbg_player_teleport(home);
+        snprintf(warp_note, sizeof warp_note, "No loading zone here; forcing the area change");
+        // An accepted request runs the event, which fades out before the loading begins: the reserve must stay, or
+        // the change loads an empty area name and the loading screen never ends. A refused one leaves nothing to do.
+        if (force_change()) {
+            started = 1;
+            snprintf(warp_note, sizeof warp_note, "Forcing the area change to %s", warp_of(atomic_load(&warp_target))->banc);
+        } else {   // take the reserve back, so the game does not find it later, and stay armed
+            atomic_store(&forcing, 0);
+            dbg_flag_set_string(K_NEXT_BANC, "");
+            dbg_flag_set_string(K_START, "");
+            dbg_flag_set_string(K_BOOT, "");
+            dbg_flag_set_string(K_STARTER, "");
+            int enforcing = W_ENFORCING;
+            atomic_compare_exchange_strong(&warp_state, &enforcing, W_ARMED);
+        }
+    }
+    if (!started && !warp_started()) {
         snprintf(warp_note, sizeof warp_note, "%s; the warp stays armed",
-                 tried ? "No loading zone here started an area change" : "No loading zone found here");
+                 tried ? "No loading zone here started an area change, nor did a forced one" : "No loading zone found here and the forced change did not start");
     }
     atomic_store(&now_on, 0);
 }
@@ -1085,4 +1221,5 @@ void dbg_game_frame(Cpu *c) {
     dbg_move_frame(c);
     dbg_bombs_frame();
     dbg_transform_frame(c);
+    dbg_state_frame(c);
 }

@@ -45,7 +45,7 @@ _Static_assert(O_EVENT_W < O_SESSION, "handle kinds");
 enum { W_NONE = KERN_WAIT_NONE, W_LOCK = KERN_WAIT_LOCK, W_CONDVAR = KERN_WAIT_CONDVAR, W_ADDRESS = KERN_WAIT_ADDRESS,
        W_SYNC = KERN_WAIT_SYNC };
 
-// Scheduler accounting states (NX2NAVI_TRACE=sched).
+// Scheduler accounting states (OOTPC_TRACE=sched).
 enum { S_OFF, S_RUN, S_CORE, S_HOST, S_SLEEP, S_SYNC, S_CV, S_LOCK, S_ADDR, S_N };
 static const char *const s_name[S_N] = {"off", "run", "core", "host", "sleep", "sync", "cv", "lock", "addr"};
 
@@ -82,7 +82,7 @@ struct RtThread {
     Fiber *fiber;              // current guest fiber, NULL on the thread's own context
     Fiber *leaving;            // fiber just switched away from, released by whoever resumes next
     int exit_pending;          // ExitThread on a fiber: unwind once back on the thread's own context
-    // NX2NAVI_TRACE=sched accounting (holding G)
+    // OOTPC_TRACE=sched accounting (holding G)
     uint32_t tid;              // host thread id
     int st;                    // S_* state since st_since
     uint64_t st_since, st_ns[S_N], nblk, npre, pre_since, cpu_last;
@@ -96,19 +96,19 @@ struct RtThread {
     uint64_t lw_ns, lw_n, lw_max, lg_ns, lg_n, lg_max, sl_n, sl_req, sl_act;   // those latencies; SleepThread asked/took
     uint64_t sp_n, sp_ho, sp_site;   // spin wait passes and core handoffs, the last loop head (the thread writes them)
     RtThread *target;          // as a core waiter: the owner core_kick asked to give its core up for it (holding G)
-    // NX2NAVI_ASYNC_PREEMPT (holding G)
+    // OOTPC_ASYNC_PREEMPT (holding G)
     PlatIntr *hthr;            // the host thread, for plat_intr_stop / resume; open while it may own a core
     uint64_t ap_rip;           // the interrupted host rip kern_ap_stub returns to
     uint64_t ap_last;          // the last redirect attempt on this owner
     int ap_pending;            // redirected to kern_ap_stub, which has not reached kern_ap_yield yet
-    // NX2NAVI_CORE_DIAG (holding G, except dg_host_end, which only the thread itself writes)
+    // OOTPC_CORE_DIAG (holding G, except dg_host_end, which only the thread itself writes)
     uint64_t dg_since;         // as a waiter: core wait start
     int dg_cls;                // as a waiter: DG_* class at the start of the wait
     uint64_t dg_kick;          // as an owner: the preempt request
     uint64_t dg_host_end;      // as an owner: the return from the host call or SVC it was in at the request
     uint64_t dg_pc, dg_lr;     // as an owner: guest pc and lr at the checkpoint that gave the core up
     int dg_host_kick;          // as an owner: in a host call or SVC at the request
-    uint32_t dg_svc;           // the thread's latest SVC (NX2NAVI_CORE_DIAG: what an owner in a host call is in)
+    uint32_t dg_svc;           // the thread's latest SVC (OOTPC_CORE_DIAG: what an owner in a host call is in)
     struct DgRel { uint64_t kick, host_end, pc, lr; int host, pre, prio; uint32_t h; } dg_rel;   // as a waiter: the
                                                                                                  // owner that released
 };
@@ -132,9 +132,9 @@ static void unlock(void) { plat_mutex_unlock(&G); }
 
 uint64_t kern_now_ns(void) { return plat_now_ns(); }
 
-// ---- NX2NAVI_CRIT=<first>-<last frame> with NX2NAVI_TRACE=sched: every state change and wake of the guest threads and
-// every present over those frames, written to NX2NAVI_CRIT_OUT (default crit.bin) at the last one, for
-// tools/crit_path.py, which walks the chain of waits back from each present (holding G). NX2NAVI_CRIT=w<lo>-<hi> takes
+// ---- OOTPC_CRIT=<first>-<last frame> with OOTPC_TRACE=sched: every state change and wake of the guest threads and
+// every present over those frames, written to OOTPC_CRIT_OUT (default crit.bin) at the last one, for
+// tools/crit_path.py, which walks the chain of waits back from each present (holding G). OOTPC_CRIT=w<lo>-<hi> takes
 // world-clock seconds instead (frame_step_world_us): from the first present at or after lo to the first after hi, so a
 // session covers the same game time at any frame rate.
 typedef struct { uint64_t ts, obj; uint32_t a, b; uint16_t kind, st; uint32_t pad; } CritEv;
@@ -150,7 +150,7 @@ static void crit_add(int kind, uint32_t a, uint32_t b, int st, uint64_t obj, uin
     if (g_crit_n < CRIT_N) g_crit[g_crit_n++] = (CritEv){ts, obj, a, b, (uint16_t)kind, (uint16_t)st, 0};
 }
 
-// ---- NX2NAVI_TRACE=sched accounting (holding G)
+// ---- OOTPC_TRACE=sched accounting (holding G)
 #define RW_N 32
 static RtThread *g_render;                               // the thread that presents (sched trace, core diag)
 typedef struct { int st; uint32_t waker; uint64_t obj, ns; } WaitRec;
@@ -264,8 +264,8 @@ static int sync_watches(const RtThread *w, const void *obj) {
 // of it are woken to look again. Every other such wait stays asleep: woken, it took a virtual core (block: core_take,
 // which asks a running thread of lower priority for its core when every core is held), found nothing signalled and
 // blocked again, and the audio renderer alone signals its event 200 times a second, each time waking every thread
-// that waits for a message, a timer or the end of another thread. NX2NAVI_SYNC_WAKE_ALL=1 wakes them all, as before
-// ("ab": in the B blocks of NX2NAVI_AB); the sched line counts the waits woken and left asleep.
+// that waits for a message, a timer or the end of another thread. OOTPC_SYNC_WAKE_ALL=1 wakes them all, as before
+// ("ab": in the B blocks of OOTPC_AB); the sched line counts the waits woken and left asleep.
 static void wake_sync_waiters(const void *obj) {
     static int mode = -1;
     if (mode < 0) mode = rt_knob("SYNC_WAKE_ALL", "0");
@@ -321,37 +321,37 @@ static uint32_t block_inner(RtThread *t, int kind, int64_t ns) {
 }
 
 // ---- virtual cores
-// Horizon runs at most one thread per core, and NX2navi keys per-core data (allocators, job queues) by the current core
+// Horizon runs at most one thread per core, and OOT-PC keys per-core data (allocators, job queues) by the current core
 // number without locks. A guest thread therefore holds one of the three application cores while it runs guest code
 // and gives it up only where Horizon would switch threads (waits, sleep, yield, exit, blocking host calls); a free
 // core goes to the best waiting thread. A waiter better than a holder asks one holder to give its core up (core_kick),
 // which it does at its next SVC or indirect call (kern_checkpoint, rt_dispatch), as Horizon runs the better thread at
 // once; guest code without either keeps the core until it reaches one.
 //
-// free_cores = 1 (NX2NAVI_FREE_CORES) turns the gate off, for experiments only: the game does not run that way. A thread
+// free_cores = 1 (OOTPC_FREE_CORES) turns the gate off, for experiments only: the game does not run that way. A thread
 // that holds no core reports its ideal core to GetCurrentProcessorNumber, so the game's job workers all report core 0
 // and run its per-core code at once: on 1.2.1 two of them add the same per-core NVN control memory, which retires the
 // command handle the other just recorded, and CallCommands finds no recording at start (#212); 1.4.3 corrupts a heap
 // in main+0x82e00 or hangs at the title menu. The start log and every crash report say so (kern_free_cores_note).
 static RtThread *g_core_owner[NCORE], *g_core_wait;
 static int g_cores_on = -1, g_held_max;
-static int g_active_cores = NCORE;   // NX2NAVI_CORES (core_allowed)
+static int g_active_cores = NCORE;   // OOTPC_CORES (core_allowed)
 
 static void diag_init(void);
 static void ap_init(void);
 
 static int cores_enabled(void) {
     if (g_cores_on < 0) {
-        g_cores_on = !cfg_bool("NX2NAVI_FREE_CORES");   // "0" keeps the gate, like unset
-        const char *n = cfg_get("NX2NAVI_CORES");
+        g_cores_on = !cfg_bool("OOTPC_FREE_CORES");   // "0" keeps the gate, like unset
+        const char *n = cfg_get("OOTPC_CORES");
         if (n && atoi(n) >= 1 && atoi(n) <= NCORE) {
             g_active_cores = atoi(n);
-            rt_log("kernel: %d virtual cores run threads (NX2NAVI_CORES); higher cores fold onto them", g_active_cores);
+            rt_log("kernel: %d virtual cores run threads (OOTPC_CORES); higher cores fold onto them", g_active_cores);
         }
         if (!g_cores_on)
-            rt_log("kernel: WARNING: free_cores = 1 (NX2NAVI_FREE_CORES) turns the virtual core gate off. This is an "
+            rt_log("kernel: WARNING: free_cores = 1 (OOTPC_FREE_CORES) turns the virtual core gate off. This is an "
                    "experimental mode and the game crashes or hangs in it, usually at start. Set free_cores = 0 in "
-                   "nx2navi.ini to play");
+                   "OOT-PC.ini to play");
         diag_init();
         ap_init();
     }
@@ -361,11 +361,11 @@ static int cores_enabled(void) {
 void kern_free_cores_note(void) {
     if (!g_cores_on)
         rt_log("fatal: free_cores = 1 was on: the game crashes in this experimental mode; set free_cores = 0 in "
-               "nx2navi.ini before reporting this crash");
+               "OOT-PC.ini before reporting this crash");
 }
 
-// NX2NAVI_CORES = 1..NCORE: how many virtual cores run threads (default all NCORE). A core at or above the count is
-// folded onto core (c mod count): a thread pinned to core 5 with NX2NAVI_CORES=3 runs on core 2, one thread per core
+// OOTPC_CORES = 1..NCORE: how many virtual cores run threads (default all NCORE). A core at or above the count is
+// folded onto core (c mod count): a thread pinned to core 5 with OOTPC_CORES=3 runs on core 2, one thread per core
 // at a time as always (diagnosis of races that more parallel cores expose; the Steam Deck profile's four).
 static int core_allowed(const RtThread *t, int c) {
     if (c >= g_active_cores) return 0;
@@ -379,7 +379,7 @@ static int core_allowed(const RtThread *t, int c) {
 // data by this number without locks, so a thread pinned to core 5 must go on using core 5's data when it takes
 // turns with core 1's threads on one virtual core. Seeing 1 there, it used core 1's data in turn with core 1's own
 // threads, and the game died in its draw set-up within seconds of the first frame in play (issue #445; with
-// NX2NAVI_CORES=4 on any machine). No two threads that run guest code see the same number: they hold different
+// OOTPC_CORES=4 on any machine). No two threads that run guest code see the same number: they hold different
 // virtual cores, and the numbers that fold onto different virtual cores differ.
 static int core_seen(const RtThread *t, int c) {
     if (g_active_cores >= NCORE) return c;
@@ -389,11 +389,11 @@ static int core_seen(const RtThread *t, int c) {
     return c;
 }
 
-// ---- asynchronous preemption (NX2NAVI_ASYNC_PREEMPT, on unless 0)
+// ---- asynchronous preemption (OOTPC_ASYNC_PREEMPT, on unless 0)
 // Contains code Copyright (c) 2026 MacNativeGames contributors (MIT; see THIRD_PARTY_NOTICES.md).
 // Horizon gives a core to a strictly better thread the moment that thread is ready.
 // Here a better waiter only marks the owner, which gives the core up at its next SVC or indirect call; an owner in a
-// stretch of game code with neither keeps it (NX2NAVI_CORE_DIAG: 0.5-1.1 ms of thread-time per frame, waits to 16 ms and
+// stretch of game code with neither keeps it (OOTPC_CORE_DIAG: 0.5-1.1 ms of thread-time per frame, waits to 16 ms and
 // more). With it on, three parts, all of them necessary:
 // - The waiter interrupts the owner (plat_intr_stop) when it has waited AP_FIRST_NS, then every
 //   millisecond: if the owner's host rip is in the lifted modules' code (g_gen_lo..g_gen_hi) and its host depth is 0
@@ -408,11 +408,11 @@ static int core_seen(const RtThread *t, int c) {
 //   (interrupt_flag) is set. Such an owner is not preempted, at a checkpoint either: interrupt_flag is set and the
 //   switch happens at that SVC. Preempting it anyway hung the game at "Continue" (the lock holder lost its
 //   core to a thread that then spun on that lock).
-// NX2NAVI_ASYNC_PREEMPT=0 keeps the old scheduling exactly: raw priorities, no interruption, no disable_count; =2 keeps
+// OOTPC_ASYNC_PREEMPT=0 keeps the old scheduling exactly: raw priorities, no interruption, no disable_count; =2 keeps
 // inheritance and the preemption disable without interrupting owners.
 #define AP_FIRST_NS 250000ull   // the waiter spins this long before the first interruption (most waits end sooner)
 #define AP_GAP_NS 1000000ull    // and interrupts the same owner at most this often
-static int g_ap = -1, g_ap_int;   // g_ap_int: interrupt owners (NX2NAVI_ASYNC_PREEMPT=2: inheritance and disable only)
+static int g_ap = -1, g_ap_int;   // g_ap_int: interrupt owners (OOTPC_ASYNC_PREEMPT=2: inheritance and disable only)
 static int g_ap_log;              // redirects logged so far (AP_LOG_N)
 #define AP_LOG_N 40
 static uintptr_t g_gen_lo, g_gen_hi;   // host code of the lifted modules: first and last function start
@@ -432,7 +432,7 @@ static int cpu_keeps_ymm(void) {
 
 static void ap_init(void) {
     if (g_ap >= 0) return;
-    const char *e = cfg_value("NX2NAVI_ASYNC_PREEMPT");
+    const char *e = cfg_value("OOTPC_ASYNC_PREEMPT");
     g_ap = strcmp(e, "0") != 0;
     g_ap_int = g_ap && strcmp(e, "2") != 0;
     if (g_ap) {
@@ -462,7 +462,7 @@ static void ap_init(void) {
     }
     rt_log("kernel: asynchronous preemption of virtual cores %s, priority inheritance and preemption disable %s; lifted "
            "code exe+%#llx-exe+%#llx; an interrupted core's %s registers are kept", g_ap_int ? "on" : "off",
-           g_ap ? "on (NX2NAVI_ASYNC_PREEMPT=0 turns all off)" : "off",
+           g_ap ? "on (OOTPC_ASYNC_PREEMPT=0 turns all off)" : "off",
            (unsigned long long)(g_gen_lo ? g_gen_lo - plat_exe_base() : 0),
            (unsigned long long)(g_gen_hi ? g_gen_hi - plat_exe_base() : 0), ap_stub == kern_ap_stub_ymm ? "YMM" : "XMM");
 }
@@ -478,7 +478,7 @@ static int eff_prio(const RtThread *o) {
     return p;
 }
 
-// The priority the virtual cores go by: raw with NX2NAVI_ASYNC_PREEMPT=0, as before.
+// The priority the virtual cores go by: raw with OOTPC_ASYNC_PREEMPT=0, as before.
 static int prio_of(const RtThread *t) { return g_ap > 0 ? eff_prio(t) : t->prio; }
 
 // TLR+0x100 disable_count, +0x102 interrupt_flag (any thread may read them; the flag is set from outside as the
@@ -566,13 +566,13 @@ static int ap_try(RtThread *w) {
     return r;
 }
 
-// ---- NX2NAVI_CORE_DIAG=1: why ready threads wait for a virtual core, and for how long
+// ---- OOTPC_CORE_DIAG=1: why ready threads wait for a virtual core, and for how long
 // Each core wait is split into classes: the owner asked to give the core up ran game code (DG_GAME, the part an
 // asynchronous preemption would remove), was in a host call or SVC that kept the core (DG_HOST), every owner the waiter
 // may displace was of better or equal priority (DG_EQ: Horizon waits too), or the worse owners were claimed by better
 // waiters (DG_NOCORE). Per 60 presents: time per frame and a wait-length histogram per class, the owners that cost
 // most; a line per present over 25 ms; a line per wait with over 2 ms of DG_GAME (where the owner reached its
-// checkpoint), and one host RIP sample of the owner per such wait (exe RVA, for nx2navi.map).
+// checkpoint), and one host RIP sample of the owner per such wait (exe RVA, for ootpc.map).
 enum { DG_GAME, DG_HOST, DG_EQ, DG_NOCORE, DG_N };
 static const char *const dg_name[DG_N] = {"game", "host", "eq", "nocore"};
 #define DG_NB 8   // wait lengths: < 0.05, 0.25, 1, 2, 4, 8, 16 ms, longer
@@ -593,11 +593,11 @@ static uint64_t g_dg_samples, g_dg_lines, g_sync36, g_sync36_flag;
 
 static void diag_init(void) {
     if (g_diag >= 0) return;
-    const char *e = cfg_get("NX2NAVI_CORE_DIAG");
+    const char *e = cfg_get("OOTPC_CORE_DIAG");
     g_diag = e && *e && strcmp(e, "0");
     if (g_diag) {
         kern_host_track = 1;
-        rt_log("core-diag: on (NX2NAVI_CORE_DIAG)");
+        rt_log("core-diag: on (OOTPC_CORE_DIAG)");
     }
 }
 
@@ -701,7 +701,7 @@ static void dg_sample(RtThread *t) {
 
 // perf_present, every present: a line for a present over 25 ms, the 60-present summary.
 void kern_core_diag_frame(uint64_t frame, uint64_t interval_ns) {
-    if (g_ap > 0 && frame && frame % 600 == 0) {   // NX2NAVI_ASYNC_PREEMPT counters since the start
+    if (g_ap > 0 && frame && frame % 600 == 0) {   // OOTPC_ASYNC_PREEMPT counters since the start
         lock();
         uint64_t v[8] = {g_ap_sent, g_ap_taken, g_ap_host, g_ap_pc, g_ap_deferred, g_ap_fail, g_ap_spin_ok, g_sync36};
         unlock();
@@ -771,7 +771,7 @@ static void core_count(void) {
     if (n > g_held_max) g_held_max = n;
 }
 
-static struct DgRel g_dg_rel;   // NX2NAVI_CORE_DIAG: the owner core_put is releasing, for core_grant
+static struct DgRel g_dg_rel;   // OOTPC_CORE_DIAG: the owner core_put is releasing, for core_grant
 
 static void core_grant(int c) {
     RtThread *b = NULL, **bp = NULL;
@@ -949,7 +949,7 @@ static uint32_t block(RtThread *t, int kind, int64_t ns) {
 }
 
 // ---- long waits (a freeze's first clue)
-// A guest thread that waits NX2NAVI_WAIT_WATCH_S seconds for a lock, or for another thread to end, is logged once per
+// A guest thread that waits OOTPC_WAIT_WATCH_S seconds for a lock, or for another thread to end, is logged once per
 // wait with the thread it waits for and what that one is doing: a game that stops with nothing in its log then names
 // the chain. Waits on condition variables, events and addresses are left out: idle worker threads wait on them for
 // good. Off by default (0), as its thread takes the kernel lock every 2 s; 10 is a good value for a hang report.
@@ -967,7 +967,7 @@ static void wait_watch_holder(char *out, size_t cap, const RtThread *h) {
 
 static void wait_watch(void *arg) {
     (void)arg;
-    uint64_t limit = (uint64_t)atoi(cfg_value("NX2NAVI_WAIT_WATCH_S")) * 1000000000ull;
+    uint64_t limit = (uint64_t)atoi(cfg_value("OOTPC_WAIT_WATCH_S")) * 1000000000ull;
     if (!limit) return;
     int lines = 0;
     while (lines < WAIT_WATCH_LINES) {
@@ -1004,7 +1004,7 @@ int kern_core_away(void) {
     lock();
     core_put(t);
     acct(t, S_HOST);
-    if (rt_trace & RT_TRACE_SCHED)   // the caller as an exe RVA (nx2navi.map)
+    if (rt_trace & RT_TRACE_SCHED)   // the caller as an exe RVA (ootpc.map)
         t->wobj = (uintptr_t)__builtin_return_address(0) - plat_exe_base();
     unlock();
     return 1;
@@ -1026,10 +1026,10 @@ void kern_core_back(int *away) {
 // where a better thread pinned there preempts it; here it holds a virtual core and a host core, and pollers that take a
 // lock on every pass hand its cache line between their host cores so the thread whose item it is rarely gets it
 // (a job queue's pollers do this). Every pass pauses the host core once. A wait is a run of
-// passes through the same loop at most SPIN_GAP_NS apart; once one has lasted NX2NAVI_SPIN_HANDOFF_US (default 50) and a
+// passes through the same loop at most SPIN_GAP_NS apart; once one has lasted OOTPC_SPIN_HANDOFF_US (default 50) and a
 // thread waits for a virtual core, each pass gives the core to the waiter, whatever its priority, yields the host CPU
 // and takes a core again. Shorter waits keep the core: a lock held for a moment would otherwise make the next pass wait
-// for another thread's next SVC. NX2NAVI_SPIN=0 keeps the core always (the gate's own cost only).
+// for another thread's next SVC. OOTPC_SPIN=0 keeps the core always (the gate's own cost only).
 #define SPIN_GAP_NS 20000ull
 static int g_spin_on = -1;
 static uint64_t g_spin_handoff_ns;
@@ -1041,11 +1041,11 @@ void rt_spin_gate(Cpu *c, uint64_t head) {
     RtThread *t = tcur;
     if (!t) return;
     if (g_spin_on < 0) {
-        const char *e = cfg_get("NX2NAVI_SPIN_HANDOFF_US");
+        const char *e = cfg_get("OOTPC_SPIN_HANDOFF_US");
         g_spin_handoff_ns = (uint64_t)(e && *e ? atoll(e) : 50) * 1000;
         // an empty value is unset: cfg_bool of a key without a settings row would stop the game on it
-        const char *spin = cfg_get("NX2NAVI_SPIN");
-        g_spin_on = !(spin && *spin && !cfg_bool("NX2NAVI_SPIN"));
+        const char *spin = cfg_get("OOTPC_SPIN");
+        g_spin_on = !(spin && *spin && !cfg_bool("OOTPC_SPIN"));
     }
     t->sp_n++;
     t->sp_site = head;
@@ -1140,18 +1140,18 @@ void kern_core_stats_reset(void) {
     unlock();
 }
 
-// NX2NAVI_TRACE=sched: every 120 presents, the time split of the busiest threads (running, waiting for a core, host
+// OOTPC_TRACE=sched: every 120 presents, the time split of the busiest threads (running, waiting for a core, host
 // calls) and of the render thread, the render and the main thread's longest waits by object and by the thread whose
 // signal ended them, and the preemption latency.
 #define REP_N 8
-// At each present (holding G): starts recording at NX2NAVI_CRIT's first frame, stops and writes the file at its last.
+// At each present (holding G): starts recording at OOTPC_CRIT's first frame, stops and writes the file at its last.
 // File: "CRIT", thread count, event count (u32 each); per thread handle, priority, flags (1 main, 2 presents), host
 // tid (u32 each); then the CritEv records.
 static void crit_frame(RtThread *self, uint64_t frame) {
     static int parsed;
     if (!parsed) {
         parsed = 1;
-        const char *e = cfg_get("NX2NAVI_CRIT");
+        const char *e = cfg_get("OOTPC_CRIT");
         unsigned long long lo, hi;
         double wl, wh;
         if (e && e[0] == 'w' && sscanf(e + 1, "%lf-%lf", &wl, &wh) == 2 && wl >= 0 && wl < wh &&
@@ -1178,7 +1178,7 @@ static void crit_frame(RtThread *self, uint64_t frame) {
     crit_add(CRIT_FRAME, self ? self->handle : 0, 0, 0, frame, kern_now_ns());
     if (frame < g_crit_hi) return;
     g_crit_on = 0;
-    const char *path = cfg_get("NX2NAVI_CRIT_OUT");
+    const char *path = cfg_get("OOTPC_CRIT_OUT");
     FILE *f = fopen(path && *path ? path : "crit.bin", "wb");
     if (!f) {
         rt_log("crit: cannot write %s", path && *path ? path : "crit.bin");
@@ -1441,7 +1441,7 @@ static void thread_finish(RtThread *t) {
 // register is offset, and the landing code then reads its locals through the wrong base.)
 static __attribute__((noreturn)) void exit_now(RtThread *t) { plat_jmp_go(&t->exit_jmp); }
 
-// The calling host thread, for ap_try (NX2NAVI_ASYNC_PREEMPT) and dg_sample (NX2NAVI_CORE_DIAG).
+// The calling host thread, for ap_try (OOTPC_ASYNC_PREEMPT) and dg_sample (OOTPC_CORE_DIAG).
 static PlatIntr *ap_open_self(void) {
     if (!cores_enabled() || (!g_ap_int && g_diag <= 0)) return NULL;
     PlatIntr *h = plat_intr_self();
@@ -2369,10 +2369,10 @@ HOST_OVERRIDE(KERN_SYM_FINALIZE_FIBER, kern_fiber_finalize);
 HOST_OVERRIDE(KERN_SYM_SWITCH_TO_FIBER, kern_fiber_switch);
 HOST_OVERRIDE(KERN_SYM_GET_CURRENT_FIBER, kern_fiber_current);
 
-// NX2NAVI_SVC_SLOW_MS (default 0, off): logs each kernel service that blocks longer than that, with the service number.
+// OOTPC_SVC_SLOW_MS (default 0, off): logs each kernel service that blocks longer than that, with the service number.
 // A stalled frame shows up as time in the replay; this says whether the guest was waiting in a service, and which one,
 // instead of leaving it to a sampler to find.
-// NX2NAVI_SVC_WAITS=1 (diagnosis, default 0): the guest main thread's time in each kernel service, per service and the
+// OOTPC_SVC_WAITS=1 (diagnosis, default 0): the guest main thread's time in each kernel service, per service and the
 // guest call chain that made it (the lr and up to three callers from the guest's frame records), logged every 10 s as
 // milliseconds per second with the chain named (ldr_describe: the SDK's symbols). What the game's main thread waits for
 // between frames: standing in Hyrule Field on an RX 580 it spent about a fifth of its time blocked in one service call.
@@ -2423,8 +2423,8 @@ static void svc_wait_note(const Cpu *c, uint32_t imm, uint64_t ns) {
 int kern_svc(Cpu *c, uint32_t imm) {
     static int waits = -1;
     if (waits < 0) {   // no settings row: cfg_bool only on a set value (an unset key is fatal there)
-        const char *v = cfg_get("NX2NAVI_SVC_WAITS");
-        waits = v && *v && cfg_bool("NX2NAVI_SVC_WAITS");
+        const char *v = cfg_get("OOTPC_SVC_WAITS");
+        waits = v && *v && cfg_bool("OOTPC_SVC_WAITS");
     }
     if (waits && plat_thread_id() == prof_main_tid) {
         uint64_t w0 = kern_now_ns();
@@ -2433,7 +2433,7 @@ int kern_svc(Cpu *c, uint32_t imm) {
         return r;
     }
     static double lim = -1;
-    if (lim < 0) lim = strtod(cfg_value("NX2NAVI_SVC_SLOW_MS"), NULL);
+    if (lim < 0) lim = strtod(cfg_value("OOTPC_SVC_SLOW_MS"), NULL);
     if (lim <= 0) return kern_svc_inner(c, imm);
     uint64_t t0 = plat_now_ns();
     int r = kern_svc_inner(c, imm);
@@ -2446,7 +2446,7 @@ int kern_svc(Cpu *c, uint32_t imm) {
     return r;
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): guest threads, the handle table, the system-event table and fibers, each
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): guest threads, the handle table, the system-event table and fibers, each
 // against its fixed size (the tables are fatal when full).
 void kern_sizes(PerfSizes *s) {
     uint64_t threads = 0, handles = 0, fibers = 0, ses;

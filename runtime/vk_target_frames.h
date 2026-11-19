@@ -12,7 +12,7 @@
 // rendered because another subresource had taken their slot. Each misread made a draw whose pipeline was still
 // building wait for it, so a new area was entered one pipeline at a time.
 //
-// Steady targets (NX2NAVI_PIPE_SKIP_STEADY, default 1; 0 = as before). Recent alone called every pass one-shot in the
+// Steady targets (OOTPC_PIPE_SKIP_STEADY, default 1; 0 = as before). Recent alone called every pass one-shot in the
 // first frame after the game had drawn something else for a while (a loading screen between two areas, a full-screen
 // menu): the scene's own targets, the probe layers and the half-resolution buffers had last been rendered hundreds of
 // frames before, so each draw with a new pipeline waited on the replay thread, and a mesh draw, whose pipeline has no

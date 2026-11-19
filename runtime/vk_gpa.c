@@ -36,15 +36,15 @@
 // mapped again while its block still waits takes that block back (block_take), so a pool freed and made again at its
 // address within a frame holds no second block.
 //
-// NX2NAVI_GPA=0 turns the table off: the translator is told the host has no device addresses (those accesses read 0).
-// NX2NAVI_GPA_EMPTY=1 keeps it empty, so every access through it reads the zero buffer (diagnosis).
+// OOTPC_GPA=0 turns the table off: the translator is told the host has no device addresses (those accesses read 0).
+// OOTPC_GPA_EMPTY=1 keeps it empty, so every access through it reads the zero buffer (diagnosis).
 // Mirrored pools are not synced for the table's readers (vk_exec_draw.c ssbo_info says why). With shadow storage the
 // pools are copies of guest memory, which a guest submission that binds the table (vk_exec_draw.c ssbo_info) brings up
 // to date with the pages the CPU wrote, once, before the part is submitted (vk_memory.c vk_mem_shadow_sync). There
 // the twin of a mirrored pool is its shadow copy, not guest memory, and what a shader stores through the table is not
 // noted as a GPU write: it does not come back to guest memory, and the next whole copy-in of its page overwrites it.
 // vk_memory.c "Pages a shader stores into through the device address table" has the sequence, what was measured, and
-// the switch that keeps the stores (NX2NAVI_SHADOW_TABLE_STORES).
+// the switch that keeps the stores (OOTPC_SHADOW_TABLE_STORES).
 #include <stdlib.h>
 #include <string.h>
 
@@ -93,7 +93,7 @@ static void put(uint32_t word, uint32_t v) {
 int vk_gpa_wanted_ctx(const VkCtx *c) {
     static int knob = -1;
     if (knob < 0) {
-        const char *e = cfg_get("NX2NAVI_GPA");
+        const char *e = cfg_get("OOTPC_GPA");
         knob = !(e && !strcmp(e, "0"));
     }
     return knob && c && c->has_buffer_device_address;
@@ -253,8 +253,8 @@ static void rec_free_cb(void *arg) {
 
 uint32_t vk_gpa_map(uint64_t lo, uint64_t hi, VkBuffer buf, uint64_t buf_lo) {
     if (!vk_gpa_on() || !buf || hi <= lo) return 0;
-    static int empty = -1;   // NX2NAVI_GPA_EMPTY=1: nothing is mapped, every access reads the zero buffer (diagnosis)
-    if (empty < 0) { const char *e = cfg_get("NX2NAVI_GPA_EMPTY"); empty = e && !strcmp(e, "1"); }
+    static int empty = -1;   // OOTPC_GPA_EMPTY=1: nothing is mapped, every access reads the zero buffer (diagnosis)
+    if (empty < 0) { const char *e = cfg_get("OOTPC_GPA_EMPTY"); empty = e && !strcmp(e, "1"); }
     if (empty) return 0;
     uint64_t dev = vk_gpa_device_address(buf);
     if (!dev) return 0;
@@ -323,10 +323,10 @@ void vk_gpa_clear(uint64_t lo, uint64_t hi) {
     blocks_release(p0, p1);
 }
 
-// NX2NAVI_GPA_TWIN=0 (diagnosis): no twin, the writes go to the mirror alone, as before patch 0034.
+// OOTPC_GPA_TWIN=0 (diagnosis): no twin, the writes go to the mirror alone, as before patch 0034.
 static int twins_on(void) {
     static int twins = -1;
-    if (twins < 0) { const char *e = cfg_get("NX2NAVI_GPA_TWIN"); twins = !(e && !strcmp(e, "0")); }
+    if (twins < 0) { const char *e = cfg_get("OOTPC_GPA_TWIN"); twins = !(e && !strcmp(e, "0")); }
     return twins;
 }
 
@@ -437,7 +437,7 @@ void vk_gpa_shutdown(void) {
     G.state = -1;
 }
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): device address table records and L2 blocks in use (those waiting for a
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): device address table records and L2 blocks in use (those waiting for a
 // fence included), against their fixed sizes (when they run out, shaders read zeros).
 void vk_gpa_sizes(PerfSizes *s) {
     plat_mutex_lock(&gpa_lock);

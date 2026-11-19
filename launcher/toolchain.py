@@ -67,7 +67,7 @@ def zstd_missing(layout):
             pass
     ver = '.'.join(map(str, sys.version_info[:3]))
     if not layout.dev:
-        return f'The launcher\'s Python ({ver}) is missing its zstandard package. Reinstall NX2navi.'
+        return f'The launcher\'s Python ({ver}) is missing its zstandard package. Reinstall OOT-PC.'
     req = layout.app / 'tools' / 'requirements-launcher.txt'
     return (f'This Python ({ver}) cannot unpack the build tools: before 3.14 it needs the zstandard package. '
             f'Install the launcher\'s packages with: "{sys.executable}" -m pip install -r "{req}"')

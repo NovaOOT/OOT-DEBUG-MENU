@@ -1,10 +1,10 @@
-# nx2navi.ini: settings for nx2navi.exe. Copy this file to nx2navi.ini next to nx2navi.exe and remove the '#' of a line to change it.
-# Each line shows the default; on a Steam Deck the device profile ([display]) changes a few of them. A NX2NAVI_*
-# environment variable of the same name (NX2NAVI_FPS_LIMIT for fps_limit) overrides the file. Keys are case-insensitive;
+# OOT-PC.ini: settings for ocarina.exe. Copy this file to OOT-PC.ini next to ocarina.exe and remove the '#' of a line to change it.
+# Each line shows the default; on a Steam Deck the device profile ([display]) changes a few of them. A OOTPC_*
+# environment variable of the same name (OOTPC_FPS_LIMIT for fps_limit) overrides the file. Keys are case-insensitive;
 # '#' and ';' start a comment; [sections] only group lines.
 # Only the keys in this file are settings. A line with any other key does nothing: the game's log names it at the
 # start ("no setting of this version") and the settings menu (F1) shows it in its bottom row.
-# Updates and rebuilds of the game never rewrite nx2navi.ini; the settings menu changes only the lines of the settings
+# Updates and rebuilds of the game never rewrite OOT-PC.ini; the settings menu changes only the lines of the settings
 # it changes and keeps every other line as it is.
 
 [frame rate]
@@ -75,10 +75,32 @@
 [performance]
 
 # General CPU/detail options. These work independently of low_end_gpu.
+# The menu's Game tab, Performance, Performance preset writes several settings at once for a slower PC; nothing reads a
+# key of its own. Low: foliage = reduced, foliage_shadows = reduced, debug_draw_distance = 0.75, aniso = 4,
+# debug_clip = 0, contact_shadows = 0, pcss = 0. Very low: foliage = off, foliage_shadows = off,
+# debug_draw_distance = 0.5, aniso = game, texture_lod_bias = 1, debug_clip = 0, contact_shadows = 0, pcss = 0,
+# aa = off, debug_fog_off = 1, audio_reverb = 0. Default removes those lines, so each setting is at its default.
 # Foliage shadows: full, reduced (no grass/moss shadows), off (no plant shadows).
 # Plants remain visible unless foliage reduces them separately. Requires a restart.
 # foliage_shadows = full
 # foliage = full
+# Plant cards cast their sun shadow from one side only from this shadow cascade on (0 all, 1 middle and far, 3 off: both
+# sides, as the game draws them); an "f" after the number keeps the back faces instead of the front ones.
+# foliage_shadow_cull = 1
+# Plant shadows from this cascade on are shaded once per 2x2 pixels (0 all, 1 middle and far, 2 far only, 3 off). Needs
+# variable rate shading.
+# foliage_shadow_vrs = 2
+# The outermost row and column of each jittered scene pass filled from their neighbours (DLSS, DLAA, FSR 3.1), for
+# drivers that leave them undrawn: auto (off on NVIDIA, whose driver draws them; on elsewhere), 1 on, 2 only before the
+# upscaler, 0 off.
+# dlaa_edge_fill = auto
+# Shader modules optimised before the driver compiles them (SSA, value numbering, dead code), with ootpc_spvopt.dll
+# beside the game (tools/build_spvopt.py; on Linux the system's SPIRV-Tools); kept under shader-cache/opt. 0 sends them as translated. Modules
+# below spv_opt_min_words words are left as they are.
+# spv_opt = 1
+# spv_opt_min_words = 1024
+# The stages optimised: 1 vertex, 2 fragment, 4 compute, 8 the others (added together).
+# spv_opt_stages = 6
 # guest_opt = 2 compiles optimised game code at the next launcher Rebuild the Game.
 # A restart alone does not rebuild it. Default 1 keeps the faster build at -O1.
 
@@ -173,11 +195,15 @@
 # frame's commands begin with a wait for that signal (0 to 100; 0: the frame is set aside at once and drawn at its
 # present, as before).
 # gate_wait_ms = 10
-# Dynamic resolution, 0 or 1, applied at once: with a DLSS upscaling mode, the scene resolution follows the GPU time
-# per frame toward dyn_res_target milliseconds (1 to 100), one DLSS step at a time, each held for dyn_res_step frames
-# (8 to 600), from the DLSS mode set down to performance. Default: off.
+# Dynamic resolution, 0 or 1, applied at once: the scene resolution follows a frame's cost (the GPU's time, or the time between frames less the frame pacer's waits when that is more) toward
+# dyn_res_target milliseconds (1 to 100; 0: one frame at fps_limit, the monitor's rate for display and unlimited), one
+# DLSS step at a time, each held for dyn_res_step frames (8 to 600), from the DLSS mode set down to performance
+# (ultra performance when that is the mode set). DLAA keeps every pixel while the frame holds its time and gives way
+# only where it does not. Without DLSS the steps are the scene's share of the picture (scene_share) times 1, 0.875,
+# 0.75, 0.66, 0.58 or 0.5, which the picture's upscaling stand-in enlarges; a scene_share of 0 (the game's own dynamic
+# resolution) is left alone. Default: off.
 # dyn_res = 0
-# dyn_res_target = 16.7
+# dyn_res_target = 0
 # dyn_res_step = 45
 # Processors. On a processor whose dies have L3 caches of different sizes (AMD's two-die X3D processors, with 3D
 # V-Cache on one die) the game runs on the die with the larger cache when that die has 8 cores or more: 1 = on,
@@ -288,6 +314,9 @@
 # pipe_binaries = 0
 # pipeline-binaries.bin larger than this (MB) starts empty and is rewritten (0: no limit).
 # pipe_binaries_max_mb = 1024
+# 1: draws with 8-bit indices bind them as they are where the GPU has VK_KHR_index_type_uint8 (or the EXT); 0 widens
+# them to 16 bits on the CPU for every such draw, as without the extension.
+# index_uint8 = 1
 # Build known pipelines ahead of time.
 # pipe_prebuild = 1
 # Count the shared pipeline list that comes with the release (seed-pipeline-keys.bin) as known pipelines, so a new
@@ -346,7 +375,7 @@
 # four times as much memory for these textures and can exhaust memory while loading.
 # Leave this setting commented for automatic selection. The renderer requests BC3 when the largest device-local GPU
 # heap is under 20 GiB or the system reports less than 47 GiB of RAM (allowing for a nominal 48 GiB PC). If the RAM
-# size is unknown, only the GPU heap decides. Look for "NX2NAVI_ASTC_BC unset" in the game log to see the decision.
+# size is unknown, only the GPU heap decides. Look for "OOTPC_ASTC_BC unset" in the game log to see the decision.
 # astc_bc = 1
 # With BC3 on: a texture none of whose texels is see-through is BC1, half the size of BC3 with the same texels (each
 # upload checks the blocks as it copies them). 0: every ASTC texture BC3.
@@ -446,6 +475,18 @@
 # can show a dark or flickering frame now and then; its row under the mode's switch turns them on. 0, the default: each of these stays as it was in 0.9.1, and none of these keys
 # is read. Read at start.
 # low_end_gpu = 0
+# Any card, with or without the mode: 1 copies the game memory a frame's draws read while the frame is recorded, so the
+# frame's first submission need not wait for the GPU to finish the previous frame (mirror_stage = 1 with
+# submit_finish_gpu = 0: the CPU and the GPU work on two frames at once). The mode turns both on; without it each is
+# off unless set here. Read at start.
+# mirror_stage = 0
+# submit_finish_gpu = 1
+# The game's own waits for the GPU (an experiment, read at start): fence waits until the GPU has run the frame;
+# recorded ends the wait once the replay has submitted it and the GPU has run what hands the game results or reads its
+# memory, so the CPU records the next frame while the GPU draws this one (at most two frames in flight). Occlusion and
+# counter results then arrive a frame late, and the picture is a frame later. Best with mirror_stage = 1 and
+# submit_finish_gpu = 0; shadow storage keeps the fence's wait.
+# game_wait = fence
 # Textures the game released that are kept as they are (1 to 16384); past this count only those that lose nothing
 # when dropped go. Default: one per 2 MB of the video memory budget, 2048 to 8192. Read at start.
 # tex_released_max = 4096
@@ -547,7 +588,7 @@
 # window_size = 1920x1080
 # fullscreen = 0
 # Which monitor the game window opens on, centred in its work area; fullscreen covers that monitor. auto (default): the
-# system places the window. primary; a number, counting from 1 in the order `nx2navi.exe --list-monitors` prints; or part
+# system places the window. primary; a number, counting from 1 in the order `ocarina.exe --list-monitors` prints; or part
 # of the monitor's name, ignoring case (on Windows also of a GDI device name, display3; on Linux the name carries the
 # connector, such as dp-2). For a virtual display that may not exist yet, use its name: when nothing matches, the log
 # lists the monitors and the window is placed as with auto. The command line `--monitor <value>` overrides this for one
@@ -587,7 +628,7 @@
 # buses short of bandwidth; on an RX 580 the pools the game refills every frame cost about 8 ms a frame in copies.
 # mirror_hot = 0
 # 2: the next Rebuild the Game compiles the game's code at -O2 instead of -O1 (faster game threads on a slower CPU, a
-# build several times longer). Read by tools/make_game.py; the environment variable NX2NAVI_GUEST_OPT wins.
+# build several times longer). Read by tools/make_game.py; the environment variable OOTPC_GUEST_OPT wins.
 # guest_opt = 1
 # How many of the game's threads run at the same time: empty (all six, as on the console), or 4 or 3 for a CPU with
 # four threads or fewer, which leaves the threads that prepare frames for the GPU room to run. Read at start. Also in
@@ -628,6 +669,12 @@
 # mipmapped textures that tile are raised; shadow maps, data maps and screen-sized buffers keep the game's setting.
 # Changes while the game runs take effect at once.
 # aniso = 16
+# Texture LOD bias for speed: 0 (the default, the textures sampled as the game asks), 0.5, 1 or 2. Moves the surface
+# textures (the filtered, mipmapped ones that tile: ground, walls, roofs) that many mip levels toward their smaller
+# versions; 1 reads textures half as wide. The picture turns softer and the GPU reads less memory per pixel, which
+# helps integrated graphics and cards short of memory bandwidth. Adds to the bias DLSS sets for its render scale.
+# Changes while the game runs take effect at once.
+# texture_lod_bias = 0
 # Texture detail: auto, full, reduced or low. The textures of a loaded area are what fills a card with little video
 # memory, and three quarters of a texture is its largest mip level. reduced makes the large surface textures (256x256 and
 # more, with smaller levels) without that level, low without the two largest when they are 1024x1024 or more. Surfaces
@@ -667,7 +714,7 @@
 # shadow_pcf = 0
 
 # NVIDIA DLSS / DLAA for the 3D scene, on NVIDIA RTX GPUs with the DLSS model from NVIDIA's DLSS SDK next to the
-# executable (Windows: nvngx_dlss.dll next to nx2navi.exe; Linux: libnvidia-ngx-dlss.so.<version> next to nx2navi, with the
+# executable (Windows: nvngx_dlss.dll next to ocarina.exe; Linux: libnvidia-ngx-dlss.so.<version> next to ootpc, with the
 # NVIDIA driver's libnvidia-ngx.so.1 installed); elsewhere the setting does nothing. The HUD is drawn after it and is not touched.
 # Read at start.
 # dlaa = 0
@@ -750,12 +797,16 @@
 # and game, off, fxaa or smaa runs along with it: off leaves the edges to the TAA alone. Changes while the game runs
 # take effect at once.
 # aa = game
+# The game's ambient occlusion, the soft shadows in corners, creases and under objects: 1 on, 0 off (the scene a
+# little flatter, a little less GPU time). Changes while the game runs take effect at once. On a game version whose
+# passes the runtime does not know yet, it stays on.
+# game_ao = 1
 # The FXAA switch of the game this runtime was first written for; Ocarina has no such pass, so it changes nothing here
 # (aa above is the setting).
 # fxaa = 1
 # Frame generation: off, fsr3 (AMD FSR 3.1 on any GPU where amd_fidelityfx_vk.dll loads, so not on Linux: one generated
 # frame between every two the game draws, the HUD kept out of it) or dlss (NVIDIA DLSS Frame Generation on GeForce RTX
-# 40 and 50 GPUs, paced with Reflex; it needs nx2navi_dlssg.dll and NVIDIA Streamline's files next to the executable,
+# 40 and 50 GPUs, paced with Reflex; it needs ootpc_dlssg.dll and NVIDIA Streamline's files next to the executable,
 # which the setup puts there). Both run with any upscaling: with DLSS or FSR 3.1 (dlaa = 1) they take its depth and
 # motion vectors, and without one (dlaa = 0) the same ones made for them alone, with no jitter (the log's "dlaa: frame
 # generation runs" line says which). While frame generation runs, fps_limit
@@ -774,6 +825,11 @@
 # Each step adds a little latency, and a display shows no more than its refresh rate. Changes while the game runs
 # take effect at once.
 # framegen_multiplier = 2
+# The rate on screen frame generation aims for: display (the display's refresh rate) or a number of frames a second
+# below it, such as 120 for a steady 120 on a 144 or 180 Hz display. The dynamic multiplier (framegen_multiplier =
+# dynamic) picks its multiplier for it, and with fps_limit = display the game draws that rate over the multiplier (60
+# for 120 at 2x), so a fixed multiplier gives it evenly too. Changes while the game runs take effect at once.
+# framegen_target = display
 # Low latency without frame generation: 0 off, 1 on, 2 on with boost (NVIDIA's: the GPU keeps a high clock; on AMD 2
 # is 1). The graphics driver holds each frame's start, so the game reads the controller as late as the picture allows
 # and no finished picture waits for its turn: NVIDIA's low-latency mode (VK_NV_low_latency2) or AMD's Anti-Lag
@@ -815,17 +871,41 @@
 # menu_lang = en
 
 [discord]
-# Rich Presence: "Playing NX2navi" with the play time in your Discord status while the game runs, through the
+# Rich Presence: "Playing The Legend of Zelda: Ocarina of Time PC" with the play time in your Discord status while the game runs, through the
 # local IPC of a running Discord client; without one it does nothing. 0 = off. The Game tab of the settings menu (F1)
 # and the launcher's Settings switch it too, and a change in the menu reaches the presence thread at once.
 # discord_rpc = 1
+# The status's second line shows where you are: the area the game has loaded and Link's age ("Hyrule Field · Adult"),
+# a few seconds after each loading screen. 0 = the game and play time only.
+# discord_location = 1
+# While you fight, the enemy is added after the place ("Kokiri Forest · Adult · Attacking: Keese"), by its short
+# name (a Fire Keese is a Keese): the one you last hit, or the nearest one within 12 m when you are hurt, shown
+# until 12 s after the last blow. It needs
+# discord_location. While it is on and Discord is connected, the debug overlay's enemy scan runs on its helper thread
+# every 1.5 s. 0 = off.
+# discord_fight = 1
 # The Discord application whose name ("Playing <name>") and artwork the status shows: its Application ID from
-# discord.com/developers/applications (General Information), digits only. Default: the NX2navi application, built
-# in from runtime/discord_app.h (NX2NAVI_DISCORD_APP_ID_DEFAULT). Register your own application to choose another
+# discord.com/developers/applications (General Information), digits only. Default: the OOT-PC application, built
+# in from runtime/discord_app.h (OOTPC_DISCORD_APP_ID_DEFAULT). Register your own application to choose another
 # name and art.
-# discord_app_id = 1568862362969309275
+# discord_app_id = 1571728936977571971
 # The key of the application's uploaded art asset (Rich Presence > Art Assets) shown as the status's large image.
-# discord_image = nx2navi_512x512
+# discord_image = icon
+
+[coop]
+# Co-op, experimental: play with friends over Steam, each in their own game and save (docs/coop.md). Co-op is a mod:
+# it is on while the Steam Co-op mod is on (the launcher's Mods screen or the menu's Mods tab; it applies at the next
+# start), and with it off the game uses no network. The game signs in to Steam as its test app, so Steam shows you as
+# playing Spacewar; it needs Steam running and Steam's library file steam_api64.dll beside ocarina.exe, which the
+# launcher copies there from a Steam game you have installed. Rooms are made and joined in the menu's Co-op tab,
+# never from this file.
+# In a room, share progress, items and songs with the other players; your save is copied to coop-backup in the profile
+# folder first. 0 = only names, positions and chat.
+# coop_share = 1
+# Show the other players' names where their Link stands (needs DLSS, FSR or TAA on).
+# coop_names = 1
+# Show new chat lines, and who joined or left, over the game while the menu is closed.
+# coop_chat = 1
 
 [audio]
 # none mixes without opening an audio device.
@@ -847,6 +927,10 @@
 # skipped. 0 plays on from where the sound stopped, which leaves it later than the picture by every gap so far.
 # Takes effect at the next start.
 # audio_catchup = 1
+# The game's echo effects (delay, reverb and 3D reverb: caves, temples, halls): 1 (the default) runs them, 0 passes the
+# sound through each as the game's own switch for an effect does, which spares the audio thread their work on a slow
+# CPU. Changes while the game runs take effect at once.
+# audio_reverb = 1
 # Volume in percent (0 to 100), on top of the game's own. Changes while the game runs take effect at once.
 # volume = 100
 # Speakers: stereo, 5.1 or auto (5.1 when the Windows speaker setup has six or more channels, stereo otherwise). The
@@ -854,7 +938,7 @@
 # told its output device changed, as on a console, and mixes for the new count.
 # audio_channels = stereo
 # Which output device the sound plays on. default (the default): the system default device, which the game follows when
-# the Windows default changes. Or a number, counting from 1 in the order `nx2navi.exe --list-audio-devices` prints; or part
+# the Windows default changes. Or a number, counting from 1 in the order `ocarina.exe --list-audio-devices` prints; or part
 # of a device's name, ignoring case (`headphones`). When nothing matches, or the device will not open, the log lists the
 # devices and the game plays on the system default. With audio_channels = auto, the channel count is the chosen device's.
 # The command line `--audio-device <value>` overrides this for one run. Takes effect at the next start.
@@ -974,7 +1058,7 @@
 # their mods into the mods folder instead ([mods]). Default: none.
 # romfs_mods =
 # Folder with the Switch shared fonts (BFTTF files, tools/extract_fonts.py output), for Chinese and Korean text.
-# Default: shared-fonts next to nx2navi.exe. NX2NAVI_SHARED_FONTS overrides it.
+# Default: shared-fonts next to ocarina.exe. OOTPC_SHARED_FONTS overrides it.
 # shared_fonts =
 
 [cheats]
@@ -1049,24 +1133,26 @@
 # debug_god = 0
 # debug_inf_magic = 0
 # debug_inf_items = 0
-# Items at any age (WIP) (Debug tab, Player): the pause menu lets every item and piece of equipment be chosen as child
+# Items at any age (WIP) (Debug tab, under PastyPixel's Bomb T-Pose): the pause menu lets every item and piece of equipment be chosen as child
 # and as adult. Work in progress: an item made for the other age does nothing yet when used. Default: 0.
 # debug_any_age_items = 0
 # Hotkeys for the debug tools (Debug tab, Hotkeys), one line per tool: up to two keys and one controller button, in the
 # bind_ format. A key or button bound here no longer reaches the game outside its pause menu. The tools: fly hover
 # hoverboots kill god infmagic infitems reload ageswitch savepos loadpos slower faster fog walls loading triggers hidden death
-# hookshot health position speed area inputs timer igt split. None is bound by default.
+# void hookshot health position speed area inputs timer igt split. None is bound by default.
 # debug_hotkey_fly = key:g, pad:dpad_up
 # Volume overlay of the debug menu (Debug tab, View; docs/debug-menu.md): invisible walls (placed ones, and the air wall
 # surfaces and shapes of the level's collision), loading zones, other
-# trigger zones, hidden things (grottos, Gold Skulltulas, heart pieces, chests) and death barriers (the kill volume under
-# the world, lava surfaces, bottomless pits, quicksand), drawn over the picture and seen through walls. 1 shows a kind.
+# trigger zones, hidden things (grottos, Gold Skulltulas, heart pieces, chests), death barriers (the kill volume under
+# the world, lava surfaces, bottomless pits, quicksand) and void-out zones (the volumes the area's logic sends the player
+# back from when touched, drawn filled), drawn over the picture and seen through walls. 1 shows a kind.
 # Default: 0 each.
 # debug_view_walls = 0
 # debug_view_loading = 0
 # debug_view_triggers = 0
 # debug_view_hidden = 0
 # debug_view_death = 0
+# debug_view_void = 0
 # With debug_view_death on: 0 leaves out the kill volume under the world (the grid kilometres wide with its name under
 # the player) and keeps the other death barriers. Default: 1.
 # debug_view_kill_plane = 1
@@ -1085,6 +1171,7 @@
 # debug_view_color_triggers = yellow
 # debug_view_color_hidden = green
 # debug_view_color_death = red
+# debug_view_color_void = purple
 # debug_view_color_hookshot = orange
 # 1: each volume's name over it, within 60 m. Default: 1.
 # debug_view_labels = 1
@@ -1129,6 +1216,9 @@
 # debug_save_tree = 1
 # Volumes further from the player than this many metres are not drawn (10 to 1000). Default: 150.
 # debug_view_range = 150
+# Frame advance: how many of the buttons pressed while the game is paused the next frame presses (the last ones
+# pressed; 1 to 16). Also in the debug menu's Debug tab. Default: 1.
+# debug_pause_inputs = 1
 # Foliage draw distance (game build 1.1.1): multiplies how far out grass tufts, bushes, flowers and low trees are drawn
 # (the game's defaults: 40 and 60 m for undergrowth, 35 m for flowers and ornaments, 135 m for low trees), in the areas
 # that keep the defaults, which is most of them. 0.25 to 8; below 1 draws less, for speed. Applies at the next start.
@@ -1176,7 +1266,7 @@
 # everything in it is freed, so smaller blocks hold less free space after area changes; larger ones need fewer
 # allocations while an area loads. Default: 64.
 # vma_block_mb = 64
-# Flight recorder: keeps the last frames and saves them to a flight folder next to the folder of nx2navi.exe when a frame
+# Flight recorder: keeps the last frames and saves them to a flight folder next to the folder of ocarina.exe when a frame
 # takes longer than flight_spike_ms (0 to 60000).
 # flight = 0
 # flight_spike_ms = 100

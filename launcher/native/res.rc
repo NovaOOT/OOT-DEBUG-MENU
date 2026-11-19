@@ -1,4 +1,4 @@
-/* The icon (Navi, written by tools/make_launcher.py from launcher/ui/art.py navi_ico into the build folder,
-   found through -I) and the manifest of OOT-DEBUG-MENU.exe and OOT-DEBUG-MENU-Setup.exe. */
-1 ICON "nx2navi.ico"
+/* The icon (runtime/ootpc.ico, made by tools/make_icon.py, copied by tools/make_launcher.py into the build folder,
+   found through -I) and the manifest of OOT-PC.exe and OOT-PC-Setup.exe. */
+1 ICON "ootpc.ico"
 1 24 "app.manifest"

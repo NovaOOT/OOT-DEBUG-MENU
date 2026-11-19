@@ -1,5 +1,5 @@
 """Build and run tests/audio_mixer_check.c: runtime/audio_mixer.c with the rest of the runtime stubbed. No game files
-and no audio device (the mixer runs as with NX2NAVI_AUDIO=none); SDL3 is only linked.
+and no audio device (the mixer runs as with OOTPC_AUDIO=none); SDL3 is only linked.
 
 Windows: python tests\\audio_mixer_check.py [--toolchain C:/msys64/ucrt64]
 Linux: python tests/audio_mixer_check.py (clang and SDL3 development files via pkg-config)

@@ -1,6 +1,6 @@
 /* The mixer's volume ramps (runtime/audio_mixer.c accumulate_ramp, audio_mixer_render) and what it owes the device
    after a stall (ring_pull, audio_mixer_owed), with the rest of the runtime stubbed. No game data and no audio device:
-   NX2NAVI_AUDIO=none mixes without opening one, and the device's requests are made by hand. Each voice plays a wave
+   OOTPC_AUDIO=none mixes without opening one, and the device's requests are made by hand. Each voice plays a wave
    buffer of one constant sample, so a mix buffer holds the gain the voice went in with, sample by sample. */
 #include "../runtime/audio_mixer.c"
 
@@ -34,10 +34,10 @@ void ipc_unimplemented(const IpcSession *s, const IpcRequest *rq) { (void)s, (vo
 void ipc_out(IpcResponse *rs, const void *p, uint32_t n) { (void)rs, (void)p, (void)n; }
 const void *ipc_arg(const IpcRequest *rq, uint32_t off, uint32_t n) { (void)rq, (void)off, (void)n; exit(2); }
 void menu_sound_mix(float *out, uint32_t frames, int channels, int rate) { (void)out, (void)frames, (void)channels, (void)rate; }
-const char *cfg_get(const char *name) { return !strcmp(name, "NX2NAVI_AUDIO") ? "none" : NULL; }
-const char *cfg_value(const char *name) { return !strcmp(name, "NX2NAVI_AUDIO_CHANNELS") ? "stereo" : "default"; }
+const char *cfg_get(const char *name) { return !strcmp(name, "OOTPC_AUDIO") ? "none" : NULL; }
+const char *cfg_value(const char *name) { return !strcmp(name, "OOTPC_AUDIO_CHANNELS") ? "stereo" : "default"; }
 int cfg_bool(const char *name) {
-    if (!strcmp(name, "NX2NAVI_AUDIO_RAMP")) return ramp_setting;
+    if (!strcmp(name, "OOTPC_AUDIO_RAMP")) return ramp_setting;
     printf("unexpected setting %s\n", name);
     exit(2);
 }
@@ -281,7 +281,7 @@ static void ramps_off(void) {
     pass(r);
     v->in.volume = 1;
     pass(r);
-    CHECK(flat(buf(r, 0), 0.5f), "NX2NAVI_AUDIO_RAMP=0: the new volume applies to the whole pass");
+    CHECK(flat(buf(r, 0), 0.5f), "OOTPC_AUDIO_RAMP=0: the new volume applies to the whole pass");
     renderer_close(r);
     ramp_setting = 1;
 }

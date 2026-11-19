@@ -1,4 +1,4 @@
-"""Build nx2navi_dlssg.dll (runtime/dlssg/nx2_sl.cpp, DLSS Frame Generation through NVIDIA Streamline) with MSVC.
+"""Build ootpc_dlssg.dll (runtime/dlssg/nx2_sl.cpp, DLSS Frame Generation through NVIDIA Streamline) with MSVC.
 
     python tools/build_dlssg.py --sl <Streamline SDK folder with include/> [--out build/dlssg]
 
@@ -49,7 +49,7 @@ def main():
     src = ROOT / 'runtime' / 'dlssg' / 'nx2_sl.cpp'
     cmd = (f'call "{vcvars()}" >nul && cl /nologo /LD /O2 /EHsc /std:c++17 /W3 /DNOMINMAX /DWIN32_LEAN_AND_MEAN '
            f'/I"{a.sl / "include"}" /I"{inc}" /I"{src.parent}" "{src}" /Fo"{a.out}\\\\" '
-           f'/Fe"{a.out / "nx2navi_dlssg.dll"}" /link /NOLOGO')
+           f'/Fe"{a.out / "ootpc_dlssg.dll"}" /link /NOLOGO')
     with tempfile.NamedTemporaryFile('w', suffix='.cmd', delete=False) as f:
         # vcvars64.bat runs vswhere itself and needs it on PATH
         f.write('@echo off\r\nset "PATH=%PATH%;' + str(VSWHERE.parent) + '"\r\n' + cmd + '\r\n')
@@ -58,9 +58,9 @@ def main():
         r = subprocess.run(['cmd', '/c', script])
     finally:
         os.unlink(script)
-    if r.returncode or not (a.out / 'nx2navi_dlssg.dll').is_file():
+    if r.returncode or not (a.out / 'ootpc_dlssg.dll').is_file():
         sys.exit(f'the build failed ({r.returncode})')
-    print(a.out / 'nx2navi_dlssg.dll')
+    print(a.out / 'ootpc_dlssg.dll')
 
 
 if __name__ == '__main__':

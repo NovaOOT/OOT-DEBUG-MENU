@@ -1,7 +1,7 @@
 // Contains code Copyright (c) 2026 MacNativeGames contributors, Copyright (c) Ryujinx Team and Contributors (MIT; see
 // THIRD_PARTY_NOTICES.md).
-#ifndef NX2NAVI_AUDIO_REVERB_H
-#define NX2NAVI_AUDIO_REVERB_H
+#ifndef OOTPC_AUDIO_REVERB_H
+#define OOTPC_AUDIO_REVERB_H
 #include <stdint.h>
 typedef struct {
     uint8_t input[6], output[6]; uint16_t channel_max, channels;

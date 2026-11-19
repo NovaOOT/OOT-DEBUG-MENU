@@ -1,4 +1,4 @@
-// Low latency without frame generation (NX2NAVI_LOW_LATENCY: 0 off, 1 on, 2 on with boost; default 0). In a run that
+// Low latency without frame generation (OOTPC_LOW_LATENCY: 0 off, 1 on, 2 on with boost; default 0). In a run that
 // starts with it on, a change takes effect at once; a run that starts with it off makes its device without the
 // drivers' extensions (vk_device.c create_device), so turning it on then takes a restart.
 //
@@ -28,7 +28,7 @@
 //   up for the sleep, as around every host wait.
 // - guest thread, the frame's first nvnQueueSubmitCommands (vk_lowlat_submit_start): simulation end, render submit
 //   start. The game's own threads cannot be told apart, so the simulation ends where the first commands are handed over.
-// - the thread that replays (the guest's, or the replay thread with NX2NAVI_REPLAY_ASYNC), at the frame's present
+// - the thread that replays (the guest's, or the replay thread with OOTPC_REPLAY_ASYNC), at the frame's present
 //   (vk_lowlat_submitted): render submit end. Its queue submissions are tagged in vk_sync.c queue_submit.
 // - present thread (gfx_present.c flip_locked): the present stage or the present markers around the host present.
 // The frame's number is the count of the game's presents, as vk_backend.c numbers the frame it hands to the present
@@ -43,11 +43,11 @@
 // plays (nvn_api_obj.c pace keeps the movie's slots through a late frame, which a driver's limiter does not), while no
 // host present goes out (a minimized window: the driver would have nothing to time its sleep by, so the sleep is left
 // out too), and before the first host present. RivaTuner Statistics Server is kept out as with frame generation
-// (frame_rate.c frame_step_cap_ns): it would hold the finished picture as the pacer did. NX2NAVI_PACE_SMOOTH and
-// NX2NAVI_FRAME_HOLD_MS act on the present thread as before.
+// (frame_rate.c frame_step_cap_ns): it would hold the finished picture as the pacer did. OOTPC_PACE_SMOOTH and
+// OOTPC_FRAME_HOLD_MS act on the present thread as before.
 //
 // Frame generation. DLSS Frame Generation through the vendor's interposer brings its own low latency
-// (vk_dlssg.c, NX2NAVI_REFLEX): a device its proxies make does not get these extensions and this path stays off for
+// (vk_dlssg.c, OOTPC_REFLEX): a device its proxies make does not get these extensions and this path stays off for
 // the run. AMD's frame generation puts its own swapchain object in the window swapchain's place, which NVIDIA's calls
 // cannot be given, so NVIDIA's path is off while it is there and on again with the plain swapchain; AMD's path has no
 // swapchain in its calls and runs beside it. NVIDIA's frame generation with the runtime's own presenter (gfx_present.c
@@ -120,11 +120,11 @@ static struct {
     uint64_t n_sleep, sleep_ns, n_input, n_unheld, n_timeout;
 } L = {.why = VK_LOWLAT_NO_DRIVER, .mode = MODE_UNSET};
 
-// NX2NAVI_LOW_LATENCY as a number, parsed again when a setting changed.
+// OOTPC_LOW_LATENCY as a number, parsed again when a setting changed.
 static int level_now(void) {
     unsigned v = cfg_version();
     if (!LOAD(&L.cfg_read) || v != LOAD(&L.cfg_seen)) {
-        int n = cfg_int("NX2NAVI_LOW_LATENCY");
+        int n = cfg_int("OOTPC_LOW_LATENCY");
         STORE(&L.level, n < 0 ? 0 : n > 2 ? 2 : n);
         STORE(&L.cfg_seen, v);
         STORE(&L.cfg_read, 1);
@@ -418,7 +418,7 @@ static void nv_report(char *out, size_t cap) {
              sub / used, pres / used, drv / used, osq / used, gpu / used);
 }
 
-// One line after the first 600 frames the path followed and every 3600 after that (every 600 with NX2NAVI_TRACE=perf):
+// One line after the first 600 frames the path followed and every 3600 after that (every 600 with OOTPC_TRACE=perf):
 // how many frame starts the driver held and for how long, where they were held, and the driver's report.
 static void stats(uint64_t frame) {
     static uint64_t shown, next = 600;   // the present thread's
@@ -485,8 +485,8 @@ void vk_lowlat_init(VkCtx *c) {
     STORE(&L.pace_bad, 0);
     if (vk_dlssg_dpa()) {
         L.why = VK_LOWLAT_DLSSG;
-        rt_log("lowlat: DLSS Frame Generation's interposer owns low latency in this run (NX2NAVI_REFLEX); the direct "
-               "path is off (NX2NAVI_LOW_LATENCY=%d)", level);
+        rt_log("lowlat: DLSS Frame Generation's interposer owns low latency in this run (OOTPC_REFLEX); the direct "
+               "path is off (OOTPC_LOW_LATENCY=%d)", level);
         return;
     }
     if (c->has_low_latency2) {
@@ -502,7 +502,7 @@ void vk_lowlat_init(VkCtx *c) {
             L.present_ids = c->has_present_id;
             L.kind = LL_NV;
             rt_log("lowlat: NVIDIA's low latency through VK_NV_low_latency2 (presents %s the frame's number): %s "
-                   "(NX2NAVI_LOW_LATENCY=%d)", L.present_ids ? "carry" : "do not carry",
+                   "(OOTPC_LOW_LATENCY=%d)", L.present_ids ? "carry" : "do not carry",
                    level == 2 ? "on with boost" : level ? "on" : "off", level);
             return;
         }
@@ -511,19 +511,19 @@ void vk_lowlat_init(VkCtx *c) {
         L.antilag = (PFN_vkAntiLagUpdateAMD)vk_dpa(c->device, "vkAntiLagUpdateAMD");
         if (L.antilag) {
             L.kind = LL_AMD;
-            rt_log("lowlat: AMD's Anti-Lag through VK_AMD_anti_lag: %s (NX2NAVI_LOW_LATENCY=%d)", level ? "on" : "off", level);
+            rt_log("lowlat: AMD's Anti-Lag through VK_AMD_anti_lag: %s (OOTPC_LOW_LATENCY=%d)", level ? "on" : "off", level);
             return;
         }
         rt_log("lowlat: VK_AMD_anti_lag is enabled but its entry point is missing");
     }
     if (c->lists_low_latency) {
         L.why = VK_LOWLAT_RESTART;
-        rt_log("lowlat: the driver has a low-latency mode; this run started with NX2NAVI_LOW_LATENCY off and made its "
+        rt_log("lowlat: the driver has a low-latency mode; this run started with OOTPC_LOW_LATENCY off and made its "
                "device without it, so the setting takes effect at the next start");
         return;
     }
     rt_log("lowlat: this driver has neither VK_NV_low_latency2 nor VK_AMD_anti_lag: no low-latency mode%s",
-           level ? " (NX2NAVI_LOW_LATENCY does nothing here)" : "");
+           level ? " (OOTPC_LOW_LATENCY does nothing here)" : "");
 }
 
 void vk_lowlat_release(void) {

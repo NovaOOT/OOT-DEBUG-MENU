@@ -1,4 +1,4 @@
-// nx2navi.exe --probe-meshfb: the mesh shader fallback (mesh_fb.c, vk_mesh_fb.c, vk_exec_draw.c "mesh fallback").
+// ocarina.exe --probe-meshfb: the mesh shader fallback (mesh_fb.c, vk_mesh_fb.c, vk_exec_draw.c "mesh fallback").
 //
 // Draw part, no game files: two mesh programs of the runtime's own in the shape the translator gives one
 // (shaders/meshfb_probe_*.mesh, .task), one without a task stage and one fed by a task program, drawn through the
@@ -6,7 +6,7 @@
 // Each picture is drawn twice, through VK_EXT_mesh_shader and through the fallback, and the two are compared texel by
 // texel; without mesh shaders on the device only the fallback draws, and the probe says that nothing was compared.
 //
-// Module part, with NX2NAVI_PROBE_MESHFB_DIR=<dir>: every "<name>" of <dir>/list.txt names <dir>/<name>.in (a stored
+// Module part, with OOTPC_PROBE_MESHFB_DIR=<dir>: every "<name>" of <dir>/list.txt names <dir>/<name>.in (a stored
 // shader input, gfx_shader.c in_store: control section and code) and <dir>/<name>.spv (its translation). The compute
 // module and, for a mesh program, a vertex module are written to <dir>/out/<name>.cs.spv and .vs.spv for spirv-val
 // (work the caller does; tests of game shaders stay outside the repository). Where <dir>/<name>.res.json (the
@@ -410,7 +410,7 @@ static int draw_part(const GfxBackend *b, uint8_t *guest) {
 }
 
 int probe_meshfb(void) {
-    const char *dir = cfg_get("NX2NAVI_PROBE_MESHFB_DIR");
+    const char *dir = cfg_get("OOTPC_PROBE_MESHFB_DIR");
     if (dir && *dir) return modules_part(dir);
     vk_hdr_off();
     const GfxBackend *b = &gfx_vulkan_backend;

@@ -10,7 +10,9 @@
 #include "cfg.h"
 #include "clip.h"
 #include "debug_tools.h"
+#include "debug_watch.h"
 #include "input_map.h"
+#include "midi_ocarina.h"
 #include "platform/platform.h"
 #include "ui/menu.h"
 
@@ -19,6 +21,7 @@ typedef struct {
     void (*run)(void);
     const char *dflt;   // the bind while the setting is unset, or NULL
     int always;         // runs on any game version (not a debug tool of the game's memory)
+    int paused;         // also runs while the game is paused (dbg_bind_run_paused)
 } Action;
 
 static void say(const char *what, int on) {
@@ -27,7 +30,7 @@ static void say(const char *what, int on) {
     dbg_toast_show(t);
 }
 
-// A setting the renderer or the overlay reads at once, flipped and written to nx2navi.ini a moment later.
+// A setting the renderer or the overlay reads at once, flipped and written to OOT-PC.ini a moment later.
 static int flip_setting(const char *key) {
     int on = !cfg_bool(key);
     cfg_set(key, on ? "1" : "0");
@@ -65,17 +68,18 @@ static void a_onehit(void) { dbg_one_hit(!dbg_one_hit_on()), say("One-hit kills"
 static void a_magic(void) { dbg_magic_infinite(!dbg_magic_infinite_on()), say("Infinite magic", dbg_magic_infinite_on()); }
 static void a_items(void) { dbg_items_infinite(!dbg_items_infinite_on()), say("Infinite items", dbg_items_infinite_on()); }
 static void a_anyage(void) { dbg_any_age_items(!dbg_any_age_items_on()), say("Items at any age (WIP)", dbg_any_age_items_on()); }
-static void a_fog(void) { say("Fog off", flip_setting("NX2NAVI_DEBUG_FOG_OFF")); }
-static void a_walls(void) { say("Invisible walls", flip_setting("NX2NAVI_DEBUG_VIEW_WALLS")); }
-static void a_loading(void) { say("Loading zones", flip_setting("NX2NAVI_DEBUG_VIEW_LOADING")); }
-static void a_triggers(void) { say("Trigger zones", flip_setting("NX2NAVI_DEBUG_VIEW_TRIGGERS")); }
-static void a_hidden(void) { say("Hidden things", flip_setting("NX2NAVI_DEBUG_VIEW_HIDDEN")); }
-static void a_death(void) { say("Death barriers", flip_setting("NX2NAVI_DEBUG_VIEW_DEATH")); }
-static void a_hook(void) { say("Hookshot targets", flip_setting("NX2NAVI_DEBUG_VIEW_HOOKSHOT")); }
-static void a_bombs(void) { say("Bomb paths", flip_setting("NX2NAVI_DEBUG_VIEW_BOMBS")); }
-static void a_coll(void) { say("Collision", flip_setting("NX2NAVI_DEBUG_VIEW_COLLISION")); }
-static void a_hide(void) { say("Hide meshes", flip_setting("NX2NAVI_DEBUG_HIDE_MESHES")); }
-static void a_health(void) { say("Enemy health", flip_setting("NX2NAVI_DEBUG_VIEW_HEALTH")); }
+static void a_fog(void) { say("Fog off", flip_setting("OOTPC_DEBUG_FOG_OFF")); }
+static void a_walls(void) { say("Invisible walls", flip_setting("OOTPC_DEBUG_VIEW_WALLS")); }
+static void a_loading(void) { say("Loading zones", flip_setting("OOTPC_DEBUG_VIEW_LOADING")); }
+static void a_triggers(void) { say("Trigger zones", flip_setting("OOTPC_DEBUG_VIEW_TRIGGERS")); }
+static void a_hidden(void) { say("Hidden things", flip_setting("OOTPC_DEBUG_VIEW_HIDDEN")); }
+static void a_death(void) { say("Death barriers", flip_setting("OOTPC_DEBUG_VIEW_DEATH")); }
+static void a_void(void) { say("Void-out zones", flip_setting("OOTPC_DEBUG_VIEW_VOID")); }
+static void a_hook(void) { say("Hookshot targets", flip_setting("OOTPC_DEBUG_VIEW_HOOKSHOT")); }
+static void a_bombs(void) { say("Bomb paths", flip_setting("OOTPC_DEBUG_VIEW_BOMBS")); }
+static void a_coll(void) { say("Collision", flip_setting("OOTPC_DEBUG_VIEW_COLLISION")); }
+static void a_hide(void) { say("Hide meshes", flip_setting("OOTPC_DEBUG_HIDE_MESHES")); }
+static void a_health(void) { say("Enemy health", flip_setting("OOTPC_DEBUG_VIEW_HEALTH")); }
 static void a_pos(void) { readout(DBG_SHOW_POS, "Position readout"); }
 static void a_speed(void) { readout(DBG_SHOW_SPEED, "Speed readout"); }
 static void a_area(void) { readout(DBG_SHOW_AREA, "Area readout"); }
@@ -86,6 +90,30 @@ static void a_age(void) {
 }
 static void a_save(void) { dbg_toast_show(dbg_slot_save(0) ? "Position saved to slot 1" : "No player to save"); }
 static void a_load(void) { dbg_toast_show(dbg_slot_load(0) ? "Moved to slot 1" : "Slot 1 is empty or no player"); }
+// Pause, frame advance and resume (debug_tools.c dbg_pause_set, dbg_step). While paused the game's input poll stands
+// still with the game thread, so these three are read from the pause itself (dbg_bind_run_paused).
+static void a_pause(void) {
+    if (dbg_paused()) {
+        dbg_toast_show("Already paused");
+        return;
+    }
+    dbg_pause_set(1);
+    dbg_toast_show("Paused");
+}
+static void a_advance(void) {
+    char t[64];
+    dbg_step(1);
+    snprintf(t, sizeof t, "Frame +%llu", (unsigned long long)dbg_paused_frames() + 1);
+    dbg_toast_show(t);
+}
+static void a_resume(void) {
+    if (!dbg_paused()) {
+        dbg_toast_show("Not paused");
+        return;
+    }
+    dbg_pause_set(0);
+    dbg_toast_show("Resumed");
+}
 static void a_ssave(void) { dbg_state_save(0), dbg_toast_show(dbg_state_note()); }
 static void a_sload(void) { dbg_state_load(0), dbg_toast_show(dbg_state_note()); }
 static void a_slower(void) {
@@ -104,6 +132,20 @@ static void a_igt(void) {
     dbg_toast_show(dbg_igt_running() ? "Speedrun timer started" : "Speedrun timer stopped");
 }
 static void a_clip(void) { clip_save(); }
+// Starts or stops the change monitor (debug_watch.c), which logs every change to the game's flags into a file of its own
+// in the flag_captures folder next to the game. The toast names the file.
+static void a_flags(void) {
+    char t[160];
+    if (dbg_watch_on()) {
+        dbg_watch_set(0);
+        snprintf(t, sizeof t, "Flag capture stopped: %d changes, report in %s", dbg_watch_changes(), dbg_watch_report());
+    } else {
+        dbg_watch_set(1);
+        if (dbg_watch_on()) snprintf(t, sizeof t, "Flag capture started: %s", dbg_watch_file());
+        else snprintf(t, sizeof t, "Flag capture: the game's flags are not available here");
+    }
+    dbg_toast_show(t);
+}
 static void a_split(void) {
     char t[48];
     dbg_igt_split();
@@ -112,13 +154,20 @@ static void a_split(void) {
 }
 
 // The order of the Debug tab's Hotkeys group. A name is the setting's suffix; renaming one loses the players' binds.
+static void a_midi(void) {
+    if (!midi_oc_loaded()) { dbg_toast_show("No MIDI file chosen (Debug tab, Ocarina MIDI player)"); return; }
+    midi_oc_toggle();
+    int st = midi_oc_state();
+    dbg_toast_show(st == MIDI_OC_WAITING || st == MIDI_OC_PLAYING ? "MIDI on the ocarina: play" : "MIDI on the ocarina: stopped");
+}
+
 static const Action actions[] = {
     {{"fly", "Fly (no clip)", "Switches Fly on and off: walls and the ground do not stop the player."}, a_fly},
     {{"hover", "Hover", "Switches Hover on and off: the player keeps the height it was switched on at."}, a_hover},
     {{"hoverboots", "Infinite Hover Boots", "Switches Infinite Hover Boots on and off."}, a_boots},
     {{"novoid", "No void-out", "Switches No void-out on and off."}, a_novoid},
     {{"bombbug", "PastyPixel's Bomb T-Pose", "Switches PastyPixel's Bomb T-Pose on and off."}, a_bombbug},
-    {{"ragdoll", "Ragdoll", "Drops Link into the game's own ragdoll; he gets back up a second after he lies still."}, a_ragdoll},
+    {{"ragdoll", "Ragdoll", "Throws Link forwards, the way he faces, into the ragdoll a bomb's blast starts; he gets back up a second after he lies still."}, a_ragdoll},
     {{"kill", "Kill Link", "Sets Link's health to zero, so he dies as he would from damage."}, a_kill},
     {{"god", "Invulnerable", "Switches Invulnerable on and off."}, a_god},
     {{"onehit", "One-hit kills", "Switches One-hit kills on and off."}, a_onehit},
@@ -129,6 +178,9 @@ static const Action actions[] = {
     {{"ageswitch", "Switch age here", "Warps into this area's version for the other age, where it has one."}, a_age},
     {{"savepos", "Save position", "Keeps the player's position in slot 1."}, a_save},
     {{"loadpos", "Go to saved position", "Moves the player to the position kept in slot 1."}, a_load},
+    {{"pause", "Pause gameplay", "Stops the game on the current frame; the picture and the menu stay live."}, a_pause, NULL, 0, 1},
+    {{"frameadvance", "Advance one frame", "Lets one frame of the game through, then stops again. Pauses first when the game is running."}, a_advance, NULL, 0, 1},
+    {{"resume", "Resume gameplay", "Lets the paused game run on."}, a_resume, NULL, 0, 1},
     {{"savestate", "Save state 1", "Keeps the game's state in save state 1 (Save states, above)."}, a_ssave},
     {{"loadstate", "Load state 1", "Puts save state 1 back, warping to its area first when needed."}, a_sload},
     {{"slower", "Game speed down", "One step slower, down to an eighth."}, a_slower},
@@ -138,7 +190,8 @@ static const Action actions[] = {
     {{"loading", "Show loading zones", "Switches the loading zones overlay. Saved in the settings."}, a_loading},
     {{"triggers", "Show trigger zones", "Switches the trigger zones overlay. Saved in the settings."}, a_triggers},
     {{"hidden", "Show hidden things", "Switches the hidden things overlay. Saved in the settings."}, a_hidden},
-    {{"death", "Show death barriers", "Switches the death barriers and void-out zones overlay. Saved in the settings."}, a_death},
+    {{"death", "Show death barriers", "Switches the death barriers overlay. Saved in the settings."}, a_death},
+    {{"void", "Show void-out zones", "Switches the void-out zones overlay. Saved in the settings."}, a_void},
     {{"hookshot", "Show hookshot targets", "Switches the hookshot targets overlay. Saved in the settings."}, a_hook},
     {{"bombpaths", "Show bomb paths", "Switches the bomb paths overlay. Saved in the settings."}, a_bombs},
     {{"collision", "Show collision", "Switches the collision overlay. Saved in the settings."}, a_coll},
@@ -151,6 +204,8 @@ static const Action actions[] = {
     {{"timer", "Timer start / stop", "Starts or stops the timer."}, a_timer},
     {{"igt", "Speedrun timer start / stop", "Starts or pauses the speedrun timer."}, a_igt},
     {{"split", "Speedrun timer split", "Takes a split, named after the current area."}, a_split},
+    {{"flagcapture", "Flag capture start / stop", "Starts or stops a flag capture: every change to the game's flags, written to a new file in the flag_captures folder next to the game, with a Markdown report beside it (Change monitor, above)."}, a_flags, "key:home"},
+    {{"midi", "Ocarina MIDI player: play / stop", "Starts or stops the MIDI file chosen in the Ocarina MIDI player (above); started without the ocarina out, it waits for it."}, a_midi},
     {{"clip", "Save clip", "Saves the last seconds of play as an MP4 in the clips folder (Clips, below)."}, a_clip, "key:f5", 1},
 };
 enum { N = sizeof actions / sizeof *actions };
@@ -160,7 +215,7 @@ int dbg_bind_count(void) { return N; }
 const DbgBindInfo *dbg_bind_info(int i) { return i >= 0 && i < N ? &actions[i].info : NULL; }
 
 static void setting_of(int i, char *out, size_t n) {
-    snprintf(out, n, "NX2NAVI_DEBUG_HOTKEY_%s", actions[i].info.name);
+    snprintf(out, n, "OOTPC_DEBUG_HOTKEY_%s", actions[i].info.name);
     for (char *p = out; *p; p++)
         if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 'a' + 'A');
 }
@@ -227,7 +282,7 @@ void dbg_bind_set(int i, const uint8_t keys[DBG_BIND_KEYS], uint8_t pad) {
         cfg_set(name, v);
     } else if (actions[i].dflt) {   // nothing bound, where the default would come back if the line went
         cfg_set(name, "none");
-    } else {   // nothing bound: the line leaves nx2navi.ini
+    } else {   // nothing bound: the line leaves OOT-PC.ini
         const char *k = name;
         cfg_reset(&k, 1);
     }
@@ -291,15 +346,20 @@ void dbg_bind_run(uint64_t actions_fired) {
         if (actions_fired >> i & 1) actions[i].run();
 }
 
+void dbg_bind_run_paused(uint64_t actions_fired) {
+    for (int i = 0; i < N; i++)
+        if (actions_fired >> i & 1 && actions[i].paused) actions[i].run();
+}
+
 int dbg_menu_button(void) {
-    if (!cfg_bool("NX2NAVI_DEBUG_MENU_PAD")) return 0;
-    const char *v = cfg_value("NX2NAVI_DEBUG_MENU_BUTTON");
+    if (!cfg_bool("OOTPC_DEBUG_MENU_PAD")) return 0;
+    const char *v = cfg_value("OOTPC_DEBUG_MENU_BUTTON");
     return v ? pad_named(v, strlen(v)) : 0;
 }
 
 void dbg_menu_button_set(int pad) {
     const char *n = pad ? input_pad_name(pad) : NULL;
-    cfg_set("NX2NAVI_DEBUG_MENU_BUTTON", n ? n : "none");
+    cfg_set("OOTPC_DEBUG_MENU_BUTTON", n ? n : "none");
 }
 
 int dbg_menu_button_closes(int pad) {
@@ -308,7 +368,7 @@ int dbg_menu_button_closes(int pad) {
 }
 
 // The game's bool flag Sequence_IsPause is 1 while its pause menu is open (seen in game: 1 with the Equipment page up, 0
-// once it closed). Read from the flag store (debug_tools.c), which a helper thread finds on first use: until then, and
+// once it closed); its other menus show on the UI screen enum. Read from the flag store (debug_tools.c), which a helper thread finds on first use: until then, and
 // before a save is loaded, the menu counts as closed. One read per 10 ms at most: the poll asks several times in a row.
 int dbg_game_menu_open(void) {
     static uint32_t key;
@@ -316,8 +376,15 @@ int dbg_game_menu_open(void) {
     static int last;
     uint64_t now = plat_now_ns();
     if (at && now - at < 10000000ull) return last;
-    if (!key) key = dbg_flag_key("Sequence_IsPause");
+    static uint32_t none, ocarina, loading;
+    if (!key) key = dbg_flag_key("Sequence_IsPause"), none = dbg_flag_key("None"), ocarina = dbg_flag_key("Ocarina"),
+                    loading = dbg_flag_key("Loading");
     at = now;
-    last = dbg_available() && dbg_flag_get_bool(key) == 1;
+    // the UI screen (the enum debug_move.c reads, key 0x578d41e1): any screen but None, Ocarina and Loading is a menu
+    // of the game's (the title, its save list, save and option prompts, game over), where the D-pad moves its cursor
+    uint32_t screen = 0;
+    int on_screen = dbg_available() && dbg_flag_get_u32(DBG_FLAG_ENUM, 0x578d41e1u, &screen) && screen != none &&
+                    screen != ocarina && screen != loading;
+    last = dbg_available() && (dbg_flag_get_bool(key) == 1 || on_screen);
     return last;
 }

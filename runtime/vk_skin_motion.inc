@@ -1,4 +1,4 @@
-// Motion vectors for every skinned character (NX2NAVI_SKIN_MOTION, skin_motion in nx2navi.ini; game 1.1.1). The
+// Motion vectors for every skinned character (OOTPC_SKIN_MOTION, skin_motion in OOT-PC.ini; game 1.1.1). The
 // player's meshes get their own motion through ownership records (motion_owner.c, vk_fg_pose.inc): a draw is the
 // player's when a block it binds belongs to a model of the player's actor. People, animals and enemies have no such
 // record, so the camera's motion was all they got, and DLSS and FSR 3.1 smeared them as they moved. This file gives
@@ -111,7 +111,7 @@ static struct {
 
 static int skin_enabled(void) {
     static int on = -1;
-    if (on < 0) on = RT_OOT && cfg_bool("NX2NAVI_SKIN_MOTION");
+    if (on < 0) on = RT_OOT && cfg_bool("OOTPC_SKIN_MOTION");
     return on;
 }
 

@@ -55,7 +55,7 @@ int romfs_prompts_off(const char *folder);
 // (action_prompt.c); -1 when the layout by label was asked for but the layout file could not be changed.
 int romfs_action_prompt(void);
 const char *romfs_overlay(size_t k, const char **file, uint64_t *size, int *is_added);   // RomFS path of overlay k
-void fs_trace(const char *what, const char *path);         // NX2NAVI_TRACE=fs: one line per open
+void fs_trace(const char *what, const char *path);         // OOTPC_TRACE=fs: one line per open
 
 // ---- fs_host.c
 void fs_host_set_profile(const char *dir);                 // profile directory; before the first storage mount only

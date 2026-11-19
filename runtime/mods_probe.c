@@ -1,4 +1,4 @@
-// --probe-mods: the mods folder scan, its order and switches (mods.c). Builds a mods folder of its own next to nx2navi.exe,
+// --probe-mods: the mods folder scan, its order and switches (mods.c). Builds a mods folder of its own next to ocarina.exe,
 // scans it and removes it. Needs no game files.
 #include <stdio.h>
 #include <string.h>
@@ -115,12 +115,12 @@ int probe_mods(void) {
     int linked = dir_link(outside, link);
     if (!linked) printf("mods: no symbolic link made (developer mode off?); the linked folder check is skipped\n");
 
-    cfg_set("NX2NAVI_MODS_DIR", "mods-probe");   // relative: under the folder of nx2navi.exe
-    cfg_set("NX2NAVI_MODS_ORDER", "B|A|Gone");
-    cfg_set("NX2NAVI_MODS_DISABLED", "C");
+    cfg_set("OOTPC_MODS_DIR", "mods-probe");   // relative: under the folder of ocarina.exe
+    cfg_set("OOTPC_MODS_ORDER", "B|A|Gone");
+    cfg_set("OOTPC_MODS_DISABLED", "C");
     mods_scan();
 
-    CHECK(ends_with(mods_dir(), "/mods-probe"), "a relative mods_dir is under the folder of nx2navi.exe");
+    CHECK(ends_with(mods_dir(), "/mods-probe"), "a relative mods_dir is under the folder of ocarina.exe");
     static const char *const order[] = {"B", "A", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P",
                                         "Q", "Ultra \xD0\x96"};
     enum { N = sizeof order / sizeof *order };
@@ -171,7 +171,7 @@ int probe_mods(void) {
 
         mods_move(1, -1);
         CHECK(EQ(mods_at(0)->name, "A") && EQ(mods_at(1)->name, "B"), "move up");
-        CHECK(EQ(cfg_get("NX2NAVI_MODS_ORDER"), linked ? "A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|Ultra \xD0\x96"
+        CHECK(EQ(cfg_get("OOTPC_MODS_ORDER"), linked ? "A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|Ultra \xD0\x96"
                                                        : "A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Ultra \xD0\x96"),
               "order written without the gone name");
         mods_move(0, -1);
@@ -179,10 +179,10 @@ int probe_mods(void) {
         mods_move(n_want - 1, 1);
         CHECK(EQ(mods_at(n_want - 1)->name, "Ultra \xD0\x96"), "move down at the bottom does nothing");
         mods_set_enabled(2, 1);
-        const char *dis = cfg_get("NX2NAVI_MODS_DISABLED");
+        const char *dis = cfg_get("OOTPC_MODS_DISABLED");
         CHECK(mods_at(2)->enabled && (!dis || !*dis), "switching C on empties mods_disabled");
         mods_set_enabled(0, 0);
-        CHECK(EQ(cfg_get("NX2NAVI_MODS_DISABLED"), "A"), "switching A off writes it");
+        CHECK(EQ(cfg_get("OOTPC_MODS_DISABLED"), "A"), "switching A off writes it");
         CHECK(mods_changed(), "changes seen");
 
         // the ExeFS patch files waiting for the rebuild follow the mods' start state, wherever the menu moved them:

@@ -1,5 +1,5 @@
 // The count a samples-passed report writes when the replay could not count all of its draws (vk_exec_xfer.c oq_cb,
-// NX2NAVI_OQ_HOLD). Header only, so that tests/oq_hold_check.c checks it without a device.
+// OOTPC_OQ_HOLD). Header only, so that tests/oq_hold_check.c checks it without a device.
 //
 // A draw that finds every slot of the occlusion query ring still waiting for the completion thread is left uncounted,
 // and the report after it says only what the other draws counted, at least 1. The game reads these counts as how much

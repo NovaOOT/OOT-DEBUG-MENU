@@ -36,7 +36,7 @@ built from your own dump.
 - **Reload area** (menu, console or F12): back into the area at the entrance you came in by, to retry a trick or a route
 - **Fog off**: removes the volumetric fog live (the haze of the forests and the field), from the menu or the console
 - **Plant draw distance**: grass, bushes, flowers and low trees drawn up to 8 times further out (or less, for speed)
-- **See the invisible**: invisible walls (placed ones and the ones in the level's collision), loading zones, trigger zones (each named with what it triggers), hidden things (grottos, Gold Skulltulas, heart pieces, chests) and **death barriers** (the kill plane under the world, lava surfaces, bottomless pits, quicksand) drawn over the game and through walls, as wireframe, solid colour or both, with a neon colour per kind
+- **See the invisible**: invisible walls (placed ones and the ones in the level's collision), loading zones, trigger zones (each named with what it triggers), hidden things (grottos, Gold Skulltulas, heart pieces, chests), **death barriers** (the kill plane under the world, lava surfaces, bottomless pits, quicksand) and **void-out zones** (every volume that sends you back with a heart less, read from the level's own logic, and the spots with no volume where the game's fall check voids you out anyway, read from its volume statistics) drawn over the game and through walls, as wireframe, solid colour or both, with a neon colour per kind
 - **Hookshot targets**: the surfaces the hookshot sticks to (wooden walls and posts, ivy, ladders, nets) and the targets themselves, read from the game's own collision files
 - **Enemy health** shown above every enemy nearby
 - **Game speed**: slow motion and fast forward from 0.05x to 8x

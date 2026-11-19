@@ -1,12 +1,12 @@
-/* OOT-DEBUG-MENU-Setup.exe: the one-click setup. This program with the launcher's folder appended as a zip.
+/* OOT-PC-Setup.exe: the one-click setup. This program with the launcher's folder appended as a zip.
 
-   It unpacks the zip into %LOCALAPPDATA%\Programs\OOT-DEBUG-MENU (no administrator rights), adds the Start menu and Desktop
-   shortcuts and the entry in Settings > Apps, and starts OOT-DEBUG-MENU.exe with --from <the setup's folder>, where the
+   It unpacks the zip into %LOCALAPPDATA%\Programs\OOT-PC (no administrator rights), adds the Start menu and Desktop
+   shortcuts and the entry in Settings > Apps, and starts OOT-PC.exe with --from <the setup's folder>, where the
    launcher looks for the player's dump first. A small window in the launcher's colours shows while it unpacks.
    When the folder already holds a newer version than the setup carries, the setup leaves the files alone (the
    launcher updates itself) and only repairs the shortcuts.
 
-   The end of the file is a trailer: "NX2NSET1", the zip's offset and size (u64 little endian) and the version (24
+   The end of the file is a trailer: "OOTPSET1", the zip's offset and size (u64 little endian) and the version (24
    bytes, NUL padded), written by tools/make_launcher.py. The zip is read here with zlib's inflate, so the setup
    needs nothing from Windows beyond its own DLLs.
 
@@ -77,7 +77,7 @@ static int read_trailer(void)
     if (ok) {
         li.QuadPart = size.QuadPart - TRAILER;
         ok = SetFilePointerEx(f, li, NULL, FILE_BEGIN) && ReadFile(f, t, TRAILER, &got, NULL) && got == TRAILER &&
-             !memcmp(t, "NX2NSET1", 8);
+             !memcmp(t, "OOTPSET1", 8);
     }
     CloseHandle(f);
     if (!ok) return 0;
@@ -215,7 +215,7 @@ static int unzip(void)
         }
         if (!make_dirs(target)) { ok = 0; break; }
         if (!extract_entry(&z, local, csize, usize, method, crc, target)) {
-            fail_msg(L"%ls could not be written. Close OOT-DEBUG-MENU if it is open, then run the setup again.", target);
+            fail_msg(L"%ls could not be written. Close OOT-PC if it is open, then run the setup again.", target);
             free(cd);
             CloseHandle(z.f);
             return 0;
@@ -230,7 +230,7 @@ static int unzip(void)
 
 /* ---------------------------------------------------------------- the work */
 
-/* The installed release ver can start: its launcher (launcher/native/nx2navi.c release_ok) and the Python it runs on. */
+/* The installed release ver can start: its launcher (launcher/native/ootpc.c release_ok) and the Python it runs on. */
 static int installed_ok(const wchar_t *dest, const wchar_t *ver)
 {
     wchar_t p[PATHN];
@@ -256,11 +256,14 @@ static DWORD WINAPI work(void *arg)
         unzip();
     }
     if (!S.result) {
+        drop_legacy_shortcut(0);
+        drop_legacy_shortcut(1);
         if (S.shortcuts) {
             set_shortcut(S.dest, 0, 1);
             set_shortcut(S.dest, 1, 1);
         }
-        write_uninstall_entry(S.dest, newer_installed ? have : S.version, (DWORD)(S.written / 1024 + 1));
+        if (write_uninstall_entry(S.dest, newer_installed ? have : S.version, (DWORD)(S.written / 1024 + 1)))
+            RegDeleteKeyW(HKEY_CURRENT_USER, LEGACY_UNINSTALL_KEY);
     }
     if (g_wnd) PostMessageW(g_wnd, WM_DONE, 0, 0);
     return 0;
@@ -336,11 +339,11 @@ static void run_with_window(HINSTANCE inst)
     wc.hInstance = inst;
     wc.hCursor = LoadCursor(NULL, IDC_WAIT);
     wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(1));
-    wc.lpszClassName = L"OOT-DEBUG-MENUSetup";
+    wc.lpszClassName = L"OOT-PCSetup";
     RegisterClassW(&wc);
     int w = 440, h = 120;
     int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2, y = (GetSystemMetrics(SM_CYSCREEN) - h) / 3;
-    g_wnd = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName, L"OOT-DEBUG-MENU Setup", WS_POPUP | WS_VISIBLE, x, y, w, h,
+    g_wnd = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName, L"OOT-PC Setup", WS_POPUP | WS_VISIBLE, x, y, w, h,
                             NULL, NULL, inst, NULL);
     SetTimer(g_wnd, 1, 200, NULL);
     HANDLE t = CreateThread(NULL, 0, work, NULL, 0, NULL);
@@ -379,11 +382,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
             wcscat(base, L"\\Programs");
         }
         swprintf(S.dest, PATHN, L"%ls\\%ls", base, APP_NAME);
+        // an install from before the rename to OOT-PC: this setup updates it in its folder instead of adding a second
+        wchar_t old[PATHN], old_stub[PATHN];
+        swprintf(old, PATHN, L"%ls\\%ls", base, LEGACY_APP_NAME);
+        swprintf(old_stub, PATHN, L"%ls\\%ls", old, LEGACY_STUB);
+        if (!path_exists(S.dest) && path_exists(old_stub)) wcscpy(S.dest, old);
     }
     size_t dl = wcslen(S.dest);
     while (dl > 3 && (S.dest[dl - 1] == L'\\' || S.dest[dl - 1] == L'/')) S.dest[--dl] = 0;
     if (!read_trailer()) {
-        MessageBoxW(NULL, L"This setup is incomplete. Download OOT-DEBUG-MENU-Setup.exe again.", APP_NAME, MB_ICONERROR);
+        MessageBoxW(NULL, L"This setup is incomplete. Download OOT-PC-Setup.exe again.", APP_NAME, MB_ICONERROR);
         return 1;
     }
     if (S.quiet) work(NULL);
@@ -395,7 +403,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (S.launch) {
         static wchar_t cmd[PATHN * 3];
         wchar_t exe[PATHN];
-        swprintf(exe, PATHN, L"%ls\\OOT-DEBUG-MENU.exe", S.dest);
+        swprintf(exe, PATHN, L"%ls\\OOT-PC.exe", S.dest);
         swprintf(cmd, PATHN * 3, L"\"%ls\" --from \"%ls\"", exe, S.src_dir);
         STARTUPINFOW si = {.cb = sizeof si};
         PROCESS_INFORMATION pi;

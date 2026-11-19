@@ -11,7 +11,7 @@
 // voices to a block. A voice is free while its position is negative; the menu thread sets its sound first and its
 // position last (release), the audio thread reads them in the other order (acquire).
 //
-// NX2NAVI_MENU_SOUND_VOLUME (menu_sound_volume, 0 to 100, default 80; 0 is silent): the level, under the output volume.
+// OOTPC_MENU_SOUND_VOLUME (menu_sound_volume, 0 to 100, default 80; 0 is silent): the level, under the output volume.
 #include <math.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -125,11 +125,11 @@ static void load_all(void) {
     atomic_store_explicit(&loaded, 2, memory_order_release);
 }
 
-// The menu's level times the output volume (NX2NAVI_VOLUME, as the game's sound has it).
+// The menu's level times the output volume (OOTPC_VOLUME, as the game's sound has it).
 static float volume(void) {
-    const char *v = cfg_value("NX2NAVI_MENU_SOUND_VOLUME");
+    const char *v = cfg_value("OOTPC_MENU_SOUND_VOLUME");
     int n = v && *v ? atoi(v) : 80;
-    double master = cfg_double("NX2NAVI_VOLUME");
+    double master = cfg_double("OOTPC_VOLUME");
     if (master < 0) master = 0;
     if (master > 100) master = 100;
     return n <= 0 ? 0.0f : (float)((n >= 100 ? 1.0 : n / 100.0) * master / 100.0);

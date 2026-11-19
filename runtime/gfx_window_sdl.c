@@ -1,6 +1,6 @@
 // The SDL3 back end of the window (gfx_wsys.h), for hosts without Win32: the window on a thread of its own that also
-// runs SDL's event loop, F11 fullscreen (borderless, the desktop's mode), the settings NX2NAVI_WINDOW_SIZE,
-// NX2NAVI_FULLSCREEN and NX2NAVI_MONITOR, the display's refresh rate, focus, the Vulkan surface. The swapchain and the
+// runs SDL's event loop, F11 fullscreen (borderless, the desktop's mode), the settings OOTPC_WINDOW_SIZE,
+// OOTPC_FULLSCREEN and OOTPC_MONITOR, the display's refresh rate, focus, the Vulkan surface. The swapchain and the
 // present are gfx_present.c's. Keyboard and mouse events go to input_sdl.c and to the menu (ui/menu_sdl.cpp).
 //
 // SDL wants its video calls on the thread that initialised video, so this thread does them all: the others hand it
@@ -8,7 +8,7 @@
 // exists: the Vulkan instance asks for SDL's surface extensions first (gfx_window_vk_extensions), the window comes with
 // gfx_window_start (wsys_open).
 //
-// NX2NAVI_WINDOW_SIZE is in pixels. On a display that scales windows (Wayland, HiDPI) the window asks for its pixels in
+// OOTPC_WINDOW_SIZE is in pixels. On a display that scales windows (Wayland, HiDPI) the window asks for its pixels in
 // the display's units (SDL_GetWindowDisplayScale), and SDL reports mouse positions in those units: input_sdl.c and the
 // menu scale them back (gfx_window_sdl_density).
 #include <stdio.h>
@@ -71,7 +71,7 @@ static char g_applied_size[32];
 static int g_applied_fs;
 
 static void note_applied(void) {
-    snprintf(g_applied_size, sizeof g_applied_size, "%s", cfg_value("NX2NAVI_WINDOW_SIZE"));
+    snprintf(g_applied_size, sizeof g_applied_size, "%s", cfg_value("OOTPC_WINDOW_SIZE"));
     g_applied_fs = gfx_cfg_fullscreen();
 }
 
@@ -100,7 +100,7 @@ static void set_fullscreen(int on) {
 // Window thread: the window takes the size and fullscreen state of the settings when they changed. A window resized by
 // hand keeps its size when another setting changes.
 static void apply_settings(void) {
-    int size_changed = strcmp(cfg_value("NX2NAVI_WINDOW_SIZE"), g_applied_size) != 0, fs = gfx_cfg_fullscreen();
+    int size_changed = strcmp(cfg_value("OOTPC_WINDOW_SIZE"), g_applied_size) != 0, fs = gfx_cfg_fullscreen();
     int fs_changed = fs != g_applied_fs;
     note_applied();
     if (size_changed) {
@@ -147,7 +147,7 @@ static void density_update(void) {
 }
 
 // ---- the window thread
-// NX2NAVI_MONITOR's display while a Wayland compositor has yet to place the fullscreen window (open_window): SDL learns
+// OOTPC_MONITOR's display while a Wayland compositor has yet to place the fullscreen window (open_window): SDL learns
 // the output a Wayland window is on later, with a display, scale or mode change (Hyprland sends only the latter two).
 static SDL_DisplayID g_place_pending;
 
@@ -190,7 +190,7 @@ static void handle(const SDL_Event *e) {
         if (e->key.scancode == SDL_SCANCODE_F11 && !e->key.repeat &&
             !(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_GUI))) {
             set_fullscreen(!is_fullscreen());
-            cfg_set("NX2NAVI_FULLSCREEN", is_fullscreen() ? "1" : "0");   // the menu shows it; the next start keeps it
+            cfg_set("OOTPC_FULLSCREEN", is_fullscreen() ? "1" : "0");   // the menu shows it; the next start keeps it
             cfg_save();
             note_applied();
         }
@@ -226,7 +226,7 @@ static void handle(const SDL_Event *e) {
 static void window_main(void *arg) {
     (void)arg;
     g_window_tid = plat_thread_id();
-    SDL_SetHint(SDL_HINT_APP_ID, "nx2navi");   // Wayland's app id: the desktop file and the taskbar match it
+    SDL_SetHint(SDL_HINT_APP_ID, "ootpc");   // Wayland's app id: the desktop file and the taskbar match it
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "0");
     g_video_ok = SDL_Init(SDL_INIT_VIDEO);
     if (!g_video_ok) rt_log("gfx: SDL video init failed (%s)", SDL_GetError());
@@ -278,7 +278,7 @@ int gfx_window_vk_presentable(VkInstance inst, VkPhysicalDevice pd, uint32_t fam
     return video_up() && SDL_Vulkan_GetPresentationSupport(inst, pd, family);
 }
 
-// ---- monitor choice (NX2NAVI_MONITOR, --monitor, --list-monitors)
+// ---- monitor choice (OOTPC_MONITOR, --monitor, --list-monitors)
 // The monitors in SDL_GetDisplays order, which is the index the setting counts in (1-based) and --list-monitors prints.
 // The video driver sets that order, which need not match the desktop's own list of monitors: it holds while the same
 // monitors stay connected, but a monitor that appears or goes away can move the ones after it. SDL has one name per
@@ -332,7 +332,7 @@ static void monitor_line(const MonList *l, int i, char *out, size_t cap) {
 
 static int monitor_unset(const char *v) { return !v || !*v || !SDL_strcasecmp(v, "auto"); }
 
-// Which monitor of the list a NX2NAVI_MONITOR value (not empty, not auto) names, as a 0-based index; -1 when none.
+// Which monitor of the list a OOTPC_MONITOR value (not empty, not auto) names, as a 0-based index; -1 when none.
 // Rules, in this order: "primary"; all digits, a 1-based index; any other text, a case-insensitive substring of a
 // monitor's name (the first monitor in list order when several match). why gets the rule that matched, or the reason
 // nothing did. The same rules as gfx_window_win.c resolve_monitor, which also matches the GDI device name.
@@ -370,12 +370,12 @@ static int resolve_monitor(const MonList *l, const char *want, char *why, size_t
     return first;
 }
 
-// The monitor NX2NAVI_MONITOR picks, copied to *out; 0 when it is unset or auto (the system places the window), or when
+// The monitor OOTPC_MONITOR picks, copied to *out; 0 when it is unset or auto (the system places the window), or when
 // it matches nothing now (the monitors present are logged, and the default placement applies). log: say what was decided
 // and why. The window thread asks with log set; the size query below, which widescreen.c makes before the window
 // exists, stays quiet. Window thread.
 static int chosen_monitor(MonInfo *out, int log) {
-    const char *want = cfg_get("NX2NAVI_MONITOR");
+    const char *want = cfg_get("OOTPC_MONITOR");
     if (monitor_unset(want)) return 0;
     MonList l;
     char why[256], line[512];
@@ -384,7 +384,7 @@ static int chosen_monitor(MonInfo *out, int log) {
     else snprintf(why, sizeof why, "no monitor was found");
     if (pick < 0) {
         if (log) {
-            rt_log("gfx: NX2NAVI_MONITOR=%s picks no monitor (%s); the window gets the default placement. Monitors present:",
+            rt_log("gfx: OOTPC_MONITOR=%s picks no monitor (%s); the window gets the default placement. Monitors present:",
                    want, why);
             for (int i = 0; i < n; i++) {
                 monitor_line(&l, i, line, sizeof line);
@@ -395,13 +395,13 @@ static int chosen_monitor(MonInfo *out, int log) {
     }
     if (log) {
         monitor_line(&l, pick, line, sizeof line);
-        rt_log("gfx: NX2NAVI_MONITOR=%s picks monitor %s (%s)", want, line, why);
+        rt_log("gfx: OOTPC_MONITOR=%s picks monitor %s (%s)", want, line, why);
     }
     *out = l.m[pick];
     return 1;
 }
 
-// --list-monitors (main.c): one line per monitor, then what the current NX2NAVI_MONITOR would pick. No game files. It
+// --list-monitors (main.c): one line per monitor, then what the current OOTPC_MONITOR would pick. No game files. It
 // runs on the main thread before any window thread exists, so that thread initialises video here and shuts it down again.
 int list_monitors(void) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -421,13 +421,13 @@ int list_monitors(void) {
         monitor_line(&l, i, line, sizeof line);
         printf("%s\n", line);
     }
-    const char *want = cfg_get("NX2NAVI_MONITOR");
+    const char *want = cfg_get("OOTPC_MONITOR");
     if (monitor_unset(want)) {
-        printf("NX2NAVI_MONITOR is not set (auto): the system places the window\n");
+        printf("OOTPC_MONITOR is not set (auto): the system places the window\n");
     } else {
         int pick = resolve_monitor(&l, want, why, sizeof why);
-        if (pick >= 0) printf("NX2NAVI_MONITOR=%s picks monitor %d (%s)\n", want, pick + 1, why);
-        else printf("NX2NAVI_MONITOR=%s picks no monitor (%s)\n", want, why);
+        if (pick >= 0) printf("OOTPC_MONITOR=%s picks monitor %d (%s)\n", want, pick + 1, why);
+        else printf("OOTPC_MONITOR=%s picks no monitor (%s)\n", want, why);
     }
     SDL_Quit();
     return 0;
@@ -442,7 +442,7 @@ static void chosen_size(void *arg) {
 }
 
 // Pixels of the monitor the window is on; 0 when unknown. Before the window exists (widescreen.c wide_init at start) a
-// fullscreen window opens on the monitor NX2NAVI_MONITOR picks, so that one's size; without a choice the system decides
+// fullscreen window opens on the monitor OOTPC_MONITOR picks, so that one's size; without a choice the system decides
 // where the window goes, which is not known yet.
 int gfx_window_monitor_size(int *w, int *h) {
     if (g_win) {
@@ -453,7 +453,7 @@ int gfx_window_monitor_size(int *w, int *h) {
         return 1;
     }
     SizeReq r = {0};
-    if (monitor_unset(cfg_get("NX2NAVI_MONITOR")) || !video_up()) return 0;
+    if (monitor_unset(cfg_get("OOTPC_MONITOR")) || !video_up()) return 0;
     run_on_window(chosen_size, &r);
     *w = r.w, *h = r.h;
     return r.ok;
@@ -466,11 +466,11 @@ static void open_window(void *arg) {
     (void)arg;
     int w, h;
     gfx_cfg_window_size(&w, &h);
-    // NX2NAVI_MONITOR: the window is created centred on the chosen monitor; without a choice the system places it.
+    // OOTPC_MONITOR: the window is created centred on the chosen monitor; without a choice the system places it.
     MonInfo mon;
     int on_mon = chosen_monitor(&mon, 1);
     SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "OOT-DEBUG-MENU");
+    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "OOT-PC");
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, w);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, h);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
@@ -493,11 +493,11 @@ static void open_window(void *arg) {
     density_update();
     note_applied();
     refresh_rate_update();
-    if (cfg_get("NX2NAVI_BACKGROUND_WINDOW")) rt_log("gfx: NX2NAVI_BACKGROUND_WINDOW has no effect with SDL windows");
+    if (cfg_get("OOTPC_BACKGROUND_WINDOW")) rt_log("gfx: OOTPC_BACKGROUND_WINDOW has no effect with SDL windows");
     int wayland = !SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland");
     // open_window runs once, so this is logged once
     if (on_mon && wayland)
-        rt_log("gfx: Wayland leaves the placement of a windowed window to the compositor, so NX2NAVI_MONITOR only decides "
+        rt_log("gfx: Wayland leaves the placement of a windowed window to the compositor, so OOTPC_MONITOR only decides "
                "where the game opens in fullscreen");
     if (gfx_cfg_fullscreen()) SDL_SetWindowFullscreen(g_win, true);
     SDL_SyncWindow(g_win);

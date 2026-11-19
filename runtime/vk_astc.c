@@ -1,14 +1,14 @@
-// ASTC textures on the GPU: the NX2NAVI_ASTC knob, a compute decoder that turns raw blocks into the RGBA8 image the CPU
+// ASTC textures on the GPU: the OOTPC_ASTC knob, a compute decoder that turns raw blocks into the RGBA8 image the CPU
 // decoder (tex_astc.c) would have written, and the native ASTC formats where the device samples them itself.
 //
-// NX2NAVI_ASTC_BC = 1 (gpu mode only; unset: by the video memory and RAM, create_bc_pipeline): a second pass (runtime/shaders/bc3_encode.comp) encodes the decoded
+// OOTPC_ASTC_BC = 1 (gpu mode only; unset: by the video memory and RAM, create_bc_pipeline): a second pass (runtime/shaders/bc3_encode.comp) encodes the decoded
 // texels to BC3 and the image is BC3, 8 bits per texel instead of 32. For GPUs with little video memory, at the cost of
 // BC3's quality: textures look slightly blockier, and data textures (normal maps) lose some precision.
-// NX2NAVI_ASTC_BC1 = 1 (default; with BC3 on): a texture whose every ASTC block decodes opaque (vk_texture.c "ASTC as
+// OOTPC_ASTC_BC1 = 1 (default; with BC3 on): a texture whose every ASTC block decodes opaque (vk_texture.c "ASTC as
 // BC1") is BC1 instead, the colour half of the BC3 blocks the same pass would write: the same texels at 4 bits per
 // texel.
 //
-// NX2NAVI_ASTC = auto (default): native when the device reports textureCompressionASTC_LDR and the format's features,
+// OOTPC_ASTC = auto (default): native when the device reports textureCompressionASTC_LDR and the format's features,
 // else gpu. gpu: compute decode into RGBA8 (runtime/shaders/astc_decode.comp). native: like auto, but logs when the
 // device cannot. cpu: astc_decode_ldr_mt on the uploading thread, as before. check: gpu, and every upload is also
 // decoded on the CPU and compared (waits for the GPU; for testing only).
@@ -111,8 +111,8 @@ static struct {
     VkDescriptorSetLayout dsl;
     VkPipelineLayout layout;
     VkPipeline pipe;
-    VkPipeline bc_pipe;           // the BC3 encoder (NX2NAVI_ASTC_BC): the decoder's layout, bindings 0 and 1
-    VkPipeline bc1_pipe;          // the same shader writing BC1 blocks (NX2NAVI_ASTC_BC1)
+    VkPipeline bc_pipe;           // the BC3 encoder (OOTPC_ASTC_BC): the decoder's layout, bindings 0 and 1
+    VkPipeline bc1_pipe;          // the same shader writing BC1 blocks (OOTPC_ASTC_BC1)
     int bc;                       // 1: ASTC images are BC3 (vk_astc_bc)
     int bc1;                      // 1: opaque ones are BC1 (vk_astc_bc1)
     PFN_vkCmdPushDescriptorSetKHR push;
@@ -122,7 +122,7 @@ static struct {
 } G = {.mode = -1};
 static uint64_t n_dispatch, n_texels, n_chunks;   // n_chunks: the breadcrumb number of the next scratch chunk
 
-// NX2NAVI_ASTC_TIME=1 (or vk_astc_time_enable): timestamps around the dispatches of each scratch chunk (the decode
+// OOTPC_ASTC_TIME=1 (or vk_astc_time_enable): timestamps around the dispatches of each scratch chunk (the decode
 // alone) and around a whole vk_astc_record call (one texture upload or WriteTexels: copies and barriers included),
 // read back by later calls. Per footprint: texels and dispatch time; a new largest call is logged with both times.
 // Needs hostQueryReset (a slot is reset on the host after its read).
@@ -146,7 +146,7 @@ static uint8_t t_max_fp;
 
 static void time_init(VkCtx *c) {   // t_lock held
     if (t_on < 0) {
-        const char *e = cfg_get("NX2NAVI_ASTC_TIME");
+        const char *e = cfg_get("OOTPC_ASTC_TIME");
         t_on = e && *e && *e != '0';
     }
     if (t_on <= 0 || (t_pool && t_dev == c->device)) return;
@@ -164,7 +164,7 @@ static void time_init(VkCtx *c) {   // t_lock held
     VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_TIMESTAMP,
                                 .queryCount = 2 * TQ};
     if (!f12.hostQueryReset || !bits || vkCreateQueryPool(c->device, &qi, NULL, &t_pool) != VK_SUCCESS) {
-        rt_log("vk: NX2NAVI_ASTC_TIME: no hostQueryReset or no timestamps on the queue; ASTC decodes not timed");
+        rt_log("vk: OOTPC_ASTC_TIME: no hostQueryReset or no timestamps on the queue; ASTC decodes not timed");
         t_pool = VK_NULL_HANDLE;
         t_on = 0;
         return;
@@ -306,7 +306,7 @@ static int create_pipeline(VkCtx *c) {
     return 1;
 }
 
-// NX2NAVI_ASTC_BC=1: the BC3 encoder, when the device samples BC3 (every desktop GPU does); 0 leaves ASTC as RGBA8.
+// OOTPC_ASTC_BC=1: the BC3 encoder, when the device samples BC3 (every desktop GPU does); 0 leaves ASTC as RGBA8.
 // Unset: on when the largest device-local heap is under 20 GiB. There RGBA8 ASTC, four times the size of BC3, fills
 // video memory (a GTX 1650 4 GiB went from 10-23 to 3-12 ms of GPU time a frame, issue #87). Ocarina in Kokiri Forest
 // holds 15.9 GiB of VRAM with RGBA8 and 8.2 GiB with BC3, at the same GPU time and no difference to see in the frame,
@@ -340,7 +340,7 @@ static VkResult bc_pipeline(VkCtx *c, int bc1, VkPipeline *out) {
 }
 
 static int create_bc_pipeline(VkCtx *c) {
-    const char *e = cfg_get("NX2NAVI_ASTC_BC");
+    const char *e = cfg_get("OOTPC_ASTC_BC");
     VkDeviceSize vram = 0;
     for (uint32_t h = 0; h < c->mem_props.memoryHeapCount && h < VK_MAX_MEMORY_HEAPS; h++)
         if (c->mem_props.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT && c->mem_props.memoryHeaps[h].size > vram)
@@ -349,40 +349,40 @@ static int create_bc_pipeline(VkCtx *c) {
     plat_mem_info(&ram_used, &ram_mb, &proc);
     int on = e && *e ? *e != '0' : vram < BC_KEEP_RGBA8_VRAM || (ram_mb > 0 && ram_mb < BC_KEEP_RGBA8_RAM_MB);
     if (!(e && *e))
-        rt_log("vk: NX2NAVI_ASTC_BC unset: BC3 %s (largest device-local heap %llu MiB, RAM %.0f MiB)", on ? "on" : "off",
+        rt_log("vk: OOTPC_ASTC_BC unset: BC3 %s (largest device-local heap %llu MiB, RAM %.0f MiB)", on ? "on" : "off",
                (unsigned long long)(vram >> 20), ram_mb);
     if (!on) return 0;
     VkFormatProperties p;
     vkGetPhysicalDeviceFormatProperties(c->phys, VK_FORMAT_BC3_SRGB_BLOCK, &p);
     VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     if ((p.optimalTilingFeatures & need) != need) {
-        rt_log("vk: NX2NAVI_ASTC_BC: the device does not sample BC3; ASTC stays RGBA8");
+        rt_log("vk: OOTPC_ASTC_BC: the device does not sample BC3; ASTC stays RGBA8");
         return 0;
     }
     VkResult r = bc_pipeline(c, 0, &G.bc_pipe);
     if (r != VK_SUCCESS) {
         G.bc_pipe = VK_NULL_HANDLE;
-        rt_log("vk: NX2NAVI_ASTC_BC: the BC3 encoder pipeline failed (%d); ASTC stays RGBA8", (int)r);
+        rt_log("vk: OOTPC_ASTC_BC: the BC3 encoder pipeline failed (%d); ASTC stays RGBA8", (int)r);
         return 0;
     }
-    rt_log("vk: ASTC textures are encoded to BC3 after the decode (NX2NAVI_ASTC_BC)");
+    rt_log("vk: ASTC textures are encoded to BC3 after the decode (OOTPC_ASTC_BC)");
     return 1;
 }
 
-// NX2NAVI_ASTC_BC1 (with BC3 on): opaque ASTC textures as BC1, when the device samples and copies into both BC1
+// OOTPC_ASTC_BC1 (with BC3 on): opaque ASTC textures as BC1, when the device samples and copies into both BC1
 // formats.
 static int bc1_on(VkCtx *c) {
-    int on = cfg_bool("NX2NAVI_ASTC_BC1");
+    int on = cfg_bool("OOTPC_ASTC_BC1");
     VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
                                 VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
     for (int i = 0; i < 2 && on; i++) {
         VkFormatProperties p;
         vkGetPhysicalDeviceFormatProperties(c->phys, i ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_BC1_RGB_UNORM_BLOCK, &p);
-        if ((p.optimalTilingFeatures & need) != need) on = 0, rt_log("vk: NX2NAVI_ASTC_BC1: the device lacks BC1 features");
+        if ((p.optimalTilingFeatures & need) != need) on = 0, rt_log("vk: OOTPC_ASTC_BC1: the device lacks BC1 features");
     }
     VkResult r = on ? bc_pipeline(c, 1, &G.bc1_pipe) : VK_SUCCESS;
-    if (r != VK_SUCCESS) on = 0, rt_log("vk: NX2NAVI_ASTC_BC1: the BC1 encoder pipeline failed (%d)", (int)r);
-    rt_log("vk: opaque ASTC textures %s (NX2NAVI_ASTC_BC1)", on ? "are BC1, the others BC3" : "are BC3 like the others");
+    if (r != VK_SUCCESS) on = 0, rt_log("vk: OOTPC_ASTC_BC1: the BC1 encoder pipeline failed (%d)", (int)r);
+    rt_log("vk: opaque ASTC textures %s (OOTPC_ASTC_BC1)", on ? "are BC1, the others BC3" : "are BC3 like the others");
     return on;
 }
 
@@ -402,13 +402,13 @@ int vk_astc_mode(void) {
     plat_mutex_lock(&g_lock);
     reset_for(c);
     if (G.mode < 0) {
-        const char *e = cfg_value("NX2NAVI_ASTC");
+        const char *e = cfg_value("OOTPC_ASTC");
         int want = !strcmp(e, "auto") ? -1 : !strcmp(e, "cpu") ? VK_ASTC_CPU : !strcmp(e, "gpu") ? VK_ASTC_GPU
                  : !strcmp(e, "native") ? VK_ASTC_NATIVE : !strcmp(e, "check") ? VK_ASTC_CHECK : -2;
-        if (want == -2) rt_log("vk: NX2NAVI_ASTC=%s is not cpu, gpu, native, check or auto: auto", e), want = -1;
+        if (want == -2) rt_log("vk: OOTPC_ASTC=%s is not cpu, gpu, native, check or auto: auto", e), want = -1;
         if ((want == -1 || want == VK_ASTC_NATIVE) && native_device(c)) m = VK_ASTC_NATIVE;
         else {
-            if (want == VK_ASTC_NATIVE) rt_log("vk: NX2NAVI_ASTC=native: the device lacks textureCompressionASTC_LDR; gpu");
+            if (want == VK_ASTC_NATIVE) rt_log("vk: OOTPC_ASTC=native: the device lacks textureCompressionASTC_LDR; gpu");
             m = want == VK_ASTC_CPU ? VK_ASTC_CPU : want == VK_ASTC_CHECK ? VK_ASTC_CHECK : VK_ASTC_GPU;
         }
         if ((m == VK_ASTC_GPU || m == VK_ASTC_CHECK || m == VK_ASTC_NATIVE) && !G.pipe && !G.failed &&
@@ -489,7 +489,7 @@ static void mem_barrier(VkCommandBuffer cb, VkPipelineStageFlags2 src, VkAccessF
 static struct { VkBuffer buf; VmaAllocation alloc; VkDeviceSize size; VkCommandBuffer cb; VkDevice dev; uint64_t big_ns; } S;
 static uint64_t n_scratch_new, n_scratch_reuse;
 
-// NX2NAVI_ASTC_SCRATCH_KEEP=1 (the default): the scratch outlives its upload batch. Every
+// OOTPC_ASTC_SCRATCH_KEEP=1 (the default): the scratch outlives its upload batch. Every
 // batch goes to gfx_queue, so the reuse barrier at the start of the next batch's first chunk (vk_astc_record) orders it
 // after the earlier batches' copies and dispatches, as it does between two textures of one batch; it then also waits
 // for their writes (WAW). With
@@ -498,14 +498,14 @@ static uint64_t n_scratch_new, n_scratch_reuse;
 // block on the replay thread during an area load (8-19 ms per block on NVIDIA, vk_headroom.c). A scratch grown past
 // SCRATCH_MIN for a large texture goes back to SCRATCH_MIN once no texture needed more for SCRATCH_SHRINK_NS.
 // On a Kakariko walk at 1440p (2026-11-11) the scratch was made 3 times instead of 60, the walk allocated device memory
-// 265 times instead of 342, and NX2NAVI_ASTC=check found 0 of 1920 textures differing from the CPU decode.
+// 265 times instead of 342, and OOTPC_ASTC=check found 0 of 1920 textures differing from the CPU decode.
 // 0: a scratch per batch.
 #define SCRATCH_SHRINK_NS 5000000000ull
 static int scratch_keep(void) {
     static int keep = -1;
     if (keep < 0) {
-        keep = cfg_bool("NX2NAVI_ASTC_SCRATCH_KEEP");
-        rt_log("vk: ASTC scratch %s (NX2NAVI_ASTC_SCRATCH_KEEP=%d)", keep ? "kept across upload batches" : "made per upload batch",
+        keep = cfg_bool("OOTPC_ASTC_SCRATCH_KEEP");
+        rt_log("vk: ASTC scratch %s (OOTPC_ASTC_SCRATCH_KEEP=%d)", keep ? "kept across upload batches" : "made per upload batch",
                keep);
     }
     return keep;

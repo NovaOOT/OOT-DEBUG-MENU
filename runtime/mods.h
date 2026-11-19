@@ -1,20 +1,24 @@
-// Player mods (mods.c): one folder per mod under mods/ next to nx2navi.exe (NX2NAVI_MODS_DIR; a relative one is under
+// Player mods (mods.c): one folder per mod under mods/ next to ocarina.exe (OOTPC_MODS_DIR; a relative one is under
 // that folder too), unpacked as emulators take them: <mod>/romfs, <mod>/exefs and <mod>/cheats, the Atmosphere layout
 // (atmosphere/contents/<title id>/romfs, atmosphere/exefs_patches/<name>/*.ips) or a mod manager's merged output
 // (romfs or romfslite, exefs, cheats). ExeFS patch files (.ips, .pchtxt) for the game's main are patch sets the setup
 // builds into the game (tools/exefs_patches.py), switched with their mod (mods_exefs_switch). The list is scanned once at start (romfs.c overlay_init);
-// its order and switches live in nx2navi.ini [mods] (NX2NAVI_MODS_ORDER: names top first, separated by '|';
-// NX2NAVI_MODS_DISABLED: names switched off). The top mod wins a file two mods replace.
+// its order and switches live in OOT-PC.ini [mods] (OOTPC_MODS_ORDER: names top first, separated by '|';
+// OOTPC_MODS_DISABLED: names switched off). The top mod wins a file two mods replace.
 // A mod may have one setting: <mod>/settings/<setting name>/<value>/romfs, one folder per value. The chosen value's
-// romfs is the mod's RomFS root (its own romfs folder is not used then). NX2NAVI_MODS_SETTINGS holds the choices as
+// romfs is the mod's RomFS root (its own romfs folder is not used then). OOTPC_MODS_SETTINGS holds the choices as
 // name=value entries separated by '|'; mods whose settings have the same name share the value, so mods that replace
 // the same files with versions of one choice stay in step. No entry: the first value (values sort as numbers when
 // they all are numbers).
+// A mod may turn on a feature built into the game instead of, or as well as, bringing files: a file ootpc-feature.txt at
+// its top whose first line names the feature (MOD_FEATURE_* below). The feature is on for the run while that mod is on
+// at the start; co-op through Steam is one (coop.c).
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 
 enum { MOD_VALUES = 16 };   // values of a mod's setting at most
-enum { MOD_ROMFS = 1, MOD_EXEFS = 2, MOD_SUBSDK = 4, MOD_CHEATS = 8 };   // ModInfo.kind bits
+enum { MOD_ROMFS = 1, MOD_EXEFS = 2, MOD_SUBSDK = 4, MOD_CHEATS = 8, MOD_FEATURE = 16 };   // ModInfo.kind bits
 typedef enum {
     MOD_OK,
     MOD_EMPTY,          // no RomFS file, no ExeFS patch, no cheat file
@@ -25,6 +29,7 @@ typedef enum {
     MOD_EXEFS_UNSUPPORTED,   // an ExeFS patch file the port cannot apply (note says why): the whole mod stays off
     MOD_EXEFS_OTHER,    // only ExeFS patches, all for another game version
     MOD_BAD_NAME,       // its folder name holds '|', the separator of the order keys
+    MOD_FEATURE_UNKNOWN,     // its ootpc-feature.txt names a feature this version does not have (note: which)
 } ModProblem;
 
 typedef struct {
@@ -44,16 +49,17 @@ typedef struct {
     int nsets;
     uint32_t sets[16];                      // the built patch sets mod_<hash> of its ExeFS patch files
     char overrides[256];                    // the port's own patch sets its patches replace, comma separated
+    char feature[32];                       // the built-in feature its ootpc-feature.txt names; "" none
     char setting[64];                       // its setting's name; "" none
     char values[MOD_VALUES][64];            // the setting's values, in the order shown
     int nvalues, value, start_value;        // value: the index chosen; start_value: chosen at the scan (in use)
 } ModInfo;
 
 void mods_scan(void);              // once; later calls return at once
-const char *mods_dir(void);        // the folder scanned (default: <dir of nx2navi.exe>/mods)
+const char *mods_dir(void);        // the folder scanned (default: <dir of ocarina.exe>/mods)
 int mods_count(void);
 ModInfo *mods_at(int i);           // 0 = top of the order; NULL out of range
-// Menu edits (present path). They change the list mods_at shows and write NX2NAVI_MODS_ORDER / NX2NAVI_MODS_DISABLED with
+// Menu edits (present path). They change the list mods_at shows and write OOTPC_MODS_ORDER / OOTPC_MODS_DISABLED with
 // cfg_set; romfs.c used the start state, so they apply at the next start.
 void mods_set_enabled(int i, int on);
 void mods_move(int i, int delta);  // -1 up, +1 down; nothing at the ends
@@ -64,5 +70,16 @@ void mods_exefs_switch(void);
 // The ExeFS patch files of the enabled mods that the build lacks, their FNV-1a mixed into *key (cheats.c starts the
 // rebuild for them).
 int mods_exefs_pending(uint32_t *key);
+// The built-in features a mod can turn on (the first line of its ootpc-feature.txt).
+#define MOD_FEATURE_STEAM_COOP "steam-coop"   // co-op through Steam (coop.c, docs/coop.md)
+#define MOD_FEATURE_N64 "n64-graphics"        // the N64 version's models and textures (n64gfx.c, docs/n64.md)
+#define MOD_FEATURE_DARK_LINK "dark-link"     // Dark Link: N64 Link drawn as the N64 game's Dark Link (n64gfx.c
+                                              // n64gfx_dark, docs/n64.md)
+#define MOD_FEATURE_DESERT_FREE_ROAM "desert-free-roam"   // no void-out in the Haunted Wasteland and the Desert
+                                                          // Colossus (desert_roam.c, tools/make_desert_roam_mod.py)
+// 1 when a mod that was on at the scan turns feature on, with that mod's folder name into mod_name when it is not NULL
+// (cap bytes). 0 until the scan has finished. Any thread may ask: the answer does not change after the scan.
+int mods_feature(const char *feature, char *mod_name, size_t cap);
+int mods_features_known(void);   // the scan has finished: mods_feature's answers are final
 // The hex of the game main's build id (64 digits), "" when exefs/main cannot be read.
 const char *mods_main_build_id(void);

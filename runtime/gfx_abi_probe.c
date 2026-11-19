@@ -1,6 +1,6 @@
 // --probe-gfx-abi: every host object of nvn_obj.h fits the storage nvn.h reserves
 // for its NVN type, the layouts the game reads directly (NVNtextureView, the command buffer's inline fast-path
-// fields) sit where NX2NAVI's NVN 55 code expects them, and the GPU address window lies above every guest region.
+// fields) sit where OOTPC's NVN 55 code expects them, and the GPU address window lies above every guest region.
 // The same facts are static assertions in nvn_obj.h; this mode prints the sizes so a change shows its margin.
 // Needs no game files.
 #include <stddef.h>
@@ -33,7 +33,7 @@ static const Fit fits[] = {
     FIT(va_st, NVNvertexAttribState),           FIT(vs_st, NVNvertexStreamState),
 };
 
-_Static_assert(sizeof(NVNtextureView) == 16, "NVNtextureView is 16 bytes in NX2NAVI's NVN 55");
+_Static_assert(sizeof(NVNtextureView) == 16, "NVNtextureView is 16 bytes in OOTPC's NVN 55");
 _Static_assert(offsetof(cmd_t, inline_cur) == 0x20 && offsetof(cmd_t, inline_end) == 0x28, "cmd_t inline fields");
 _Static_assert(RT_GPU_VA_BASE >= RT_ADDRESS_LIMIT, "GPU address window overlaps the guest address space");
 
@@ -95,7 +95,7 @@ static void check_write_watch(void) {
     CHECK(plat_mem_state(a, a + 0x10000, &end) == PLAT_PROT_RW && end == a + 0x4000, "the thawed pages are not read-write");
     CHECK(plat_mem_state(a + 0x4000, a + 0x4001, &end) == PLAT_MEM_RESERVED, "a hole got committed");
     printf("write-watch: region with reserved holes frozen and thawed by a write\n");
-    // NX2NAVI_WB_PROBE=1 (memory.c, "Probed regions"): a probed region is inaccessible until its first access, which is
+    // OOTPC_WB_PROBE=1 (memory.c, "Probed regions"): a probed region is inaccessible until its first access, which is
     // noted and runs again; a frozen one goes back to read-only first and then thaws on a write; mem_thaw ends a probe
     // and holds the region. With the setting off mem_probe arms nothing.
     if (mem_probing()) {

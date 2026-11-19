@@ -1,4 +1,4 @@
-// DLSS Frame Generation (NX2NAVI_FRAMEGEN = dlss; applies after a restart) through nx2navi_dlssg.dll
+// DLSS Frame Generation (OOTPC_FRAMEGEN = dlss; applies after a restart) through ootpc_dlssg.dll
 // (runtime/dlssg/nx2_sl.cpp), which drives NVIDIA Streamline. Like AMD's frame generation (vk_fg.cpp) it takes the
 // depth, motion vectors and camera vk_dlaa.c makes for DLSS or FSR 3.1 upscaling, or without an upscaler for frame
 // generation alone (vk_dlaa.c fg_only_frame: the same pass at the scene's size, no jitter); it needs an RTX 40 or 50 GPU.
@@ -8,13 +8,13 @@
 // DLSS-G needs; the present path calls Streamline's swapchain functions (gfx_present.c), and every present records the
 // frame's constants and tags first (vk_dlssg_frame). Generation pauses while the menu is open.
 //
-// Multi frame generation: NX2NAVI_FRAMEGEN_MULTIPLIER (2, 3 or 4, live) is how many frames the display gets per
+// Multi frame generation: OOTPC_FRAMEGEN_MULTIPLIER (2, 3 or 4, live) is how many frames the display gets per
 // rendered frame, so one, two or three generated ones. Streamline says how many this GPU and driver can generate
 // (numFramesToGenerateMax: one where only 2x runs, three on an RTX 50); a higher setting is clamped to it with a log
 // line. frame_rate.c divides the frame limit by the multiplier in effect (vk_dlssg_multiplier), so the display gets the
 // limit and the game renders a half, a third or a quarter of it.
 //
-// DLSS-G needs Reflex, whose low-latency mode paces the game (NX2NAVI_REFLEX, default 1; 0 off, 2 on with boost): the
+// DLSS-G needs Reflex, whose low-latency mode paces the game (OOTPC_REFLEX, default 1; 0 off, 2 on with boost): the
 // game's frame sleeps in Reflex where it starts (its acquire of a window image), and each frame carries the latency
 // markers from that start to the host present, all with the frame's number, the count of the game's presents up to it.
 // The mode is the swapchain's, so it is set again after each one (vk_dlssg_create_swapchain).
@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "debug_tools.h"
 #include "cfg.h"
 #include "host.h"
 #include "vk.h"
@@ -67,7 +68,7 @@ static void sl_line(const char *line) { rt_log("%s", line); }
 static int reflex_mode(void) {
     static int m = -1;
     if (m < 0) {
-        const char *s = cfg_get("NX2NAVI_REFLEX");
+        const char *s = cfg_get("OOTPC_REFLEX");
         m = s && *s ? atoi(s) : 1;
         if (m < 0 || m > 2) m = 1;
     }
@@ -77,7 +78,7 @@ static int reflex_mode(void) {
 // With any upscaler or none: vk_dlaa.c makes the inputs either way (vk_dlaa_frame says which, at the start and at each
 // change).
 int vk_dlssg_wanted(void) {
-    if (S.wanted < 0) S.wanted = !strcmp(cfg_value("NX2NAVI_FRAMEGEN"), "dlss");
+    if (S.wanted < 0) S.wanted = !strcmp(cfg_value("OOTPC_FRAMEGEN"), "dlss");
     return S.wanted;
 }
 
@@ -90,10 +91,10 @@ int vk_dlssg_early(void) {
     DWORD n = GetModuleFileNameW(NULL, dir, MAX_PATH);
     while (n && dir[n - 1] != L'\\') n--;
     dir[n ? n - 1 : 0] = 0;
-    swprintf(path, MAX_PATH + 32, L"%ls\\nx2navi_dlssg.dll", dir);
+    swprintf(path, MAX_PATH + 32, L"%ls\\ootpc_dlssg.dll", dir);
     HMODULE m = LoadLibraryW(path);
     if (!m) {
-        rt_log("dlssg: nx2navi_dlssg.dll is not next to the game: DLSS Frame Generation off");
+        rt_log("dlssg: ootpc_dlssg.dll is not next to the game: DLSS Frame Generation off");
         return 0;
     }
     PFN_nx2sl_version ver = (PFN_nx2sl_version)(void *)GetProcAddress(m, "nx2sl_version");
@@ -110,10 +111,10 @@ int vk_dlssg_early(void) {
     S.shutdown = (PFN_nx2sl_shutdown)(void *)GetProcAddress(m, "nx2sl_shutdown");
     S.reflex = (PFN_nx2sl_reflex)(void *)GetProcAddress(m, "nx2sl_reflex");
     S.frames_max = (PFN_nx2sl_frames_max)(void *)GetProcAddress(m, "nx2sl_frames_max");   // optional: 2x only without
-    if (!S.frames_max) rt_log("dlssg: nx2navi_dlssg.dll is older than multi frame generation: 2x at most");
+    if (!S.frames_max) rt_log("dlssg: ootpc_dlssg.dll is older than multi frame generation: 2x at most");
     if (!ver || ver() != NX2SL_VERSION || !S.init || !S.gipa || !S.gdpa || !S.available || !S.frame || !S.marker ||
         !S.sleep || !S.submit_end || !S.shown || !S.reflex) {
-        rt_log("dlssg: nx2navi_dlssg.dll is from another build: DLSS Frame Generation off");
+        rt_log("dlssg: ootpc_dlssg.dll is from another build: DLSS Frame Generation off");
         return 0;
     }
     if (!S.init(dir, sl_line)) return 0;
@@ -206,14 +207,95 @@ int vk_dlssg_multiplier_max(int *old_dll) {
 
 int vk_dlssg_multiplier(void) { return S.active ? __atomic_load_n(&S.shown_mult, __ATOMIC_RELAXED) : 1; }
 
+// OOTPC_FRAMEGEN_MULTIPLIER = dynamic: as few generated frames as keep the screen at the monitor's refresh rate, so every
+// frame the game can render is shown and the generated ones only fill what it cannot. Measured on an RTX 5070 at
+// 180 Hz: Kakariko Village, Zora's Domain and Death Mountain Crater rendered 73 to 90 frames a second, 2x filled the
+// screen; Lake Hylia and Hyrule Field rendered 49 to 66, 2x showed 98 to 132 and 3x 147 to 198.
+// The rate the game renders is its frame interval less the pacer's sleeps in the acquire (nvn_api_obj.c
+// gfx_pace_slept_ns), averaged over about half a second. Reflex's sleep at the frame's start is not taken out: the game
+// waits for the GPU there (the frame's work is serialized with it), so the sleep is part of what a frame costs; taking
+// it out read 110 frames a second where the game made 55, and the multiplier went back and forth.
+// The multiplier goes up as soon as that rate times the multiplier stays under AUTO_LOW of the refresh for AUTO_UP
+// frames. Going down cannot be read off the rate: frame generation holds the rendered frames at the refresh over the
+// multiplier, so a game that could render more shows only that. Where the rate sits at that ceiling (or one fewer would
+// still reach the refresh) for down_wait frames, the multiplier tries one fewer; if the rate then falls short it goes
+// back up within AUTO_UP frames and the next try waits twice as long (up to AUTO_WAIT_MAX), and one that holds for two
+// seconds sets the wait back to AUTO_DOWN. A step each way every few frames would be the visible flicker of
+// generated-frame artefacts coming and going. Without a known refresh rate the target is 120.
+#define AUTO_LOW 0.92
+#define AUTO_UP 20
+#define AUTO_DOWN 180
+#define AUTO_WAIT_MAX 3600
+#define AUTO_SETTLE 15   // frames after a step before the rate counts again
+static uint64_t reflex_slept;   // Reflex's sleeps so far (vk_dlssg_frame_start), for the log line
+
+int vk_dlssg_multiplier_dynamic(const char *value) { return value && !strcmp(value, "dynamic"); }
+
+static int auto_multiplier(int max) {
+    static uint64_t last_t, last_slept, frames, tried_at;
+    static double work_ns;
+    static int m = 2, up, down, down_wait = AUTO_DOWN, settle;
+    uint64_t now = kern_now_ns(), slept = gfx_pace_slept_ns();
+    uint64_t d = last_t ? now - last_t : 0, s = slept - last_slept;
+    last_t = now, last_slept = slept;
+    if (max < 2) max = 4;
+    if (m > max) m = max;
+    if (!d || d > 250000000ull) return m;   // the first frame, or a pause (menu, load): no reading
+    frames++;
+    double w = (double)(d > s ? d - s : d / 4);
+    work_ns = work_ns ? work_ns * 0.9 + w * 0.1 : w;
+    if (settle) {   // after a step the average starts again: the old one still holds the rate under the old ceiling
+        settle--;
+        return m;
+    }
+    // the rate on screen aimed for: the display's refresh, or OOTPC_FRAMEGEN_TARGET frames a second (a steady 120 on a
+    // faster display, say) when that is lower
+    double hz = 1e9 / work_ns, target = gfx_window_refresh_hz();
+    if (target < 30) target = 120;
+    {
+        static unsigned seen = ~0u;
+        static double want;
+        if (cfg_version() != seen) {
+            seen = cfg_version();
+            const char *t = cfg_value("OOTPC_FRAMEGEN_TARGET");
+            want = t && strcmp(t, "display") ? atof(t) : 0;
+        }
+        if (want >= 30 && want < target) target = want;
+    }
+    int was = m, capped = hz >= target / m * 0.94;
+    if (tried_at && frames - tried_at > 120 + AUTO_SETTLE) tried_at = 0, down_wait = AUTO_DOWN;   // the last try held
+    if (hz * m < target * AUTO_LOW && m < max) {
+        down = 0;
+        if (++up >= AUTO_UP) {
+            m++, up = 0;
+            if (tried_at) down_wait = down_wait * 2 > AUTO_WAIT_MAX ? AUTO_WAIT_MAX : down_wait * 2, tried_at = 0;
+        }
+    } else if (m > 2 && (capped || hz * (m - 1) >= target)) {
+        up = 0;
+        if (++down >= down_wait) m--, down = 0, tried_at = frames;
+    } else {
+        up = down = 0;
+    }
+    if (m != was) {
+        work_ns = 0, settle = AUTO_SETTLE;
+        static int logged;
+        if (logged++ < 200)
+            rt_log("dlssg: dynamic multiplier %dx -> %dx: the game renders %.0f frames a second, the screen %.0f Hz (Reflex "
+                   "slept %.1f ms a frame so far; next try down after %d frames)", was, m, hz, target,
+                   frames ? __atomic_load_n(&reflex_slept, __ATOMIC_RELAXED) / 1e6 / (double)frames : 0.0, down_wait);
+    }
+    return m;
+}
+
 // The multiplier the setting gives here (present thread), clamped to the GPU's limit; one log line each time the value
 // or the limit changes and the value is not taken as it is. Until Streamline reports its limit, one generated frame,
 // and no log line about the GPU yet.
 static int multiplier_wanted(void) {
     static char last[24];
     static int last_max = -1, m = 2;
-    const char *value = cfg_value("NX2NAVI_FRAMEGEN_MULTIPLIER");
+    const char *value = cfg_value("OOTPC_FRAMEGEN_MULTIPLIER");
     int max = gpu_multiplier_max(NULL);
+    if (vk_dlssg_multiplier_dynamic(value)) return max ? auto_multiplier(max > 4 ? 4 : max) : 2;
     if (max == last_max && !strncmp(value, last, sizeof last - 1)) return m;
     snprintf(last, sizeof last, "%s", value);
     last_max = max;
@@ -266,7 +348,9 @@ void vk_dlssg_frame_start(void) {
     if (f == S.started) return;
     S.started = f;
     uint64_t hosted = __atomic_load_n(&S.hosted_ns, __ATOMIC_RELAXED);
-    S.sleep(f, hosted && kern_now_ns() - hosted < HOLD_IDLE_NS);
+    uint64_t t0 = kern_now_ns();
+    S.sleep(f, hosted && t0 - hosted < HOLD_IDLE_NS);
+    __atomic_add_fetch(&reflex_slept, kern_now_ns() - t0, __ATOMIC_RELAXED);   // auto_multiplier
 }
 
 void vk_dlssg_game_present(void) { __atomic_add_fetch(&S.game, 1, __ATOMIC_RELAXED); }
@@ -287,7 +371,7 @@ void vk_dlssg_frame(VkCommandBuffer cb, VkExtent2D ext) {
     float jx = 0, jy = 0;
     int reset = 0;
     int have = vk_dlaa_fg_inputs(&d, &m, &jx, &jy, &reset) && vk_dlaa_fg_views(&dv, &mvv) && vk_dlaa_fg_camera(&c);
-    int want = have && !menu_is_open();
+    int want = have && !menu_is_open() && !dbg_paused();   // paused: the same picture again (vk_present_again)
     if (want == S.mode) S.pending = 0;
     else if (++S.pending >= FG_SETTLE_FRAMES) { S.mode = want; S.pending = 0; }
     else want = S.mode;   // hold the state it has until the new one stays
@@ -303,7 +387,7 @@ void vk_dlssg_frame(VkCommandBuffer cb, VkExtent2D ext) {
         memcpy(k.view_to_clip, c.view_to_clip, 64), memcpy(k.clip_to_view, c.clip_to_view, 64);
         memcpy(k.clip_to_prev_clip, c.clip_to_prev_clip, 64), memcpy(k.prev_clip_to_clip, c.prev_clip_to_clip, 64);
         memcpy(k.pos, c.pos, 12), memcpy(k.up, c.up, 12), memcpy(k.right, c.right, 12), memcpy(k.fwd, c.fwd, 12);
-        // the frame's own near and far planes (vk_dlaa.c proj_planes); nx2navi_dlssg.dll tells Streamline the depth is
+        // the frame's own near and far planes (vk_dlaa.c proj_planes); ootpc_dlssg.dll tells Streamline the depth is
         // not inverted, which holds for every projection the game has shown (0 near, 1 far)
         k.znear = c.znear, k.zfar = c.zfar, k.fov_y = c.fov_y, k.aspect = c.aspect;
         static int told;

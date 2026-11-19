@@ -47,7 +47,7 @@ enum {
     PAD_COUNT
 };
 
-// Gamepad layouts (NX2NAVI_PAD_LAYOUT): which face button is Switch A. Nintendo: by position, east A, south B, west Y,
+// Gamepad layouts (OOTPC_PAD_LAYOUT): which face button is Switch A. Nintendo: by position, east A, south B, west Y,
 // north X. Xbox: south A, east B, west X, north Y, as an Xbox pad labels them (cross A, circle B on a PlayStation pad).
 enum { PAD_LAYOUT_NINTENDO, PAD_LAYOUT_XBOX, PAD_LAYOUT_COUNT };
 
@@ -67,7 +67,7 @@ typedef struct InputMap {
 extern InputMap input_map;
 
 void input_map_reset(void);
-// The script and nx2navi.ini names, any case when parsed; NULL for an id without one. Actions: A B X Y LCLICK RCLICK L R ZL
+// The script and OOT-PC.ini names, any case when parsed; NULL for an id without one. Actions: A B X Y LCLICK RCLICK L R ZL
 // ZR PLUS MINUS LEFT UP RIGHT DOWN, then LSTICK_LEFT LSTICK_UP LSTICK_RIGHT LSTICK_DOWN and the same for RSTICK (the
 // stick directions the keys drive), then SHAKE. Keys: a-z 0-9 space tab lshift ... (key_names in input_map.c). Pads: south east ...
 const char *input_action_name(int action);
@@ -79,25 +79,25 @@ const char *input_pad_name(int pad);
 // layout; pad:default keeps each layout's own button. Stick directions and SHAKE take keys only. Invalid entries are logged and
 // skipped; when none is valid the action keeps its bindings. 1 when applied.
 int input_map_bind(const char *button, const char *list);
-// Applies the NX2NAVI_BIND_<action> settings (cfg_get) over the defaults: at start, and again when one of them changes.
+// Applies the OOTPC_BIND_<action> settings (cfg_get) over the defaults: at start, and again when one of them changes.
 void input_map_configure(void);
 
-// The layout for a NX2NAVI_PAD_LAYOUT value: "nintendo" or "xbox" (any case); "playstation" is the Xbox layout under its
+// The layout for a OOTPC_PAD_LAYOUT value: "nintendo" or "xbox" (any case); "playstation" is the Xbox layout under its
 // PlayStation name (cross A, circle B, square X, triangle Y); "xbox_prompts", 0.1.9's name for the Nintendo layout with
 // the Xbox prompts, maps the buttons as "nintendo". Anything else ("auto", NULL) picks Nintendo when the pad's east
 // button is labelled A (a Switch Pro Controller, a GuliKit) and Xbox otherwise.
 int input_pad_layout_pick(const char *setting, int east_labelled_a);
 
-// Button prompts (NX2NAVI_PROMPTS): the controller whose buttons the game's prompts show. Nintendo: the game's own. Xbox,
+// Button prompts (OOTPC_PROMPTS): the controller whose buttons the game's prompts show. Nintendo: the game's own. Xbox,
 // PlayStation and Steam Deck: that pad's buttons (LB RB LT RT, Menu and View; L1 R1 L2 R2, Options and Create; the
 // Deck's A B X Y with L1 R1 L2 R2, Menu and View), and the face buttons named by the label of the button the pad layout
 // presses (runtime/romfs.c overlay_init, tools/pad_prompts.py). PC: the key or mouse button the keyboard defaults press
 // each button with, the mouse for the right stick.
 enum { PROMPTS_NINTENDO, PROMPTS_XBOX, PROMPTS_PC, PROMPTS_PLAYSTATION, PROMPTS_STEAMDECK };
-// The prompts for a NX2NAVI_PROMPTS value ("nintendo", "xbox", "playstation", "steamdeck" or "pc", any case). Unset or
+// The prompts for a OOTPC_PROMPTS value ("nintendo", "xbox", "playstation", "steamdeck" or "pc", any case). Unset or
 // empty: Xbox while the pad layout setting is "xbox_prompts", else Nintendo.
 int input_prompts_pick(const char *prompts, const char *pad_layout);
-// The folder next to romfs-index.bin that holds those prompts for a NX2NAVI_PAD_LAYOUT value, NULL for the game's own. The
+// The folder next to romfs-index.bin that holds those prompts for a OOTPC_PAD_LAYOUT value, NULL for the game's own. The
 // Nintendo layout plays a pad by position, so its folder names the face buttons the other way round
 // (romfs-patches-xbox and romfs-patches-steamdeck: the right button does A and is labelled B;
 // romfs-patches-playstation: it is circle); xbox and
@@ -127,7 +127,7 @@ void input_mouse_stick(int32_t dx, int32_t dy, double dt_s, float sens, float ca
 // drifting stick rests at 0 and full deflection still reaches full. The result stays inside the unit square.
 void input_pad_stick(int32_t x, int32_t y, float dead, int32_t out[2]);
 // The dead zone of gamepad stick 0 (left) or 1 (right) for input_pad_stick, as a fraction of full deflection:
-// NX2NAVI_LSTICK_DEADZONE or NX2NAVI_RSTICK_DEADZONE when set, else NX2NAVI_STICK_DEADZONE (both sticks), percent clamped to 0..50.
+// OOTPC_LSTICK_DEADZONE or OOTPC_RSTICK_DEADZONE when set, else OOTPC_STICK_DEADZONE (both sticks), percent clamped to 0..50.
 float input_pad_deadzone(int stick);
 // How far a stick (x, y in -32768..32767) is from the centre, in percent of full deflection (100 at an axis's end; a
 // square gate's corner reads more).

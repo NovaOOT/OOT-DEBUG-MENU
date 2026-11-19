@@ -20,7 +20,7 @@
 // values.)
 //
 // The filter: the console's upscaler is a network that rebuilds edges, and a linear filter over a scene drawn at about
-// three quarters of the picture is visibly softer than that. With NX2NAVI_STANDIN_FILTER = easu (the default) the
+// three quarters of the picture is visibly softer than that. With OOTPC_STANDIN_FILTER = easu (the default) the
 // pass that enlarges is shaders/fsr_easu.comp instead, the edge-adaptive filter the present scales to the window with
 // (vk_fsr.c), built here with its SQUARE constant set: it filters the same stored values, which are the perceptual
 // encoding that filter is made for, and squares the result as the linear pass does, so only how the scaled sample is
@@ -159,7 +159,7 @@ static void tm_filter_log(int easu, int edge, uint32_t sw, uint32_t sh, uint32_t
     TM.filter_last = now, TM.filter_logs++;
     if (easu)
         rt_log("vk_exec: upscaler stand-in scales %ux%u to %ux%u with the edge-adaptive filter "
-               "(NX2NAVI_STANDIN_FILTER=bilinear: the linear one)", sw, sh, dw, dh);
+               "(OOTPC_STANDIN_FILTER=bilinear: the linear one)", sw, sh, dw, dh);
     else if (now == 3)
         rt_log("vk_exec: upscaler stand-in copies %ux%u 1:1, decoded and not scaled: the scene is the picture's size", sw,
                sh);
@@ -167,7 +167,7 @@ static void tm_filter_log(int easu, int edge, uint32_t sw, uint32_t sh, uint32_t
         rt_log("vk_exec: upscaler stand-in scales %ux%u to %ux%u with the linear filter: %s", sw, sh, dw, dh,
                !edge ? "DLSS or FSR scales the scene and its picture goes over this one"
                : dw < sw || dh < sh ? "nothing to enlarge"
-               : strcmp(cfg_value("NX2NAVI_STANDIN_FILTER"), "easu") ? "NX2NAVI_STANDIN_FILTER asks for it"
+               : strcmp(cfg_value("OOTPC_STANDIN_FILTER"), "easu") ? "OOTPC_STANDIN_FILTER asks for it"
                                                                      : "the edge-adaptive pass is not there");
 }
 
@@ -203,14 +203,14 @@ static VkImageView tm_view(VkImage img, VkFormat f) {
 // what the screen shows, so the edge-adaptive filter may scale it (0: another upscaler's picture replaces it).
 VkImage vk_tonemap_record(VkCommandBuffer cb, VkImage src, VkFormat sf, uint32_t sw, uint32_t sh, uint32_t dw,
                           uint32_t dh, int edge) {
-    static int disp = -1;   // NX2NAVI_TM_DISPATCH=0: everything but the dispatch, =2: not at all (diagnosis)
+    static int disp = -1;   // OOTPC_TM_DISPATCH=0: everything but the dispatch, =2: not at all (diagnosis)
     if (disp < 0) disp = rt_knob("TM_DISPATCH", "1");
     if (disp == 2 || !tm_init() || !tm_out(cb, dw, dh)) return VK_NULL_HANDLE;
     VkImageView sv = tm_view(src, sf), dv = TM.out_view;
     if (!sv) return VK_NULL_HANDLE;
-    // NX2NAVI_STANDIN_FILTER, read each frame (the setting is live). The edge-adaptive filter only enlarges: a target
+    // OOTPC_STANDIN_FILTER, read each frame (the setting is live). The edge-adaptive filter only enlarges: a target
     // smaller than the source in either direction, or of its size, keeps the linear pass.
-    int want = edge && dw >= sw && dh >= sh && (dw > sw || dh > sh) && !strcmp(cfg_value("NX2NAVI_STANDIN_FILTER"), "easu");
+    int want = edge && dw >= sw && dh >= sh && (dw > sw || dh > sh) && !strcmp(cfg_value("OOTPC_STANDIN_FILTER"), "easu");
     VkPipeline easu = want ? tm_easu() : VK_NULL_HANDLE;
     tm_filter_log(easu != VK_NULL_HANDLE, edge, sw, sh, dw, dh);
     VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,

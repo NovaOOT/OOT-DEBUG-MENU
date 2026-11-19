@@ -125,8 +125,8 @@ def main():
         check(r.returncode != 0 or (work / 'out.bin').read_bytes() != data['text'], f'damaged stream ({mutate}) read')
 
     # C writes, zipfile reads
-    members = {'manifest.json': b'{"format": "nx2navi-save"}', 'save/option.sav': data['save'][:3000],
-               'save/slot_00/progress.sav': data['save'], 'bug-report/nx2navi.log': data['text'],
+    members = {'manifest.json': b'{"format": "ootpc-save"}', 'save/option.sav': data['save'][:3000],
+               'save/slot_00/progress.sav': data['save'], 'bug-report/ootpc.log': data['text'],
                'save/empty.sav': b''}
     args = []
     for i, (n, b) in enumerate(members.items()):
@@ -195,15 +195,15 @@ def main():
 
     # the launcher imports what the game's menu writes
     from launcher import saves
-    manifest = json.dumps({'format': 'nx2navi-save', 'format_version': 1, 'title_id': '0400486024dec000',
-                           'nx2navi': '0.6.1', 'exported': '2026-11-09T17:30:05Z', 'exported_by': 'game'}).encode()
+    manifest = json.dumps({'format': 'ootpc-save', 'format_version': 1, 'title_id': '0400486024dec000',
+                           'ootpc': '0.6.1', 'exported': '2026-11-09T17:30:05Z', 'exported_by': 'game'}).encode()
     (work / 'manifest').write_bytes(manifest)
     (work / 'opt').write_bytes(b'option')
     (work / 'prog').write_bytes(data['save'])
     gz = work / 'game.zip'
     check(run('zip', gz, 'manifest.json', work / 'manifest', 'save/option.sav', work / 'opt',
               'save/slot_03/progress.sav', work / 'prog').returncode == 0, 'C zip of a save')
-    game = Path(tempfile.mkdtemp(prefix='nx2navi-zipcheck-'))
+    game = Path(tempfile.mkdtemp(prefix='ootpc-zipcheck-'))
     try:
         r = saves.import_save(game, gz, log=lambda m: None)
         acct = saves.account_dir(game)

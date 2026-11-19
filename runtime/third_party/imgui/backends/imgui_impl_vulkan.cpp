@@ -427,7 +427,7 @@ static void CreateOrResizeBuffer(VkBuffer& buffer, VkDeviceMemory& buffer_memory
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     err = vkCreateBuffer(v->Device, &buffer_info, v->Allocator, &buffer);
     check_vk_result(err);
-    if (err != VK_SUCCESS)   // NX2NAVI: as for the memory below
+    if (err != VK_SUCCESS)   // OOTPC: as for the memory below
     {
         buffer = VK_NULL_HANDLE;
         buffer_memory = VK_NULL_HANDLE;
@@ -442,10 +442,10 @@ static void CreateOrResizeBuffer(VkBuffer& buffer, VkDeviceMemory& buffer_memory
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_info.allocationSize = req.size;
     alloc_info.memoryTypeIndex = ImGui_ImplVulkan_MemoryType(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, req.memoryTypeBits);
-    buffer_memory = VK_NULL_HANDLE;   // NX2NAVI: the handle freed above is not kept when the allocation fails
+    buffer_memory = VK_NULL_HANDLE;   // OOTPC: the handle freed above is not kept when the allocation fails
     err = vkAllocateMemory(v->Device, &alloc_info, v->Allocator, &buffer_memory);
     check_vk_result(err);
-    // NX2NAVI: out of memory. No buffer, no memory and size 0, so the caller draws nothing this frame and the next
+    // OOTPC: out of memory. No buffer, no memory and size 0, so the caller draws nothing this frame and the next
     // frame asks again (ImGui_ImplVulkan_RenderDrawData). Unchecked, the mapping below it failed too and the copy of
     // the vertices went through a null pointer.
     if (err != VK_SUCCESS)
@@ -542,7 +542,7 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
             CreateOrResizeBuffer(rb->VertexBuffer, rb->VertexBufferMemory, rb->VertexBufferSize, vertex_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
         if (rb->IndexBuffer == VK_NULL_HANDLE || rb->IndexBufferSize < index_size)
             CreateOrResizeBuffer(rb->IndexBuffer, rb->IndexBufferMemory, rb->IndexBufferSize, index_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-        // NX2NAVI: a buffer that could not be made (CreateOrResizeBuffer): nothing is drawn this frame
+        // OOTPC: a buffer that could not be made (CreateOrResizeBuffer): nothing is drawn this frame
         if (rb->VertexBufferMemory == VK_NULL_HANDLE || rb->IndexBufferMemory == VK_NULL_HANDLE)
             return;
 
@@ -551,7 +551,7 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
         ImDrawIdx* idx_dst = nullptr;
         VkResult err = vkMapMemory(v->Device, rb->VertexBufferMemory, 0, vertex_size, 0, (void**)&vtx_dst);
         check_vk_result(err);
-        // NX2NAVI: a mapping that failed leaves nothing to copy into
+        // OOTPC: a mapping that failed leaves nothing to copy into
         if (err != VK_SUCCESS || !vtx_dst)
             return;
         err = vkMapMemory(v->Device, rb->IndexBufferMemory, 0, index_size, 0, (void**)&idx_dst);

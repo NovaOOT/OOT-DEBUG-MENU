@@ -24,7 +24,7 @@
 // empty when an allocation that failed there ended the game; an integrated GPU's memory is the machine's RAM. Linux's
 // limits (plat_commit_counts_vram) do not count a discrete card's own memory, so dropping its spare would free nothing
 // they count and only put the block allocations back on the render thread.
-// NX2NAVI_VRAM_HEADROOM=0 turns it off.
+// OOTPC_VRAM_HEADROOM=0 turns it off.
 
 #include "cfg.h"
 #include "host.h"
@@ -48,20 +48,25 @@ static struct {
     volatile uint32_t hold_until;   // plat_now_ms(): no spare block before then (vk_headroom_release)
 } H;
 
-// NX2NAVI_VMA_BLOCK_MB (16 to 256, default 64): the size of VMA's blocks on heaps over 1 GiB (its
+// OOTPC_VMA_BLOCK_MB (16 to 256, default 16): the size of VMA's blocks on heaps over 1 GiB (its
 // preferredLargeHeapBlockSize; VMA's own default is 256 MiB). A freed texture or mirror leaves a hole its block keeps,
 // and the driver counts the whole block against the VRAM budget and the system's commit until its last allocation
 // goes. With 256 MiB blocks one session held 2.1 GiB free inside them beside 8.2 GiB of allocations after a few area
 // changes, every block pinned by a texture or mirror that outlived its neighbours; a smaller block empties, and goes
 // back to the driver, once fewer allocations have gone. Allocations over half a block get memory of their own (VMA),
 // which matches the 32 MiB from which create_tex gives images their own memory.
+// 16 MiB, not the 64 it was: on a 10 GiB card a tour of six areas ended at Lake Hylia with 2.5 GiB free inside 64 MiB
+// blocks, the driver's figure over its budget and the GPU three times slower (23-30 fps where the area alone ran at
+// 58); with 16 MiB blocks and the texture compaction on (vk_texture.c compact_on) the holes were 1.4 GiB, fifteen
+// emptied blocks went back and the same tour ran Lake Hylia at 55 fps. Allocations over 8 MiB then get memory of their
+// own: some 1,100 device memory objects for 9 GiB at most, far below the 4,096 a Windows driver allows.
 VkDeviceSize vk_vma_block_size(void) {
     static VkDeviceSize size;
     if (!size) {
-        int mb = cfg_int("NX2NAVI_VMA_BLOCK_MB");
+        int mb = cfg_int("OOTPC_VMA_BLOCK_MB");
         mb = mb < 16 ? 16 : mb > 256 ? 256 : mb;
         size = (VkDeviceSize)mb << 20;
-        rt_log("vk: VMA blocks of %d MiB on heaps over 1 GiB (NX2NAVI_VMA_BLOCK_MB)", mb);
+        rt_log("vk: VMA blocks of %d MiB on heaps over 1 GiB (OOTPC_VMA_BLOCK_MB)", mb);
     }
     return size;
 }
@@ -84,7 +89,7 @@ uint64_t vk_headroom_held(void) { return (uint64_t)__atomic_load_n(&H.held, __AT
 
 static void VKAPI_PTR on_allocate(VmaAllocator a, uint32_t type, VkDeviceMemory m, VkDeviceSize size, void *user) {
     (void)a, (void)m, (void)size, (void)user;
-    perf_mark_add(PERF_M_DEVMEM, 0, size);   // NX2NAVI_TRACE=perf: every block and dedicated allocation VMA makes
+    perf_mark_add(PERF_M_DEVMEM, 0, size);   // OOTPC_TRACE=perf: every block and dedicated allocation VMA makes
     if (!H.on || type >= 64) return;
     if (plat_thread_id() == H.tid) {
         plat_inc64(&H.made);
@@ -98,7 +103,7 @@ static void VKAPI_PTR on_allocate(VmaAllocator a, uint32_t type, VkDeviceMemory 
     plat_event_set(&H.ev);
 }
 
-// NX2NAVI_TEX_COMPACT: every device memory VMA gives back to the driver is reported to the texture compaction, which
+// OOTPC_TEX_COMPACT: every device memory VMA gives back to the driver is reported to the texture compaction, which
 // counts the blocks its pass emptied (vk_texture.c vk_texture_block_freed). Any thread; the callback takes no lock.
 static void VKAPI_PTR on_free(VmaAllocator a, uint32_t type, VkDeviceMemory m, VkDeviceSize size, void *user) {
     (void)a, (void)type, (void)size, (void)user;
@@ -108,8 +113,8 @@ static void VKAPI_PTR on_free(VmaAllocator a, uint32_t type, VkDeviceMemory m, V
 const VmaDeviceMemoryCallbacks *vk_headroom_callbacks(void) {
     static const VmaDeviceMemoryCallbacks cb = {.pfnAllocate = on_allocate};
     static const VmaDeviceMemoryCallbacks cb_free = {.pfnAllocate = on_allocate, .pfnFree = on_free};
-    const char *v = cfg_get("NX2NAVI_VRAM_HEADROOM");   // empty is unset: the key has no settings row for cfg_bool
-    H.on = !v || !*v || cfg_bool("NX2NAVI_VRAM_HEADROOM");
+    const char *v = cfg_get("OOTPC_VRAM_HEADROOM");   // empty is unset: the key has no settings row for cfg_bool
+    H.on = !v || !*v || cfg_bool("OOTPC_VRAM_HEADROOM");
     if (vk_texture_compact_on()) return &cb_free;   // on_allocate does nothing for the headroom while H.on is 0
     return H.on ? &cb : NULL;
 }
@@ -222,5 +227,5 @@ void vk_headroom_start(void) {
     }
     H.started = 1;
     rt_log("vk: headroom: the next VMA block of each memory type in use is allocated on a background thread "
-           "(NX2NAVI_VRAM_HEADROOM=0 turns it off)");
+           "(OOTPC_VRAM_HEADROOM=0 turns it off)");
 }

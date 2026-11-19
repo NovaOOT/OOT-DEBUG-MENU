@@ -1,5 +1,5 @@
 #pragma once
-// Mesh shader emulation for GPUs without VK_EXT_mesh_shader (NX2NAVI_MESH_EMULATION, vk_pipeline.c / vk_exec_draw.c):
+// Mesh shader emulation for GPUs without VK_EXT_mesh_shader (OOTPC_MESH_EMULATION, vk_pipeline.c / vk_exec_draw.c):
 // the translator's TaskEXT and MeshEXT modules (tools/xlate/MeshSpirv.cs) become GLCompute modules that write their
 // vertices, triangles and task payloads into one GPU buffer (the arena), and a generated vertex shader reads the
 // vertices back for the game's fragment shader. Plain C over SPIR-V words; no Vulkan types.
@@ -29,7 +29,7 @@
 #define MESH_EMU_R_TASK 14u    // 1 with a task stage
 #define MESH_EMU_TWORDS 780u                   // 1 + payloads of up to 776 words (3072 bytes and the 32 the
                                                // translator adds for the payload header since 0.6.0), padded
-// task records: as many as the push constants say (the replay sizes them, NX2NAVI_MESH_EMU_TASKS); the index area
+// task records: as many as the push constants say (the replay sizes them, OOTPC_MESH_EMU_TASKS); the index area
 // follows them
 // Push constants of every emulation stage (compute and the vertex shader), 32 bytes:
 //   u64 arena address; uint draw record (word index); uint index area (word index); uint index capacity;

@@ -184,7 +184,7 @@ static void ov_longjmp(Cpu *c) {
 HOST_OVERRIDE("setjmp", ov_setjmp);
 HOST_OVERRIDE("longjmp", ov_longjmp);
 
-// NX2NAVI_TRACE=perf "mem: sizes" (perf.c): the jmp_buf table's entries (entries are never removed; fatal when full).
+// OOTPC_TRACE=perf "mem: sizes" (perf.c): the jmp_buf table's entries (entries are never removed; fatal when full).
 void setjmp_sizes(PerfSizes *s) {
     uint64_t n = 0;
     plat_mutex_lock(&jt_lock);

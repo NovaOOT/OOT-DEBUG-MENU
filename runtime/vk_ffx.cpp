@@ -81,10 +81,10 @@ VKAPI_ATTR VkResult VKAPI_CALL graphics_pipelines(VkDevice dev, VkPipelineCache 
     return vk_pipeline_create_foreign(dev, 0, n, ci, a, out);
 }
 
-int pipe_cache_on(void) {   // NX2NAVI_FFX_PIPE_CACHE, read once
+int pipe_cache_on(void) {   // OOTPC_FFX_PIPE_CACHE, read once
     static std::atomic<int> on{-1};
     int v = on.load(std::memory_order_relaxed);
-    if (v < 0) on.store(v = cfg_bool("NX2NAVI_FFX_PIPE_CACHE"), std::memory_order_relaxed);
+    if (v < 0) on.store(v = cfg_bool("OOTPC_FFX_PIPE_CACHE"), std::memory_order_relaxed);
     return v;
 }
 
@@ -102,7 +102,7 @@ ffxReturnCode_t create_counted(ffxContext *ctx, ffxCreateContextDescHeader *desc
     if (r != FFX_API_RETURN_OK) return r;
     if (!pipe_cache_on())
         rt_log("ffx: context created in %.0f ms; its pipelines are made without the runtime's pipeline caches "
-               "(NX2NAVI_FFX_PIPE_CACHE=0)", ms);
+               "(OOTPC_FFX_PIPE_CACHE=0)", ms);
     else if (!made)
         rt_log("ffx: context created in %.0f ms; it made no pipeline through the runtime's creates", ms);
     else
@@ -118,7 +118,7 @@ ffxReturnCode_t create_counted(ffxContext *ctx, ffxCreateContextDescHeader *desc
 // dynamic resolution mode. One context per output size that every mode of the menu ran on, with another render size at
 // each dispatch and without that flag, preceded an access violation in AMD's driver inside FSR 4's dispatch at the
 // first frame after a switch from 67 % to 100 % (vk_ffx4.cpp keeps its contexts the same way). With the game's dynamic
-// resolution on (NX2NAVI_DYN_RES, dynres.c), whose steps change the render size every few seconds, one context with
+// resolution on (OOTPC_DYN_RES, dynres.c), whose steps change the render size every few seconds, one context with
 // that flag takes them all. A context of another render size goes once no command buffer can still hold it
 // (UP_RECENT), so a switch keeps at most two of an output size for a few frames, and the game's second scenes, of
 // another output size, keep their own. When all slots are taken, the least recently used one is destroyed for the new
@@ -162,11 +162,11 @@ FfxApiResource image(const VkFfxImage *i, uint32_t state, uint32_t usage) {
     return ffxApiGetResourceVK((void *)i->image, ffxApiGetImageResourceDescriptionVK(i->image, ci, usage), state);
 }
 
-// NX2NAVI_FFX_KEYS=<key>:<value>[,...] (test): FSR 3.1's tuning constants for each new context (ffx_upscale.h
+// OOTPC_FFX_KEYS=<key>:<value>[,...] (test): FSR 3.1's tuning constants for each new context (ffx_upscale.h
 // FfxApiConfigureUpscaleKey: 0 velocity factor, 1 reactiveness scale, 2 shading change scale, 3 accumulation added per
 // frame, 4 minimum disocclusion accumulation). The library reads the value through the pointer.
 void configure_keys(ffxContext *ctx) {
-    const char *e = cfg_get("NX2NAVI_FFX_KEYS");
+    const char *e = cfg_get("OOTPC_FFX_KEYS");
     static float value[8];
     for (int n = 0; e && *e && n < 8; n++) {
         unsigned key = 0;
@@ -186,7 +186,7 @@ void configure_keys(ffxContext *ctx) {
 Up *context_for(uint32_t w, uint32_t h, uint32_t ow, uint32_t oh) {
     up_tick++;
     uint64_t now = plat_now_ns();
-    const bool drs = cfg_bool("NX2NAVI_DYN_RES");
+    const bool drs = cfg_bool("OOTPC_DYN_RES");
     Up *found = nullptr;
     for (Up &u : U)
         if (u.ctx && u.ow == ow && u.oh == oh && u.drs == drs && (drs ? w <= u.mw && h <= u.mh : w == u.mw && h == u.mh))
@@ -228,7 +228,7 @@ Up *context_for(uint32_t w, uint32_t h, uint32_t ow, uint32_t oh) {
     d.header.pNext = &be.header;
     // no infinite-depth flag: the game's far plane is finite (vk_dlaa.c proj_planes) and each dispatch gives it
     d.flags = FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
-    // NX2NAVI_FFX_DEBUG=1 (test): the library checks the values of each dispatch and says what it finds (message)
+    // OOTPC_FFX_DEBUG=1 (test): the library checks the values of each dispatch and says what it finds (message)
     if (rt_knob("FFX_DEBUG", "0")) d.flags |= FFX_UPSCALE_ENABLE_DEBUG_CHECKING;
     if (drs) d.flags |= FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION;
     d.maxRenderSize = {mw, mh};
@@ -307,8 +307,8 @@ extern "C" int vk_ffx_available(void) {
 // the same library, its API calls; and a queue for the frame generation swapchain's presents (vk_fg_has_queues)
 extern "C" int vk_ffx_framegen_available(void) { return vk_ffx_available() && vk_fg_has_queues(); }
 
-// NX2NAVI_FSR4 (default 0, live): FSR 4 where it runs (vk_ffx4.cpp) and has not failed in a row, else FSR 3.1.
-extern "C" int vk_ffx_fsr4(void) { return cfg_bool("NX2NAVI_FSR4") && vk_ffx4_available() && !vk_ffx4_failed(); }
+// OOTPC_FSR4 (default 0, live): FSR 4 where it runs (vk_ffx4.cpp) and has not failed in a row, else FSR 3.1.
+extern "C" int vk_ffx_fsr4(void) { return cfg_bool("OOTPC_FSR4") && vk_ffx4_available() && !vk_ffx4_failed(); }
 
 extern "C" int vk_ffx_trim_idle(uint64_t recent) {
     int n = 0;
@@ -355,7 +355,7 @@ extern "C" int vk_ffx_upscale(VkCommandBuffer cb, const VkFfxImage *color, const
     // The sharpness slider (0-100) drives FSR's own RCAS here, as it does for FSR 1. Below a render scale of three
     // quarters it goes towards the maximum, all the way from Performance down, where FSR 3.1 is soft (vk_dlaa.c
     // "FSR 3.1's second sharpening pass", which has the measurements); 0 still turns it off.
-    int sharp = cfg_int("NX2NAVI_SHARPNESS");
+    int sharp = cfg_int("OOTPC_SHARPNESS");
     d.enableSharpening = sharp > 0;
     d.sharpness = sharp > 100 ? 1.0f : sharp / 100.0f;
     if (sharp > 0) d.sharpness += (1.0f - d.sharpness) * vk_dlaa_fsr3_boost(color->width, out->width);
@@ -381,7 +381,7 @@ extern "C" ffxReturnCode_t vk_ffx_create(ffxContext *ctx, ffxCreateContextDescHe
 }
 
 // What the library is handed as ffxCreateBackendVKDesc.vkDeviceProcAddr: the device's functions, with the two
-// pipeline creates replaced by ours (compute_pipelines, graphics_pipelines) unless NX2NAVI_FFX_PIPE_CACHE is 0.
+// pipeline creates replaced by ours (compute_pipelines, graphics_pipelines) unless OOTPC_FFX_PIPE_CACHE is 0.
 extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_ffx_proc_addr(VkDevice dev, const char *name) {
     if (name && pipe_cache_on()) {
         if (!strcmp(name, "vkCreateComputePipelines")) return (PFN_vkVoidFunction)compute_pipelines;
@@ -391,7 +391,7 @@ extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_ffx_proc_addr(VkDevice de
 }
 
 // --probe-ffx-cache (host.h): one FSR 3.1 upscaling context on the device, without a window or the game, and where
-// its pipelines came from. The pipeline caches are those beside the executable, or NX2NAVI_PIPELINE_CACHE's, and are
+// its pipelines came from. The pipeline caches are those beside the executable, or OOTPC_PIPELINE_CACHE's, and are
 // saved as after a run, so a second run of the probe shows what the first one's files give
 // (tests/ffx_cache_check.py runs it twice on a folder of its own). Fails when the context is not created, or when
 // the library made no pipeline through the runtime's creates although they are on.
@@ -416,7 +416,7 @@ extern "C" int vk_ffx_probe_cache(void) {
     int on = pipe_cache_on(), fails = 0;
     printf("probe-ffx-cache: context %s in %.0f ms; pipelines made through the runtime's creates: %llu (from the "
            "pipeline caches %llu, compiled into the play cache %llu, through the one cache %llu, with no cache %llu); "
-           "NX2NAVI_FFX_PIPE_CACHE %d\n", u ? "created" : "not created", ms, made, hit, comp, made - hit - comp - none,
+           "OOTPC_FFX_PIPE_CACHE %d\n", u ? "created" : "not created", ms, made, hit, comp, made - hit - comp - none,
            none, on);
     if (!u) fails++, printf("probe-ffx-cache: FAIL: no context\n");
     if (u && on && !made) fails++, printf("probe-ffx-cache: FAIL: the library created its pipelines past the runtime\n");

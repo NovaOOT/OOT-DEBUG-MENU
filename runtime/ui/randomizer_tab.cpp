@@ -1,4 +1,4 @@
-// The Randomizer tab of the in-game menu: the generator's options (randomizer.c, nx2navi.ini [randomizer]), the seed,
+// The Randomizer tab of the in-game menu: the generator's options (randomizer.c, OOT-PC.ini [randomizer]), the seed,
 // and Generate, which writes the Randomizer mod in the background; the new seed applies at the next start.
 #include <stdio.h>
 #include <string.h>
@@ -126,13 +126,21 @@ extern "C" void tab_randomizer(float scale) {
                                 kOptions[i].desc);
         if (r >= 0 && !running) opt_apply(o->key, o->values[r]);
     }
+    {   // not part of the seed: invisible_walls.c reads it while the Randomizer mod is on, from the next area loaded
+        const char *iw = cfg_get("OOTPC_RANDO_INVISIBLE_WALLS");
+        bool gone = iw && !strcmp(iw, "remove");
+        if (opt_toggle_text("##rando_invisible_walls", "Remove invisible walls", "While the Randomizer mod is on, "
+                            "the invisible walls that keep Link on the intended paths are gone, so shortcuts and jumps "
+                            "the normal game blocks are open. Takes effect from the next area loaded.", gone))
+            opt_apply("OOTPC_RANDO_INVISIBLE_WALLS", gone ? "keep" : "remove");
+    }
     {
-        const char *sp = cfg_get("NX2NAVI_RANDO_SPOILER");
+        const char *sp = cfg_get("OOTPC_RANDO_SPOILER");
         bool on = !sp || strcmp(sp, "0");
         if (running) opt_disable_next_text("Generating...");
         if (opt_toggle_text("##rando_spoiler", "Write a spoiler log", "spoiler.txt in the Randomizer mod's folder "
                             "lists where everything went.", on) && !running)
-            opt_apply("NX2NAVI_RANDO_SPOILER", on ? "0" : "1");
+            opt_apply("OOTPC_RANDO_SPOILER", on ? "0" : "1");
     }
 
     opt_group_text("About");

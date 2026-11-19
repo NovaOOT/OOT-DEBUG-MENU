@@ -1,9 +1,9 @@
-// HDR output (NX2NAVI_HDR=1): an HDR10 swapchain (Rec. 2020 primaries, PQ) and a game picture tone mapped to the
-// display's range, one fixed look (shaders/hdr_tonemap.frag says which). Settings: NX2NAVI_HDR, on and off following
+// HDR output (OOTPC_HDR=1): an HDR10 swapchain (Rec. 2020 primaries, PQ) and a game picture tone mapped to the
+// display's range, one fixed look (shaders/hdr_tonemap.frag says which). Settings: OOTPC_HDR, on and off following
 // the menu during a run (vk_hdr_wanted), the game's own HDR (native, the menu's other HDR) from the start only; and
-// the nits NX2NAVI_HDR_PEAK_NITS (the display's peak), NX2NAVI_HDR_GAME_NITS (the picture's white, "paper white") and
-// NX2NAVI_HDR_UI_NITS (the HUD's and this menu's white), read when the settings change (vk_hdr_support). With
-// NX2NAVI_HDR=0 the swapchain is SDR, the spliced tonemap gives the game's own SDR picture (vk_hdr_support, p0.w = -1)
+// the nits OOTPC_HDR_PEAK_NITS (the display's peak), OOTPC_HDR_GAME_NITS (the picture's white, "paper white") and
+// OOTPC_HDR_UI_NITS (the HUD's and this menu's white), read when the settings change (vk_hdr_support). With
+// OOTPC_HDR=0 the swapchain is SDR, the spliced tonemap gives the game's own SDR picture (vk_hdr_support, p0.w = -1)
 // and the present is what it was.
 //
 // The game's picture (docs/architecture.md, "HDR"). The game tonemaps its scene into an r11g11b10f target, upscales it
@@ -51,9 +51,9 @@
 // - armed: the HDR path is set up, so the menu can switch HDR on and off without a restart: the instance and device
 //   get the HDR extensions (vk_device.c), the game's tonemap is spliced as its shaders load (vk_hdr_shader_swap) and
 //   every draw's support buffer carries the settings (vk_exec_draw.c). While the swapchain is SDR the spliced tonemap
-//   returns the game's own SDR result. Always, unless NX2NAVI_HDR_LIVE = 0 with NX2NAVI_HDR = 0 (the path left out as it
+//   returns the game's own SDR result. Always, unless OOTPC_HDR_LIVE = 0 with OOTPC_HDR = 0 (the path left out as it
 //   was before the setting followed the menu: HDR then needs a restart) or a probe turned it off (vk_hdr_off).
-// - native: NX2NAVI_HDR = native, the game's own HDR. The display is reported as HDR10 (ov_gfx.c
+// - native: OOTPC_HDR = native, the game's own HDR. The display is reported as HDR10 (ov_gfx.c
 //   QueryDisplayHdrStatus, with the peak and paper white of the settings), and the game then renders its HDR picture
 //   itself and presents it as PQ-encoded Rec. 2020 in A2B10G10R10 (format 64), which goes to the HDR10 swapchain as it
 //   is: no tonemap splice, no float picture, no encode (pictures still presented in 8 bits, before the switch, are
@@ -62,8 +62,8 @@ static int g_armed = -1, g_native = -1;
 
 static void hdr_start(void) {
     if (g_armed >= 0) return;
-    g_native = !strcmp(cfg_value("NX2NAVI_HDR"), "native");
-    g_armed = cfg_bool("NX2NAVI_HDR") || cfg_bool("NX2NAVI_HDR_LIVE");   // last: the mark that both are read
+    g_native = !strcmp(cfg_value("OOTPC_HDR"), "native");
+    g_armed = cfg_bool("OOTPC_HDR") || cfg_bool("OOTPC_HDR_LIVE");   // last: the mark that both are read
 }
 
 int vk_hdr_armed(void) {
@@ -83,17 +83,17 @@ int vk_hdr_wanted(void) {
     if (g_native) return 1;
     unsigned v = cfg_version();
     if (__atomic_load_n(&seen, __ATOMIC_ACQUIRE) != v) {
-        __atomic_store_n(&on, cfg_bool("NX2NAVI_HDR") != 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&on, cfg_bool("OOTPC_HDR") != 0, __ATOMIC_RELEASE);
         __atomic_store_n(&seen, v, __ATOMIC_RELEASE);
     }
     return __atomic_load_n(&on, __ATOMIC_ACQUIRE);
 }
 
 // The menu's HDR row: what is set takes a restart. To or from the game's own HDR, and switching HDR on in a run that
-// started without the HDR path (NX2NAVI_HDR_LIVE = 0).
+// started without the HDR path (OOTPC_HDR_LIVE = 0).
 int vk_hdr_needs_restart(void) {
     hdr_start();
-    return (!strcmp(cfg_value("NX2NAVI_HDR"), "native")) != g_native || (!g_armed && cfg_bool("NX2NAVI_HDR"));
+    return (!strcmp(cfg_value("OOTPC_HDR"), "native")) != g_native || (!g_armed && cfg_bool("OOTPC_HDR"));
 }
 
 void vk_hdr_off(void) { g_native = 0, g_armed = 0; }
@@ -122,9 +122,9 @@ static Nits nits(void) {
         plat_mutex_lock(&N.lock);
         if (N.seen != v) {
             Nits *n = &N.snap[!N.cur];
-            n->peak = clampf((float)cfg_double("NX2NAVI_HDR_PEAK_NITS"), 80.0f, 10000.0f);
-            n->game = clampf((float)cfg_double("NX2NAVI_HDR_GAME_NITS"), 48.0f, 500.0f);
-            n->ui = clampf((float)cfg_double("NX2NAVI_HDR_UI_NITS"), 48.0f, 500.0f);
+            n->peak = clampf((float)cfg_double("OOTPC_HDR_PEAK_NITS"), 80.0f, 10000.0f);
+            n->game = clampf((float)cfg_double("OOTPC_HDR_GAME_NITS"), 48.0f, 500.0f);
+            n->ui = clampf((float)cfg_double("OOTPC_HDR_UI_NITS"), 48.0f, 500.0f);
             n->gamma = HDR_GAMMA;
             n->tm[0] = n->peak, n->tm[1] = n->game, n->tm[2] = n->ui, n->tm[3] = 1.0f;
             __atomic_store_n(&N.cur, !N.cur, __ATOMIC_RELEASE);
@@ -752,7 +752,7 @@ void vk_hdr_shader_swap(uint32_t **spirv, uint64_t *words) {
 
 // ---- 2. the picture the window texture is copied from
 
-int vk_hdr_track;                 // vk_exec_draw.c calls vk_hdr_draw: set at the first present with NX2NAVI_HDR=1
+int vk_hdr_track;                 // vk_exec_draw.c calls vk_hdr_draw: set at the first present with OOTPC_HDR=1
 static volatile int32_t g_active;   // the swapchain is HDR10 (gfx_present.c vk_hdr_set_active)
 static PlatMutex rec_lock = PLAT_MUTEX_INIT;
 // per presented window image: what the last draw copied, and where in the stream (vk_exec_stream_pos)
@@ -823,7 +823,7 @@ void vk_hdr_image_gone(VkImage image) {   // a texture image went away: forget i
 
 // ---- swapchain
 
-// While NX2NAVI_HDR is on (vk_hdr_wanted), the HDR10 format among the surface's (10-bit UNORM, ST 2084): 1 with *out
+// While OOTPC_HDR is on (vk_hdr_wanted), the HDR10 format among the surface's (10-bit UNORM, ST 2084): 1 with *out
 // set, else 0 and the reason logged once.
 int vk_hdr_surface_format(const VkSurfaceFormatKHR *f, uint32_t n, VkSurfaceFormatKHR *out) {
     if (!vk_hdr_wanted()) return 0;

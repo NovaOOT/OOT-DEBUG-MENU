@@ -1,4 +1,4 @@
-// Frame generation with AMD FSR 3.1 (NX2NAVI_FRAMEGEN = fsr3; applies after a restart): AMD's frame generation
+// Frame generation with AMD FSR 3.1 (OOTPC_FRAMEGEN = fsr3; applies after a restart): AMD's frame generation
 // swapchain (amd_fidelityfx_vk.dll, vk_ffx.cpp loads it) takes the place of gfx_present.c's swapchain. Every frame
 // the game presents, the swapchain presents a generated frame between it and the one before, on its own present
 // queue and pacing threads, so the screen shows twice the game's frame rate.
@@ -99,13 +99,13 @@ void fail(const char *what, unsigned r) {
 // still the one to use: a change of that setting or of the upscaler between FSR 3.1 and FSR 4, or a failure of the SDK
 // 2.4 path, takes it down as switching frame generation off does, and the next present makes it with the other library.
 // FSR 4 is the upscaler only while one is set (dlaa): without an upscaler the FSR 3.1 library's runs.
-static int use4(void) {   // NX2NAVI_FSR4_FG (default 0, live): 1 takes the SDK 2.4's frame generation with FSR 4
-    return cfg_bool("NX2NAVI_FSR4_FG") && cfg_bool("NX2NAVI_DLAA") && vk_ffx_fsr4() && !vk_fg4_failed() &&
+static int use4(void) {   // OOTPC_FSR4_FG (default 0, live): 1 takes the SDK 2.4's frame generation with FSR 4
+    return cfg_bool("OOTPC_FSR4_FG") && cfg_bool("OOTPC_DLAA") && vk_ffx_fsr4() && !vk_fg4_failed() &&
            vk_fg4_available();
 }
 
 extern "C" int vk_fg_wanted(void) {
-    if (strcmp(cfg_value("NX2NAVI_FRAMEGEN"), "fsr3") || vk_dlssg_dpa()) return 0;
+    if (strcmp(cfg_value("OOTPC_FRAMEGEN"), "fsr3") || vk_dlssg_dpa()) return 0;
     int four = use4();
     if (vk_fg4_active()) return four;
     if (F.sc) return !F.failed && !four;

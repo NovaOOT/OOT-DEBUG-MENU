@@ -9,9 +9,9 @@
 // the menu backgrounds that redraw a capture of the whole picture stay full width), wide_movie shows pre-rendered
 // movies in the same middle 16:9, and wide_save draws that middle 16:9 into the picture a save file keeps. The heights
 // stay the game's (1440 and 1080), so only the width grows, by the shape's ratio to 16:9; the present scales the
-// picture to the window keeping its shape (gfx_present.c, NX2NAVI_ASPECT=fit).
+// picture to the window keeping its shape (gfx_present.c, OOTPC_ASPECT=fit).
 //
-// Setting NX2NAVI_GAME_ASPECT, read at start: "16:9" (the game's own, every set off), "window" (the shape of the window,
+// Setting OOTPC_GAME_ASPECT, read at start: "16:9" (the game's own, every set off), "window" (the shape of the window,
 // or of the monitor in fullscreen), or a fixed shape "21:9" (2560x1080 monitors, 64:27), "32:9". A shape within 1% of
 // 16:9 or narrower than it keeps the game's own sizes; the widest is 32:9.
 //
@@ -45,7 +45,7 @@ static int screen_size(int *w, int *h) {
 
 // The shape the setting asks for as width / height; 0 for the game's own.
 static double wanted_ratio(void) {
-    const char *s = cfg_value("NX2NAVI_GAME_ASPECT");
+    const char *s = cfg_value("OOTPC_GAME_ASPECT");
     if (!strcmp(s, "21:9")) return 64.0 / 27.0;
     if (!strcmp(s, "32:9")) return 32.0 / 9.0;
     if (strcmp(s, "window")) return 0;
@@ -57,14 +57,14 @@ static double wanted_ratio(void) {
     return (double)w / h;
 }
 
-// NX2NAVI_GAME_RES: the picture's height, 540 up to 4320 ("window": the window's height, or the monitor's in
+// OOTPC_GAME_RES: the picture's height, 540 up to 4320 ("window": the window's height, or the monitor's in
 // fullscreen, never below the game's 1440). 1080, 720 and 540 are below the game's own: lighter pictures for slower
 // GPUs, whose scene the game sizes against that picture itself, as the comment at scale_k says. 540 is the least: DLSS
 // Ultra Performance there renders a 320-pixel-wide 16:9 scene, the narrowest the DLSS pass recognises
 // (vk_dlaa.h DLAA_SCENE_MIN_W).
 #define PICTURE_MIN_H 540
 static unsigned picture_height(void) {
-    const char *s = cfg_value("NX2NAVI_GAME_RES");
+    const char *s = cfg_value("OOTPC_GAME_RES");
     int w = 0, h = GAME_H, min = PICTURE_MIN_H;
     if (!strcmp(s, "window")) {
         if (!screen_size(&w, &h)) h = GAME_H;
@@ -82,7 +82,7 @@ static unsigned picture_height(void) {
 // Balanced 0.58, Performance 1/2, Ultra Performance 1/3) instead of what the game's dynamic-resolution controller
 // picks. The share is written to +240 at every change of the setting (the menu switches the mode live); the set goes on
 // RES_FIXED_AFTER presents after the first, once the controller has filled the fields the fixed path keeps. Without
-// DLSS or FSR the share is NX2NAVI_SCENE_SHARE's (plain_share): the game's own most unless set, all of the picture
+// DLSS or FSR the share is OOTPC_SCENE_SHARE's (plain_share): the game's own most unless set, all of the picture
 // for the menu's Native.
 #define RES_FIXED_AFTER 120
 // The share follows the upscaler that runs, not the setting: DLSS starts only after a restart and only where NGX came up
@@ -111,21 +111,24 @@ static double fit_share(void) {
     return heap_unserved ? PLAIN_SHARE : heap_share();
 }
 
-// The share of the picture the upscaler's mode renders (NX2NAVI_DLSS; NVIDIA's ratios).
-static double mode_share(void) {
-    const char *m = cfg_value("NX2NAVI_DLSS");
+// The share of the picture an upscaler mode renders (NVIDIA's ratios); mode_share is the setting's (OOTPC_DLSS).
+static double share_of(const char *m) {
     return !strcmp(m, "quality") ? 2.0 / 3 : !strcmp(m, "balanced") ? 0.58 : !strcmp(m, "performance") ? 0.5
          : !strcmp(m, "ultra_performance") ? 1.0 / 3 : 1.0;
 }
+static double mode_share(void) { return share_of(cfg_value("OOTPC_DLSS")); }
 
 // DLSS or FSR 3.1 scales the scene in this run: the setting is on and the upscaler came up.
 static int upscaler_runs(void) {
-    return vk_dlaa_wanted() && cfg_bool("NX2NAVI_DLAA") && (vk_dlaa_fsr3() || vk_dlaa_available());
+    return vk_dlaa_wanted() && cfg_bool("OOTPC_DLAA") && (vk_dlaa_fsr3() || vk_dlaa_available());
 }
 
 static double dlss_share(void) {
     if (!upscaler_runs()) return 0;
-    double s = mode_share();
+    // Dynamic resolution's step while it differs from the setting (dynres.c); its sharpest step is the setting, so
+    // the heap made for the setting holds it.
+    const char *dyn = dynres_override();
+    double s = dyn ? share_of(dyn) : mode_share();
     // Never more than the texture heap the game has was made for (fit_share). A mode chosen in the menu that renders
     // more than the start's did gets its size after a restart; a heap at its limit never holds the whole picture.
     if (s > fit_share()) {
@@ -141,19 +144,21 @@ static double dlss_share(void) {
     return s;
 }
 
-// The share without DLSS or FSR 3.1 (NX2NAVI_SCENE_SHARE, 1 at most): PLAIN_SHARE unset, 1 for the menu's Native
+// The share without DLSS or FSR 3.1 (OOTPC_SCENE_SHARE, 1 at most): PLAIN_SHARE unset, 1 for the menu's Native
 // (ui/menu.cpp row_upscaling: the scene at the picture's size, which the stand-in then only decodes, vk_tonemap.c),
 // 0 for the game's dynamic resolution, as with no share at all. Read at every call, so the menu's choice applies at
 // once within the heap the start made (fit_share).
 static double plain_share(void) {
-    const char *e = cfg_get("NX2NAVI_SCENE_SHARE");
+    const char *e = cfg_get("OOTPC_SCENE_SHARE");
     double s = e && *e ? atof(e) : PLAIN_SHARE;
     return s > 1 ? 1 : s;
 }
 
 static double scene_share(void) {
     double s = dlss_share(), plain = plain_share();
-    return s > 0 ? s : plain > fit_share() ? fit_share() : plain;   // NX2NAVI_SCENE_SHARE above the heap the game has
+    if (s > 0) return s;
+    if (plain > fit_share()) plain = fit_share();   // OOTPC_SCENE_SHARE above the heap the game has
+    return plain * dynres_plain_factor();          // dynamic resolution's step without DLSS (dynres.c); 0 stays 0
 }
 
 // The share the settings ask for, before the heap's limit: the upscaler's mode while one runs, else plain_share.
@@ -181,7 +186,7 @@ static double share_most(void) {
 // The largest share of the picture the scene can have in this run, which the texture heap is made for
 // (wide_heap_extra_kib). Decided once, at the first call, which is the start (memory.c sizes the application pool
 // from it before any device exists): the game's own most, PLAIN_SHARE, or more where the settings at the start ask
-// for more: NX2NAVI_SCENE_SHARE, or the upscaler's mode when the upscaler is on (DLAA and FSR at native size render
+// for more: OOTPC_SCENE_SHARE, or the upscaler's mode when the upscaler is on (DLAA and FSR at native size render
 // the whole picture; the modes below PLAIN_SHARE need nothing). From the settings, not from what runs: DLSS is known
 // to run only once the device is up. A mode chosen in the menu later that renders more keeps the start's share until
 // a restart (dlss_share).
@@ -193,7 +198,7 @@ static double heap_share(void) {
     if (share < 0) {
         double s = plain_share();
         if (s < PLAIN_SHARE) s = PLAIN_SHARE;
-        if (rt_patch_set("res_fixed") >= 0 && cfg_bool("NX2NAVI_DLAA") && mode_share() > s) s = mode_share();
+        if (rt_patch_set("res_fixed") >= 0 && cfg_bool("OOTPC_DLAA") && mode_share() > s) s = mode_share();
         double most = share_most();
         if (s > most) {
             if (most < PLAIN_SHARE) most = PLAIN_SHARE;   // wide_heap_extra_kib says what a picture this large lacks
@@ -222,7 +227,7 @@ static void scene_log(double s, int first) {
     static int last_how = -1;
     // 1 DLSS, 2 FSR, 3 not scaled (the stand-in decodes 1:1), 4 the stand-in's edge-adaptive filter, 5 its linear one
     int how = dlss_share() > 0 ? (vk_dlaa_fsr3() ? 2 : 1) : s >= 1 ? 3
-            : !strcmp(cfg_value("NX2NAVI_STANDIN_FILTER"), "easu") ? 4 : 5;
+            : !strcmp(cfg_value("OOTPC_STANDIN_FILTER"), "easu") ? 4 : 5;
     if (!first && how == last_how && fabs(s - last_s) < 0.001) return;
     last_s = s, last_how = how;
     static const char *const hows[] = {
@@ -249,10 +254,15 @@ void wide_present(void) {
     static unsigned seen = ~0u;
     if (set == -2) set = rt_patch_set("res_fixed");
     if (set < 0) return;
+    // dynamic resolution's step at the last look (dynres_override's constant strings, dynres_plain_factor)
+    static const char *dyn_seen;
+    static double factor_seen = 1;
     unsigned v = cfg_version();
+    const char *dyn = dynres_override();
+    double factor = dynres_plain_factor();
     int at = ++presents == RES_FIXED_AFTER, due = presents >= RES_FIXED_AFTER;
-    if (v == seen && !at) return;
-    seen = v;
+    if (v == seen && dyn == dyn_seen && factor == factor_seen && !at) return;
+    seen = v, dyn_seen = dyn, factor_seen = factor;
     double s = scene_share();
     float page_s = (float)(s * scale_k);
     if (s > 0) memcpy((uint8_t *)rt_patch_page() + 240, &page_s, 4);
@@ -311,7 +321,7 @@ static int picture_size(unsigned *ow, unsigned *oh, int quiet) {
 // the application pool, so no other heap shrinks. 0 for the game's picture and scene, and for a larger picture
 // without the widescreen sets. In MiB, with the scene at the game's own most and with all of the picture (DLAA):
 // 2560x1440 0 and 238, 3440x1440 105 and 424, 3840x2160 382 and 915, 5120x2160 610 and 1,322, 7680x2160 1,068 and
-// 2,135. The heap is committed as the game first writes it (memory.c, NX2NAVI_HEAP_LAZY), so the room a run does not
+// 2,135. The heap is committed as the game first writes it (memory.c, OOTPC_HEAP_LAZY), so the room a run does not
 // use costs address space and no memory.
 // At most mem_heap_extra_max_kib: heap_share has taken the scene's share down to what fits, and a picture too large
 // even with the game's own scene (above 10240x2880) gets the most there is, with a line that says so.

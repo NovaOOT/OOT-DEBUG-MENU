@@ -15,8 +15,8 @@ const int rt_game_version = 111;
 static const char *button = "off", *mode = "toggle";
 static GuestFn link_fn, stance_fn;
 const char *cfg_value(const char *key) {
-    if (!strcmp(key, "NX2NAVI_SPRINT_BUTTON")) return button;
-    if (!strcmp(key, "NX2NAVI_SPRINT_MODE")) return mode;
+    if (!strcmp(key, "OOTPC_SPRINT_BUTTON")) return button;
+    if (!strcmp(key, "OOTPC_SPRINT_MODE")) return mode;
     return "";
 }
 static int set_on = 1;   // the patch set sprint, on at the start as its default
@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
     test_main_base = (uintptr_t)img;
     assert(link_fn && stance_fn);
     if (argc > 1 && !strcmp(argv[1], "kept-off")) {
-        // off at the start (NX2NAVI_SPRINT_BUTTON_PATCH=0, or a mod patching its sites): no rows, never switched on, and the
+        // off at the start (OOTPC_SPRINT_BUTTON_PATCH=0, or a mod patching its sites): no rows, never switched on, and the
         // button always reaches the game
         set_on = 0, button = "l3";
         assert(!sprint_available());

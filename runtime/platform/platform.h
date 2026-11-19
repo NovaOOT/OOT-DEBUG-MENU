@@ -196,7 +196,7 @@ void plat_rmutex_lock(PlatRMutex *m);
 int plat_rmutex_trylock(PlatRMutex *m);   // 1 when acquired (or already held by this thread)
 void plat_rmutex_unlock(PlatRMutex *m);
 
-// Lock-wait timing (NX2NAVI_LOCK_TIME, perf.c): after plat_lock_timing(fn) on a thread, each plat_mutex_lock(_shared)
+// Lock-wait timing (OOTPC_LOCK_TIME, perf.c): after plat_lock_timing(fn) on a thread, each plat_mutex_lock(_shared)
 // or plat_rmutex_lock there that has to wait calls fn with the address of the code that asked for the lock (for a
 // recursive mutex, the caller of plat_rmutex_lock) and the nanoseconds it waited. NULL turns it off. Windows only.
 typedef void (*PlatLockNote)(void *site, uint64_t ns);
@@ -273,10 +273,10 @@ uint64_t plat_mem_written(uint64_t addr, uint64_t n, uint64_t *pages, uint64_t m
 // pages in one call, where the watch works by protecting pages (Linux), so the stores do not fault page by page. The
 // pages count as written. Returns 0 when there is nothing to clear or it cannot be done; the write is valid either way.
 int plat_mem_prepare_write(uint64_t addr, uint64_t n);
-// Guest memory as dma-bufs (Linux, NX2NAVI_DMABUF, on by default; vk_memory.c "dma-buf imports"): the watched
+// Guest memory as dma-bufs (Linux, OOTPC_DMABUF, on by default; vk_memory.c "dma-buf imports"): the watched
 // reservations are shared mappings of one memfd, and /dev/udmabuf makes a dma-buf of a page range of it, which the GPU
 // driver imports like its own memory. plat_mem_dmabuf_ok: 1 when that is so, with udmabuf's size limit in bytes in *limit and the
-// first page of a shared reservation in *any; 0 with the reason in *why ("" when NX2NAVI_DMABUF=0 turned it off).
+// first page of a shared reservation in *any; 0 with the reason in *why ("" when OOTPC_DMABUF=0 turned it off).
 // plat_mem_dmabuf: a new dma-buf file descriptor over [addr, addr + n) (whole pages inside one watched reservation),
 // -1 with errno on failure. Its pages stay pinned (a decommit zeroes them in place) until plat_mem_dmabuf_done is
 // told, after the last user of the dma-buf (the imported memory) is gone; the pages of its range that nothing has
@@ -453,7 +453,7 @@ uintptr_t plat_exe_base(void);                            // where the executabl
 int plat_module_of(uintptr_t addr, char *name, size_t cap, uintptr_t *base);
 #define PLAT_PATH_MAX 1024   // path buffers of the runtime
 #ifdef _WIN32
-#define PLAT_EXE_SUFFIX ".exe"   // of the programs the runtime starts (nx2navi_xlate)
+#define PLAT_EXE_SUFFIX ".exe"   // of the programs the runtime starts (ootpc_xlate)
 #else
 #define PLAT_EXE_SUFFIX ""
 #endif

@@ -2,10 +2,10 @@
 // SPIR-V for Vulkan is the only output (no MSL, no vertex-counter lowering, no near-is-minus-w rewrite); depth clip control
 // is reported as supported and non-constant texture offsets as unsupported.
 // Protocol (stdout carries replies only; diagnostics go to stderr):
-//   nx2navi_xlate --serve              one request per stdin line: {"job": {...}, "out": "<dir>"}; one reply line per request:
+//   ootpc_xlate --serve              one request per stdin line: {"job": {...}, "out": "<dir>"}; one reply line per request:
 //                                   "ok <key>" or "fail <key> <message>"; a malformed line gets "fail ? <message>" and the loop continues.
-//   nx2navi_xlate <jobs.json> <outdir> batch mode: a JSON array of jobs, prints a summary, exit 1 if any failed.
-//   nx2navi_xlate --lower <file>       lowers SM86 instructions given as hex words and prints the Maxwell words (LowerFile).
+//   ootpc_xlate <jobs.json> <outdir> batch mode: a JSON array of jobs, prints a summary, exit 1 if any failed.
+//   ootpc_xlate --lower <file>       lowers SM86 instructions given as hex words and prints the Maxwell words (LowerFile).
 //   job: { "key", "stage": "vs|ps|cs", "code": path (graphics = 0x50-byte SPH + instructions, compute = instructions), "c1": hex,
 //          "sm86": bool + "size": bytes (an NVN2 program, lowered by AmpereLowering.cs), "nvn2_table": [start, textures,
 //          images] (NVN2 compute binding table), "lowered_out": path, "mesh": {"stage": 6|7, "threads", "maxv", "maxp",

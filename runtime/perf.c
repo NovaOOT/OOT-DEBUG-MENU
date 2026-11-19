@@ -1,5 +1,5 @@
-// Frame timing (NX2NAVI_TRACE=perf, the frame-time summary, the performance overlay's counts), the A/B switches (rt_ab,
-// rt_knob) and NX2NAVI_ONE_PER_CORE. The sampling profiler (NX2NAVI_PROFILE) is the OS's (prof_win.c); without one the weak
+// Frame timing (OOTPC_TRACE=perf, the frame-time summary, the performance overlay's counts), the A/B switches (rt_ab,
+// rt_knob) and OOTPC_ONE_PER_CORE. The sampling profiler (OOTPC_PROFILE) is the OS's (prof_win.c); without one the weak
 // prof_sampler_* below do nothing.
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +18,7 @@
 volatile uint32_t prof_render_tid, prof_main_tid, prof_replay_tid;
 
 __attribute__((weak)) int prof_sampler_start(void) {
-    if (cfg_get("NX2NAVI_PROFILE")) rt_log("prof: NX2NAVI_PROFILE: no sampling profiler on this OS");
+    if (cfg_get("OOTPC_PROFILE")) rt_log("prof: OOTPC_PROFILE: no sampling profiler on this OS");
     return 0;
 }
 __attribute__((weak)) void prof_sampler_write(void) {}
@@ -27,7 +27,7 @@ __attribute__((weak)) void prof_commit_census(uint64_t frame) { (void)frame; }
 __attribute__((weak)) void mem_guest_census(uint64_t frame) { (void)frame; }
 __attribute__((weak)) void mem_lazy_heap_report(uint64_t frame) { (void)frame; }
 
-// NX2NAVI_TRACE=perf, NX2NAVI_FLIGHT=1 or the full performance overlay: event counts are taken. Wait times are always taken
+// OOTPC_TRACE=perf, OOTPC_FLIGHT=1 or the full performance overlay: event counts are taken. Wait times are always taken
 // (frame-time summary). perf_base: the part fixed at start.
 static int perf_on, perf_base;
 static int overlay;   // performance overlay mode (perf_set_overlay): 0 off, 1 fps, 2 full
@@ -66,8 +66,8 @@ void prof_write(void) {
     prof_sampler_write();
 }
 
-// ---- NX2NAVI_TRACE=perf: frame interval and the time the render thread spends waiting, logged every 60 presents. The
-// flight recorder (NX2NAVI_FLIGHT=1, flight.c) takes the same numbers per frame.
+// ---- OOTPC_TRACE=perf: frame interval and the time the render thread spends waiting, logged every 60 presents. The
+// flight recorder (OOTPC_FLIGHT=1, flight.c) takes the same numbers per frame.
 static uint64_t wait_ns[PERF_N], frame_ns[PERF_N], worst_ns[PERF_N];   // window totals, this frame, the slowest frame
 
 uint64_t perf_begin(void) { return kern_now_ns(); }
@@ -121,7 +121,7 @@ void perf_count(int kind) {
     if (__atomic_load_n(&perf_on, __ATOMIC_RELAXED)) plat_inc64(&counts[kind]);
 }
 
-// ---- NX2NAVI_TRACE=perf work marks (host.h PERF_M_*): any thread adds; the present takes the frame's sums (mark_frame),
+// ---- OOTPC_TRACE=perf work marks (host.h PERF_M_*): any thread adds; the present takes the frame's sums (mark_frame),
 // names them on a slow frame's line and adds them to the 60-frame window's line.
 static const char *const mark_name[PERF_M_N] = {"file reads", "zstd decodes", "pipeline creates", "guest memory maps",
                                                 "pool init/finalize", "device memory allocations",
@@ -172,7 +172,7 @@ static int mark_text(const MarkSums *s, char *line, int n, size_t cap) {
     return n;
 }
 
-// ---- NX2NAVI_TRACE=perf segments (host.h perf_segment) and scenes (perf_scene). The present thread keeps the running
+// ---- OOTPC_TRACE=perf segments (host.h perf_segment) and scenes (perf_scene). The present thread keeps the running
 // segment's frame times in 50 us bins (SEG_BINS, up to 204.8 ms; slower frames land in the last bin, the worst is kept
 // apart), so a segment's 1% low is exact to 50 us at any frame rate. perf_segment and perf_scene come from any thread
 // (the input script's guest thread, the game's loading threads) and leave a request under seg_lock for the present.
@@ -360,7 +360,7 @@ static void seg_frame(uint64_t frame, uint64_t now, uint64_t d, const MarkSums *
 #define FT_PERIOD_NS 60000000000ull
 typedef struct {
     uint64_t frame, ns, wait[PERF_N], replay;
-    uint64_t op_ns[PERF_RP_N], op_n[PERF_RP_N], max_ns, hold_ns;   // NX2NAVI_REPLAY_TIME: the frame's replay ops
+    uint64_t op_ns[PERF_RP_N], op_n[PERF_RP_N], max_ns, hold_ns;   // OOTPC_REPLAY_TIME: the frame's replay ops
     uint64_t replay_cpu;   // the replaying thread's CPU time in the frame's replay
     uint32_t max_op;
 } FtWorst;
@@ -382,9 +382,9 @@ static struct {
 } ft;
 static uint64_t summary_t0;   // start of the current period (0: not started)
 
-// NX2NAVI_REPLAY_TIME=1: how the replay splits between the kinds of op it walks, reported with the frame-time summary.
+// OOTPC_REPLAY_TIME=1: how the replay splits between the kinds of op it walks, reported with the frame-time summary.
 // The replay is recorded on one thread, so these need no atomics. The kinds are PERF_RP_* in host.h.
-// NX2NAVI_LOCK_TIME=1 (default 0): the replay threads time every lock they have to wait for (platform.h
+// OOTPC_LOCK_TIME=1 (default 0): the replay threads time every lock they have to wait for (platform.h
 // plat_lock_timing), kept per asking site, and the frame-time summary lists the sites that waited longest since the last
 // summary, with the recorder's full-ring and drain waits. Sites are code addresses; "ref" is perf_lock_timing_here's,
 // which the link map names, so the others resolve as offsets from it.
@@ -419,11 +419,11 @@ void perf_lock_hold(void *site, uint64_t ns) {
 
 static int lt_on = -1;
 int perf_lock_holds_on(void) {
-    if (lt_on < 0) lt_on = cfg_bool("NX2NAVI_LOCK_TIME");
+    if (lt_on < 0) lt_on = cfg_bool("OOTPC_LOCK_TIME");
     return lt_on;
 }
 void perf_lock_timing_here(void) {
-    if (lt_on < 0) lt_on = cfg_bool("NX2NAVI_LOCK_TIME");
+    if (lt_on < 0) lt_on = cfg_bool("OOTPC_LOCK_TIME");
     if (lt_on) plat_lock_timing(lt_note);
 }
 
@@ -481,9 +481,9 @@ void perf_replay_op(int cat, uint64_t ns) {
     if ((unsigned)cat < PERF_RP_N) rp_ns[cat] += ns, rp_n[cat]++;
 }
 
-// The replay ops since the last present (NX2NAVI_REPLAY_TIME), so a frame over 25 ms charged to the replay can say
+// The replay ops since the last present (OOTPC_REPLAY_TIME), so a frame over 25 ms charged to the replay can say
 // what its replay was: how many ops of each kind, their time, the slowest op and how long the texture lock was held
-// over 1 ms (NX2NAVI_LOCK_TIME). The present thread takes and clears them in ft_frame; the replay adds.
+// over 1 ms (OOTPC_LOCK_TIME). The present thread takes and clears them in ft_frame; the replay adds.
 static volatile int64_t fr_ns[PERF_RP_N], fr_n[PERF_RP_N], fr_max_ns, fr_max_op;
 // Over the period: the frames over 25 ms charged to the replay, their sums, and how often each op was a frame's slowest.
 static uint64_t sr_n, sr_ns[PERF_RP_N], sr_cnt[PERF_RP_N], sr_max_ns, sr_hold_ns, sr_max_op[256], sr_wall, sr_cpu;
@@ -689,12 +689,12 @@ static void perf_gpu_line(uint64_t frame, double interval_ms, double pace_share,
            "%.0f MiB, private %.0f MiB; bound: %s",
            (unsigned long long)frame, gs, rw, ow, vs, ws, priv, bound);
     // Where the committed memory lies, every 3600 frames and whenever it grew by 1 GiB since the last census: the process
-    // has run out of commit in long sessions while the game's own pools stayed flat. Only with NX2NAVI_MEM_CENSUS=1, as
+    // has run out of commit in long sessions while the game's own pools stayed flat. Only with OOTPC_MEM_CENSUS=1, as
     // vk_memory.c's census: the walk holds the address-space lock the game's threads take at every page fault, and here
     // it ran on the presenting thread, so each one delayed a frame by 65-240 ms.
     static int census_on = -1;
     static uint64_t census_prv;
-    if (census_on < 0) census_on = cfg_bool("NX2NAVI_MEM_CENSUS");
+    if (census_on < 0) census_on = cfg_bool("OOTPC_MEM_CENSUS");
     if (census_on && (frame % 3600 == 0 || prv >= census_prv + (1ull << 30)))
         prof_commit_census(frame), mem_guest_census(frame), census_prv = prv;
     mem_lazy_heap_report(frame);
@@ -708,7 +708,7 @@ static void perf_gpu_line(uint64_t frame, double interval_ms, double pace_share,
 int rt_ab(void) {
     static int64_t period = -1;   // us of world clock; 0: off
     if (period < 0) {
-        const char *e = cfg_get("NX2NAVI_AB");
+        const char *e = cfg_get("OOTPC_AB");
         period = e && *e ? (int64_t)(atof(e) * 1e6) : 0;
     }
     int64_t w = period ? frame_step_world_us() : -1;
@@ -719,18 +719,18 @@ int rt_ab(void) {
 
 int rt_knob(const char *name, const char *def) {
     char key[64];
-    snprintf(key, sizeof key, "NX2NAVI_%s", name);
+    snprintf(key, sizeof key, "OOTPC_%s", name);
     const char *e = cfg_get(key);
     if (!e || !*e) e = def;
     return !strcmp(e, "ab") ? 2 : strcmp(e, "0") != 0;
 }
 
-// NX2NAVI_ONE_PER_CORE=1: the process keeps the first logical processor of each physical core, so busy threads (the
+// OOTPC_ONE_PER_CORE=1: the process keeps the first logical processor of each physical core, so busy threads (the
 // render thread, the guest cores, the job workers) never share a core's execution units with another; "ab" switches
 // it with the A/B blocks. Off by default until measured here; the same rule
 // is reported to give +4-10% on an 8-core SMT CPU.
 //
-// NX2NAVI_CACHE_DIE=1, the default: on a processor whose dies have L3 caches of different sizes (AMD's two-die
+// OOTPC_CACHE_DIE=1, the default: on a processor whose dies have L3 caches of different sizes (AMD's two-die
 // X3D processors, 3D V-Cache on one die) the process runs on the die with the larger cache, so the guest cores, the
 // render thread and the recorder share one L3 and never cross dies. Windows' own placement of games on that die
 // (game mode with AMD's driver) depends on recognizing the exe as a game. 0 leaves the placement to the OS; "ab"
@@ -784,7 +784,7 @@ void perf_cpu_start(void) { cpu_placement(); }
 
 int perf_cpu_on_cache_die(void) { return cpu_applied && cpu_die && (cpu_applied & ~cpu_die) == 0; }
 
-// NX2NAVI_CRASH_FILTER_GUARD (default 1; 0 off): once a second, the crash report's last-chance exception filter is put
+// OOTPC_CRASH_FILTER_GUARD (default 1; 0 off): once a second, the crash report's last-chance exception filter is put
 // back if a DLL loaded after the start (a GPU driver, an overlay) set its own in its place. Without it, a fault in such
 // a DLL ends the process with no FATAL line in the log. The first eight replacements are logged with the module.
 static void crash_filter_guard(uint64_t frame) {
@@ -795,7 +795,7 @@ static void crash_filter_guard(uint64_t frame) {
     if (plat_crash_filter_reassert(who, sizeof who) && logged < 8) {
         logged++;
         rt_log("diag: frame %llu: an exception filter from %s had replaced the crash report's; the crash report's is "
-               "back (NX2NAVI_CRASH_FILTER_GUARD)", (unsigned long long)frame, who);
+               "back (OOTPC_CRASH_FILTER_GUARD)", (unsigned long long)frame, who);
     }
 }
 
@@ -835,9 +835,9 @@ void perf_present(uint64_t frame) {
         last = now;
         return;
     }
-    static uint64_t slow_ns;   // NX2NAVI_PERF_SLOW_MS (default 50): frames at least this long get a line of their own
+    static uint64_t slow_ns;   // OOTPC_PERF_SLOW_MS (default 50): frames at least this long get a line of their own
     if (!slow_ns) {
-        const char *e = cfg_get("NX2NAVI_PERF_SLOW_MS");
+        const char *e = cfg_get("OOTPC_PERF_SLOW_MS");
         slow_ns = (uint64_t)(e && atoi(e) > 0 ? atoi(e) : 50) * 1000000ull;
     }
     MarkSums fm;

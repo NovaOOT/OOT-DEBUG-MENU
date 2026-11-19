@@ -29,9 +29,9 @@ LINE = re.compile(r'probe-ffx-cache: context (created|not created) in \d+ ms; pi
 def run(game, cache, setting):
     """One probe run -> (exit code, last probe line, the counts or None)."""
     env = dict(os.environ)
-    env['NX2NAVI_PIPELINE_CACHE'] = str(cache)
-    env.pop('NX2NAVI_PIPE_BINARIES', None)
-    env['NX2NAVI_FFX_PIPE_CACHE'] = setting
+    env['OOTPC_PIPELINE_CACHE'] = str(cache)
+    env.pop('OOTPC_PIPE_BINARIES', None)
+    env['OOTPC_FFX_PIPE_CACHE'] = setting
     r = subprocess.run([game, '--probe-ffx-cache'], env=env, capture_output=True, text=True, errors='replace')
     lines = [ln for ln in r.stdout.splitlines() if ln.startswith('probe-ffx-cache:')]
     counts = None

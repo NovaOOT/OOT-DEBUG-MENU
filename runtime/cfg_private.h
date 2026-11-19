@@ -1,11 +1,11 @@
 // Settings whose values stay on the player's PC: the menu's test hook, and what the co-op of versions up to 0.9.2 kept
-// in nx2navi.ini, which a player's file may still hold (a room's secret and the offer number made for it, the relay's
+// in OOT-PC.ini, which a player's file may still hold (a room's secret and the offer number made for it, the relay's
 // address, the player's name, the key a maker removed). The log's
-// line of what nx2navi.ini sets (cfg.c log_file_settings), "Copy system info" (sysinfo.c) and the copy of nx2navi.ini a
+// line of what OOT-PC.ini sets (cfg.c log_file_settings), "Copy system info" (sysinfo.c) and the copy of OOT-PC.ini a
 // bug report takes along (save_share.c; launcher/saves.py has the same list) show only that such a key is set.
 // Header only, so that the tests that build one of those files alone need nothing else.
-#ifndef NX2NAVI_CFG_PRIVATE_H
-#define NX2NAVI_CFG_PRIVATE_H
+#ifndef OOTPC_CFG_PRIVATE_H
+#define OOTPC_CFG_PRIVATE_H
 
 #include <ctype.h>
 #include <stddef.h>
@@ -14,7 +14,7 @@
 
 #define CFG_PRIVATE_SHOWN "(set, not shown)"
 
-// key: a setting's name without the NX2NAVI_ prefix, in any case, n bytes of it.
+// key: a setting's name without the OOTPC_ prefix, in any case, n bytes of it.
 static inline int cfg_private_key_n(const char *key, size_t n) {
     static const char *const keys[] = {"COOP_ROOM", "COOP_SERVER", "COOP_NAME", "COOP_ACCEPT", "COOP_REMOVE",
                                        "MENU_TEST_SET"};
@@ -28,7 +28,7 @@ static inline int cfg_private_key_n(const char *key, size_t n) {
 
 static inline int cfg_private_key(const char *key) { return cfg_private_key_n(key, strlen(key)); }
 
-// A copy of the text of an nx2navi.ini (n bytes) in which every private key that has a value reads
+// A copy of the text of an OOT-PC.ini (n bytes) in which every private key that has a value reads
 // "key = (set, not shown)"; everything else, comments and line ends included, byte for byte. malloc'd, *out_n its
 // length; NULL when memory runs out.
 static inline char *cfg_ini_scrub(const char *text, size_t n, size_t *out_n) {

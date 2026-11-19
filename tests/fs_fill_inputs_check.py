@@ -123,7 +123,7 @@ def main():
     src = (ROOT / 'runtime' / 'vk_pipeline.c').read_text(encoding='utf-8')
     body = src[src.index('// The locations a mesh module writes'):src.index('// Two fixes for what the translator declares')]
     fails = 0
-    with tempfile.TemporaryDirectory(prefix='nx2navi-fs-fill-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='ootpc-fs-fill-') as tmp:
         t = Path(tmp)
         for name, text, stage in (('points', MESH_POINTS, 'mesh'), ('triangles', MESH_TRIANGLES, 'mesh'), ('frag', FRAG, 'frag')):
             (t / f'{name}.{stage}').write_text(text)

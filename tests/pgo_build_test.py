@@ -2,8 +2,8 @@
 
 Which flags a build compiles with: a kit without an execution profile (the flags and keys it always had), a kit with one
 that fits (the lifted code at -O2 and every compile with the profile), a record that names another recomp/, a record
-that is missing or names none, a profile the compiler refuses in the trial compile, NX2NAVI_PGO=off, and an
-instrumented build (NX2NAVI_PGO=gen). The object keys: the same profile in a kit at another place keeps them, another
+that is missing or names none, a profile the compiler refuses in the trial compile, OOTPC_PGO=off, and an
+instrumented build (OOTPC_PGO=gen). The object keys: the same profile in a kit at another place keeps them, another
 profile changes them. tools/pgo.py: the record a merge writes names the recomp/ a kit compares, a game built from
 another recomp/ stops the merge, and a release refuses a profile of another tree. tools/check_content.py refuses
 profiles in a commit.
@@ -63,13 +63,13 @@ class Compiler:
 
 class PgoBuildTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='nx2navi-pgo-'))
+        self.tmp = Path(tempfile.mkdtemp(prefix='ootpc-pgo-'))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.kit = self.make_kit('kit')
         self.clang, self.clangxx = self.tmp / 'msys' / 'bin' / 'clang.exe', self.tmp / 'msys' / 'bin' / 'clang++.exe'
         self.inc = ['-I', str(self.kit / 'runtime')]
         self.cc = Compiler()
-        env = {k: v for k, v in os.environ.items() if k not in ('NX2NAVI_PGO', 'NX2NAVI_GUEST_OPT')}
+        env = {k: v for k, v in os.environ.items() if k not in ('OOTPC_PGO', 'OOTPC_GUEST_OPT')}
         for p in (mock.patch.object(mg, 'KIT', self.kit), mock.patch.object(mg, 'WIN', True),
                   mock.patch.object(mg, 'PGO_MODE', ''), mock.patch.object(mg, 'PGO_IDS', {}),
                   mock.patch.dict(os.environ, env, clear=True)):
@@ -118,7 +118,7 @@ class PgoBuildTest(unittest.TestCase):
         self.assertEqual(self.commands(), self.PLAIN)
         self.assertEqual(mg.pgo_tag(), '')                       # the compile step's key is what it was
         self.assertEqual(mg.pgo_salt('compiler', None), 'compiler')   # and so are the object keys
-        with mock.patch.dict(os.environ, {'NX2NAVI_PGO': 'off'}):
+        with mock.patch.dict(os.environ, {'OOTPC_PGO': 'off'}):
             self.assertEqual(mg.pgo_tag(), '')
 
     def test_a_fitting_profile_goes_into_every_compile(self):
@@ -203,16 +203,16 @@ class PgoBuildTest(unittest.TestCase):
 
     def test_off_leaves_a_fitting_profile_out(self):
         self.add_profile()
-        for mode in ({'NX2NAVI_PGO': 'off'}, {'NX2NAVI_PGO': ' OFF '}):
+        for mode in ({'OOTPC_PGO': 'off'}, {'OOTPC_PGO': ' OFF '}):
             with mock.patch.dict(os.environ, mode):
                 profile, why = self.choose()
                 self.assertIsNone(profile)
-                self.assertIn('NX2NAVI_PGO=off', why)
+                self.assertIn('OOTPC_PGO=off', why)
                 self.assertEqual(mg.pgo_tag(), '|pgo off')
         with mock.patch.object(mg, 'PGO_MODE', 'off'):   # --pgo off
             self.assertIsNone(self.choose()[0])
         self.assertEqual(self.cc.cmds, [])
-        with mock.patch.dict(os.environ, {'NX2NAVI_PGO': 'something'}):   # no mode: as without it
+        with mock.patch.dict(os.environ, {'OOTPC_PGO': 'something'}):   # no mode: as without it
             self.assertIsNotNone(self.choose()[0])
 
     def test_only_the_windows_build_takes_the_profile(self):
@@ -224,12 +224,12 @@ class PgoBuildTest(unittest.TestCase):
 
     def test_an_instrumented_build_counts_into_the_game_folder(self):
         out = self.tmp / 'game out'
-        with mock.patch.dict(os.environ, {'NX2NAVI_PGO': 'gen'}):
+        with mock.patch.dict(os.environ, {'OOTPC_PGO': 'gen'}):
             self.assertEqual(mg.pgo_mode(), 'gen')
             self.assertEqual(mg.pgo_tag(), '|pgo gen')
         flags = mg.pgo_gen_flags(out)
         self.assertEqual(flags, [f'-fprofile-generate={(out / "pgo").as_posix()}', '-mllvm',
-                                 '-static-func-full-module-prefix=false', '-DNX2NAVI_PGO_GEN'])
+                                 '-static-func-full-module-prefix=false', '-DOOTPC_PGO_GEN'])
         guest, runtime = self.commands(flags)
         self.assertEqual(guest, ['-c', '-std=gnu11', '-O2', '-march=x86-64-v3', '-fno-strict-aliasing', '-w', *flags])
         self.assertEqual(runtime, [*self.PLAIN[1], *flags])
@@ -329,7 +329,7 @@ class PgoBuildTest(unittest.TestCase):
 
 class PgoToolTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='nx2navi-pgo-'))
+        self.tmp = Path(tempfile.mkdtemp(prefix='ootpc-pgo-'))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.build = self.tmp / 'game'
         (self.build / 'pgo').mkdir(parents=True)
@@ -421,13 +421,13 @@ class PgoToolTest(unittest.TestCase):
 
 
 MSYS = Path(r'C:\msys64\ucrt64')
-TEXT_PROFILE = ':ir\nnx2navi_pgo_trial\n0\n1\n100\n\n'   # one function with one counter, as llvm-profdata reads text
+TEXT_PROFILE = ':ir\nootpc_pgo_trial\n0\n1\n100\n\n'   # one function with one counter, as llvm-profdata reads text
 
 
 @unittest.skipUnless((MSYS / 'bin' / 'clang.exe').is_file(), 'needs MSYS2 UCRT64 clang')
 class RealCompilerTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='nx2navi-pgo-'))
+        self.tmp = Path(tempfile.mkdtemp(prefix='ootpc-pgo-'))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.clang = MSYS / 'bin' / 'clang.exe'
         self.env = dict(os.environ, PATH=str(MSYS / 'bin') + os.pathsep + os.environ.get('PATH', ''))

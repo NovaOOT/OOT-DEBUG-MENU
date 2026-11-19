@@ -5,7 +5,7 @@
 // rather than waiting, and no caller can wait for a pool that waits for it.
 //
 // Size: the usable hardware threads less two (the drawing thread and the game's main thread), at most PAR_MAX_THREADS
-// in all, the caller counted. NX2NAVI_PAR_JOBS=0 runs every job on its caller (cfg.c).
+// in all, the caller counted. OOTPC_PAR_JOBS=0 runs every job on its caller (cfg.c).
 #include <string.h>
 
 #include "cfg.h"
@@ -56,9 +56,9 @@ static void worker(void *arg) {
 
 static void pool_init(void *param) {
     (void)param;
-    if (!cfg_bool("NX2NAVI_PAR_JOBS")) {
+    if (!cfg_bool("OOTPC_PAR_JOBS")) {
         J.off = 1;
-        rt_log("par_jobs: off (NX2NAVI_PAR_JOBS=0): large texture copies run on the thread that makes them");
+        rt_log("par_jobs: off (OOTPC_PAR_JOBS=0): large texture copies run on the thread that makes them");
         return;
     }
     int cpus = (int)plat_cpu_usable() - 2;

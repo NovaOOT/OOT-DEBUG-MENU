@@ -1,0 +1,5 @@
+/* The application manifest of ocarina.exe (ootpc.manifest) and its icon (ootpc.ico, also the icon of OOT-PC-Setup.exe and of
+   the installer window). tools/build_game.py compiles it with the runtime objects, so it is also a member of
+   libootpcrt.a, which the release links with --whole-archive. */
+1 24 "ootpc.manifest"
+1 ICON "ootpc.ico"

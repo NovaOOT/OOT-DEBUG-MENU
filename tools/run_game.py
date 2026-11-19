@@ -5,16 +5,16 @@ afterwards. It is the game folder's own profile when there is one (<exe dir>/pro
 build/profile. The log records how many other copies of the game and of Ninja ran, because timings taken next to them
 are not comparable.
 
-    python tools/run_game.py build/v143 --save <backup> --seconds 15 --tag idle --env NX2NAVI_TRACE=perf
+    python tools/run_game.py build/v143 --save <backup> --seconds 15 --tag idle --env OOTPC_TRACE=perf
     python tools/run_game.py build/v143 --save <backup> --script <input.txt> --seconds 18 --tag fight --quiet \
-        --env NX2NAVI_TRACE=perf,sched
+        --env OOTPC_TRACE=perf,sched
     python3 tools/run_game.py ~/Games/Ocarina --save <report.zip> --seconds 600 --wall 90 \
-        --env NX2NAVI_SHOT_DIR=shots --env NX2NAVI_SHOT_AFTER=40 --env NX2NAVI_SHOT_EVERY=10
+        --env OOTPC_SHOT_DIR=shots --env OOTPC_SHOT_AFTER=40 --env OOTPC_SHOT_EVERY=10
 
 <backup> is a folder of build/save-backup or of the profile's save-backup (the game keeps its last three saves there),
 or a save folder or .zip from elsewhere, such as a crash report's zipped profile folder; --script defaults to
-tools/input/load_save.txt (title screen to the first save slot), and a recording made with NX2NAVI_INPUT_RECORD replays
-the same way. --wall ends a run whose script never reaches the world clock; NX2NAVI_SHOT_EVERY takes its pictures by
+tools/input/load_save.txt (title screen to the first save slot), and a recording made with OOTPC_INPUT_RECORD replays
+the same way. --wall ends a run whose script never reaches the world clock; OOTPC_SHOT_EVERY takes its pictures by
 wall time.
 """
 import argparse
@@ -42,10 +42,10 @@ SAVES = ROOT / 'build' / 'save-backup'
 SLOTS = ROOT / 'build' / 'run-slots'
 GPU_LOCK = ROOT / 'build' / '.gpu-run.lock'
 LOCK_OFFSET = 1 << 16   # Windows byte-range lock sits past the holder text, so other processes can still read it
-MAX_RUNS = int(os.environ.get('NX2NAVI_MAX_RUNS', '3'))   # more parallel runs exhaust device memory (16 GB RX 9070)
+MAX_RUNS = int(os.environ.get('OOTPC_MAX_RUNS', '3'))   # more parallel runs exhaust device memory (16 GB RX 9070)
 # The game's executable as each tool names it: build_game.py, make_game.py on Windows, make_game.py on Linux,
 # build_game.py on Linux
-GAME_EXES = ('nx2navi.exe', 'ocarina.exe', 'ocarina', 'nx2navi')
+GAME_EXES = ('ocarina.exe', 'ocarina.exe', 'ocarina', 'ootpc')
 NINJA = 'ninja.exe' if os.name == 'nt' else 'ninja'
 
 
@@ -76,7 +76,7 @@ def game_exe(exe_dir):
 
 def keep_in_background(proc):
     """Push the game window behind the user's windows as soon as it appears, for builds older than
-    NX2NAVI_BACKGROUND_WINDOW."""
+    OOTPC_BACKGROUND_WINDOW."""
     user32 = ctypes.windll.user32
     user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
     user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
@@ -207,7 +207,7 @@ def main():
     ap.add_argument('--save', help="the save to run: a backup's name in build/save-backup or the profile's save-backup, "
                                    "or a save folder or .zip from elsewhere (a crash report's zipped profile folder); "
                                    'default: the profile as it is')
-    ap.add_argument('--script', type=Path, default=ROOT / 'tools' / 'input' / 'load_save.txt', help='NX2NAVI_INPUT_SCRIPT')
+    ap.add_argument('--script', type=Path, default=ROOT / 'tools' / 'input' / 'load_save.txt', help='OOTPC_INPUT_SCRIPT')
     ap.add_argument('--seconds', type=float, required=True,
                     help='game time to run: the run ends once the world clock (game time since the save loaded) passed '
                          'this many seconds (shot is taken of that frame)')
@@ -238,9 +238,9 @@ def main():
         profile_copy(prof, profile, *(save_source(a.save, profile, scratch) if a.save else ()))
         shutil.rmtree(scratch, ignore_errors=True)
 
-        env = dict(os.environ, NX2NAVI_ASSUME_FOCUS='1', NX2NAVI_INPUT='none', NX2NAVI_INPUT_SCRIPT=str(a.script.resolve()))
+        env = dict(os.environ, OOTPC_ASSUME_FOCUS='1', OOTPC_INPUT='none', OOTPC_INPUT_SCRIPT=str(a.script.resolve()))
         if not a.show and os.name == 'nt':   # SDL windows open in front either way
-            env['NX2NAVI_BACKGROUND_WINDOW'] = '1'
+            env['OOTPC_BACKGROUND_WINDOW'] = '1'
         for kv in a.env:
             k, _, v = kv.partition('=')
             env[k] = v

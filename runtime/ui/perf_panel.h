@@ -9,7 +9,7 @@ extern "C" {
 
 typedef struct {
     PerfStats s;              // perfmon_snapshot
-    const char *version;      // "OOT-DEBUG-MENU <version>, game <update>"
+    const char *version;      // "OOT-PC <version>, game <update>"
     // window, game image, scene, then the settings as the menu names them: upscaling, anti-aliasing, frame limit, VSync,
     // widescreen, resolution, HDR, frame generation. An empty string leaves its line out.
     char picture[11][64];

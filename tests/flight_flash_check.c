@@ -12,7 +12,7 @@
 
 #define W 640   // FLIGHT_THUMB_W x FLIGHT_THUMB_H (flight.h): cells of 40x40 pixels
 #define H 360
-#define DIFF 24   // the defaults of NX2NAVI_FLIGHT_FLASH_DIFF and NX2NAVI_FLIGHT_FLASH_CELLS (cfg.c)
+#define DIFF 24   // the defaults of OOTPC_FLIGHT_FLASH_DIFF and OOTPC_FLIGHT_FLASH_CELLS (cfg.c)
 #define MIN_CELLS 3
 
 static int fails;

@@ -1,4 +1,4 @@
-# NX2navi audit
+# OOT-PC audit
 
 This file holds the audit's state across sessions: the project context, the subsystem map, the threads and what they
 share, the path of one frame, the allocators, pools and caches, the leads for Phase 3, the findings ledger and what
@@ -52,7 +52,7 @@ The recompiled output is not in the repository: it is generated under ignored fo
 - The runtime is C11 (plus C++ for the menu, DLSS frame generation and AMD FidelityFX), built with MSYS2 UCRT64 Clang.
 - A Vulkan 1.3 renderer with `VK_EXT_mesh_shader`, `VK_EXT_external_memory_host` and the graphics pipeline library
   where the driver has it. Device memory goes through Vulkan Memory Allocator.
-- Shaders are translated to SPIR-V by a separate translator process (`nx2navi_xlate.exe`) into an on-disk cache,
+- Shaders are translated to SPIR-V by a separate translator process (`ootpc_xlate.exe`) into an on-disk cache,
   prepared at install time.
 - SDL3 for gamepads and audio output, Win32 for the window, keyboard and mouse. libopus for voice, libvpx and dav1d for
   movies, libzstd, and Dear ImGui for the menu.
@@ -60,7 +60,7 @@ The recompiled output is not in the repository: it is generated under ignored fo
 ### Targets
 
 - PC only. There is no fixed resolution or frame rate.
-- The frame limit (`NX2NAVI_FPS_LIMIT`, `cfg.c` default 60, live; 30 to 240, `display` or `unlimited`) counts frames
+- The frame limit (`OOTPC_FPS_LIMIT`, `cfg.c` default 60, live; 30 to 240, `display` or `unlimited`) counts frames
   the game draws. Frame generation multiplies on top of it.
 - Reference PC: RTX 5090. The user plays at a 120 limit with DLSS frame generation x2 and HDR.
 - Minimum: 16 GB RAM and a Vulkan 1.3 GPU with mesh shaders.
@@ -68,13 +68,13 @@ The recompiled output is not in the repository: it is generated under ignored fo
 ### Memory budget
 
 - **Guest application pool.** The pool is `rt_app_pool_bytes`, which `tools/make_game.py` generates as 9809 MiB.
-  - `memory.c` `mem_init` (~860) actually sets the limit to `NX2NAVI_APP_POOL` when that is set. Otherwise it uses
+  - `memory.c` `mem_init` (~860) actually sets the limit to `OOTPC_APP_POOL` when that is set. Otherwise it uses
     `rt_app_pool_bytes + res_heap_extra_bytes()`, and the extra comes from the resolution settings (`resolution.c`).
     So the pool can be larger than 9809 MiB.
   - The limit is enforced in `mem_set_heap_size` (~899) and `alias_map` (~1080). The heap is also capped at
     `HEAP_CAP` (12 GiB).
 - **VRAM.** VRAM follows the driver's heap budget (`VK_EXT_memory_budget`, `vk_memory.c` `vram_query`).
-  `NX2NAVI_VRAM_BUDGET_MB` caps it (`vk_memory.c` `budget_cap`, a test switch).
+  `OOTPC_VRAM_BUDGET_MB` caps it (`vk_memory.c` `budget_cap`, a test switch).
 - **CPU and GPU memory are separate.** The game's guest memory pools are imported into Vulkan as host memory. On a
   discrete GPU they are mirrored into device-local buffers (`vk_memory.c`).
 
@@ -93,9 +93,9 @@ Phase 1 ran nothing.
   - `C:\msys64\ucrt64\bin` first on PATH, with system Python 3.12;
   - a copy of `work\build_rt_allfix.py` pointed at this worktree.
 - **Scripted game runs** use a runner script with an input script and a save folder; a Kakariko Village save exists.
-  Useful settings: `NX2NAVI_TRACE=perf` and `NX2NAVI_PROFILE`.
+  Useful settings: `OOTPC_TRACE=perf` and `OOTPC_PROFILE`.
 - **Launcher tests:** `python -m unittest tests.launcher_test`.
-- **Runtime self-checks:** `nx2navi.exe --selftest`, `--probe-kernel`, `--probe-vkexec`, `--probe-vkmem`,
+- **Runtime self-checks:** `ocarina.exe --selftest`, `--probe-kernel`, `--probe-vkexec`, `--probe-vkmem`,
   `--probe-cfg`, `--probe-prewarm`.
 - **Unit checks that build one file with the rest stubbed:** the `tests\*_check.py` files listed in
   `docs/building.md`, "Checks". Examples: `logq_check.py`, `sync_wake_check.py`, `save_share_check.py`,
@@ -127,7 +127,7 @@ These are what the user or players see. None is a finding until it is reproduced
 
 **Other**
 - The shader cache pack grows with every translator change.
-- The replay on its own thread (`NX2NAVI_REPLAY_ASYNC=1`) has a known fault and stays off.
+- The replay on its own thread (`OOTPC_REPLAY_ASYNC=1`) has a known fault and stays off.
 - `tests.installer_test` cannot be imported on this PC.
 
 ### Parts of the audit prompt that do not apply
@@ -168,7 +168,7 @@ This was written before Phase 2 tried anything. The results are in section 11.4:
   - a 14 GiB low region (stacks and heap);
   - a 64 GiB alias region.
 
-  It re-executes itself when a range is taken (`NX2NAVI_REEXEC`, `REEXEC_LIMIT` 20). An ASan shadow mapping placed in
+  It re-executes itself when a range is taken (`OOTPC_REEXEC`, `REEXEC_LIMIT` 20). An ASan shadow mapping placed in
   that range would make every start re-execute and then fail. Whether the Windows ASan runtime's shadow placement
   collides is not determined.
 - *Faults are part of normal operation.* The runtime registers a vectored exception handler first
@@ -216,7 +216,7 @@ There are 22 subsystems. Files are under `runtime/` unless the path says otherwi
 | 5 | Services (in-process Horizon) | `ipc.c`, `ov_system.c`, `net_offline.c`, `nfp.c`, `amiibo.c`, `swkbd.c`, `swkbd_win.c`, `swkbd_sdl.c`, `ov_media.c` (Opus) | `sm:` and the service table; oe/applet/am/account/time and others answered on the host; offline sockets; amiibo; the software keyboard window. |
 | 6 | Files: RomFS, decompression, mods | `romfs.c`, `romfs_path.h`, `restbl.c`, `ov_zstd.c`, `mods.c`, `cheats.c` | The read-only game RomFS from the player's image with overlays (`romfs-patches*`, mods); the resource size table; host zstd decode with dictionaries; mod scan and order; cheats from the mods' cheat files. |
 | 7 | Save data | `fs_host.c`, `save_share.c`, `save_zip.c`, `sha256.c` | The game's save mount on the host file system, the save transaction (work copy, commit, swap, backups), recovery at start, import and export zips. |
-| 8 | Settings and logging | `cfg.c`, `cfg.h`, `logq.c`, `main.c` (log sink, crash handler), `perf.c` (switches `rt_knob`, `rt_ab`) | Every setting with its default (`nx2navi.ini`, `NX2NAVI_*`), live changes and saving; the log queue and its writer thread; log rotation; the crash report. |
+| 8 | Settings and logging | `cfg.c`, `cfg.h`, `logq.c`, `main.c` (log sink, crash handler), `perf.c` (switches `rt_knob`, `rt_ab`) | Every setting with its default (`OOT-PC.ini`, `OOTPC_*`), live changes and saving; the log queue and its writer thread; log rotation; the crash report. |
 | 9 | Frame pacing and game timing | `frame_rate.c`, `nvn_api_obj.c` (`present_period`, `pace`, `nvnWindowAcquireTexture`), `rtss_limit.c`, `resolution.c`, `widescreen.c`, `dynres.c` | The frame limit and present slots; the game's frame step (`ostep`); the world clock; the RivaTuner limit hand-off; render resolution, aspect and dynamic resolution. |
 | 10 | NVN front end | `nvn_api_core.c`, `nvn_api_cmd.c`, `nvn_api_obj.c`, `nvn_ext.c`, `nvn_procs.c`, `nvn_procs.inc`, `nvn_tex.c`, `tex_deswizzle.c`, `ov_gfx.c`, `nvn.h`, `nvn_api.h`, `nvn_obj.h`, `nvn_hmap.h`, `nvn_pool_index.h` | The NVN API the game calls: devices, queues, memory pools, textures and samplers, command buffer recording into op records, deferred binds, recording copies and pins, submit and present entry points, texture layout and deswizzle. |
 | 11 | Replay and submission | `vk_backend.c`, `vk_exec.c`, `vk_exec_draw.c`, `vk_exec_xfer.c`, `vk_exec.h`, `vk_rec.c`, `vk_rec.h`, `vk_sync.c`, `vk_usnap.c`, `vk_target_frames.h` | Replaying NVN op records into Vulkan command buffers, draws, binds, the bindless pools, copies, events and counters, event order across queues; the recorder thread's packet ring; timelines, submit batching, the completion thread; the uniform snapshot; frame hold. |
@@ -225,7 +225,7 @@ There are 22 subsystems. Files are under `runtime/` unless the path says otherwi
 | 14 | Shaders | `gfx_shader.c`, `gfx_shader_guess.c`, `gfx.h`, `tools/xlate/` (translator source), `tools/vendor/` (pinned translator) | Translation through child processes, the memory cache, the disk cache and pack, the carry of the previous translator's translations, prewarm and preparation, disk-read budget. |
 | 15 | Pipelines | `vk_pipeline.c`, `vk_warm_hint.h`, `vk_caps.c` | Graphics and compute pipelines, stage libraries and fast links, background workers, the boot prewarm and prebuild, driver cache warm checks, the pipeline cache file and autosave, records (`pipeline-keys.bin`, `compute-used.bin`), device capability decisions. |
 | 16 | Device and present | `vk_device.c`, `gfx_present.c`, `gfx_window_win.c`, `gfx_window_sdl.c`, `gfx_wsys.h`, `vk_hdr.c`, `vk_fsr.c`, `vk_color.c`, `vk_tonemap.c`, `vk_contact.c`, `gfx_null.c` | Instance and device, the queue lock, the swapchain, the present blit and FSR 1, HDR, colour adjustment, the window thread, the vsync thread, the scene upscaler stand-in, contact shadows. |
-| 17 | Upscaling and frame generation | `vk_dlaa.c`, `vk_dlaa.h`, `vk_ffx.cpp`, `vk_fg.cpp`, `vk_dlssg.c`, `dlssg/nx2_sl.cpp`, `vk_mvprev.c`, `vk_mvsurvey.c`, `vk_mvcheck.c` | DLSS/DLAA through NGX, FSR 3.1 upscaling and frame generation, DLSS frame generation through `nx2navi_dlssg.dll`, motion vectors. |
+| 17 | Upscaling and frame generation | `vk_dlaa.c`, `vk_dlaa.h`, `vk_ffx.cpp`, `vk_fg.cpp`, `vk_dlssg.c`, `dlssg/nx2_sl.cpp`, `vk_mvprev.c`, `vk_mvsurvey.c`, `vk_mvcheck.c` | DLSS/DLAA through NGX, FSR 3.1 upscaling and frame generation, DLSS frame generation through `ootpc_dlssg.dll`, motion vectors. |
 | 18 | Audio | `audren.c`, `audren.h`, `audio_mixer.c`, `audio_effects.c`, `audio_reverb.c`, `audio_capture.c`, `ov_audio_input.c`, `menu_sound.c` | The game's audio renderer (`audren:u`) on a host render thread, the mixer and its SDL output ring, effects, the microphone, menu sounds. |
 | 19 | Movies | `ov_movie.c`, `ov_movie2.c`, `movie.h` | Host VP9 (libvpx) and AV1 (dav1d) decoders standing in for the SDK's, with their threads and frame queues. |
 | 20 | Input | `input.c`, `input_win.c`, `input_sdl.c`, `input_map.c`, `input_ds3.c`, `input_ds3_win.c`, `ov_input.c`, `mouse_direct.c`, `motion_fusion.c`, `camera_speed.c`, `menu_cursor.c` | Gamepads (SDL3, XInput, DualShock 3), keyboard and mouse, bindings, the state the game's HID calls read, rumble, motion, mouse camera, camera speed rewrite, menu pointer. |
@@ -271,10 +271,10 @@ platform's seven levels; "normal" when nothing sets one.
 | "guest main" | `kernel.c` `guest_main` → `kern_main_thread` → `boot.c` `guest_main` (runs `nn::init::Start`) | `kernel.c` `kern_run_on_guest_main` (~1469) from `rt_boot` after the prewarm wait | 1, 256 MiB stack reserved | Joined by the main thread |
 | "guest" | `kernel.c` `thread_main` (~1383): waits for `StartThread`, takes a core, `rt_call(entry)` | SVC `CreateThread` (0x08, `kern_svc_inner` ~1562) | One per guest thread; detached; 256 MiB reserved stack each | `ExitThread` (0x0A) → `thread_finish`; a thread created and never started waits forever (lead L-12) |
 | (guest fibers) | `kernel.c` `fiber_main` | `kern_fiber_initialize` (~2206) | Up to `FIBER_MAX` 1024 | Not threads: they run on whichever guest thread switches to them |
-| "prewarm" | `boot.c` `prewarm_main` (~348): `vk_pipeline_prewarm`, `gfx_shader_prepare_recorded`, `gfx_shader_carry_start` | `rt_boot` (~407) before the modules load | 1 | Joined, or detached by `boot_wait` after `NX2NAVI_PREWARM_WAIT_MS` or 60 s without progress; then runs on during play |
-| "log" | `logq.c` `log_main` (~114) | `main.c` `log_open` → `logq_async` (~125), game runs, unless `NX2NAVI_LOG_ASYNC=0` | 1, detached | Never ends; `logq_sync` turns the queue off |
+| "prewarm" | `boot.c` `prewarm_main` (~348): `vk_pipeline_prewarm`, `gfx_shader_prepare_recorded`, `gfx_shader_carry_start` | `rt_boot` (~407) before the modules load | 1 | Joined, or detached by `boot_wait` after `OOTPC_PREWARM_WAIT_MS` or 60 s without progress; then runs on during play |
+| "log" | `logq.c` `log_main` (~114) | `main.c` `log_open` → `logq_async` (~125), game runs, unless `OOTPC_LOG_ASYNC=0` | 1, detached | Never ends; `logq_sync` turns the queue off |
 | "save commit" | `fs_host.c` `commit_main` → `commit_run` → `save_commit_locked` | `fs_host.c` `save_commit` (~601) on each `nn::fs::Commit` with a dirty save | One per Commit, detached; inline when the spawn fails | After the commit |
-| PGO flush | `platform/win32.c` `pgo_flush_thread` | Constructor, only with `NX2NAVI_PGO_GEN` (instrumented builds) | 1 | Never |
+| PGO flush | `platform/win32.c` `pgo_flush_thread` | Constructor, only with `OOTPC_PGO_GEN` (instrumented builds) | 1 | Never |
 | Open folder | `platform/win32.c` `open_folder_main` | `plat_open_folder` (menu) | Per call | After `ShellExecuteW` |
 | Exception handlers | `platform/win32.c` `fault_veh` (first), `crash_veh` (last), `crash_filter` | Registered by `plat_mem_fault_hook` (from `memory.c` `mem_init`) and `plat_crash_hook` (from `main.c`) | — | Run on the faulting thread; `crash_veh` → `main.c` `crash_handler` → `plat_exit(71)` |
 | "reap" (Linux only) | `platform/linux.c` `reap_main` | Child process start | Per child | When the child exits |
@@ -284,28 +284,28 @@ platform's seven levels; "normal" when nothing sets one.
 | Thread | Entry | Started by, when | How many, priority | Ends |
 |---|---|---|---|---|
 | Game submit thread(s) | `nvn_api_core.c` `nvnQueueSubmitCommands` → `vk_backend.c` `submit_sync` → `vk_sync.c` `submit` → `vk_exec.c` `vk_exec_record` | The game | Guest threads | — |
-| "The recording thread" | Whichever guest thread first spends 0.5 s in `vk_exec_record` | `vk_exec.c` `rec_claim` (~1643) | Raised to highest priority unless `NX2NAVI_RECORDER_PRIO=0`. Gets a reserved core (`plat_cpu_reserve`) with `NX2NAVI_RECORDER_CORE=1`, or `auto` with 12 or more usable CPUs | — |
+| "The recording thread" | Whichever guest thread first spends 0.5 s in `vk_exec_record` | `vk_exec.c` `rec_claim` (~1643) | Raised to highest priority unless `OOTPC_RECORDER_PRIO=0`. Gets a reserved core (`plat_cpu_reserve`) with `OOTPC_RECORDER_CORE=1`, or `auto` with 12 or more usable CPUs | — |
 | Game present thread | `nvn_api_obj.c` `nvnQueuePresentTexture` → `vk_backend.c` `vk_be_present` | The game | Guest thread | — |
 | "vk present" | `vk_backend.c` `present_main` (~75) | `present_image` (~252) at the first present | 1, detached, normal | Never |
-| "vk replay" | `vk_backend.c` `replay_main` (~406) | `replay_enqueue` (~472), only with `NX2NAVI_REPLAY_ASYNC=1` (`cfg.c` default 0) | 1, detached; becomes the recording thread | Never |
-| "vk recorder" | `vk_rec.c` `rec_main` (~61) | `rec_begin` (~179) at the first submission part | 1. On unless AMD (`NX2NAVI_VK_RECORDER`, `rt_knob` default "0" on AMD, else "1"). Takes the priority of whichever thread called `rec_begin` first | Never (handle kept, never joined) |
+| "vk replay" | `vk_backend.c` `replay_main` (~406) | `replay_enqueue` (~472), only with `OOTPC_REPLAY_ASYNC=1` (`cfg.c` default 0) | 1, detached; becomes the recording thread | Never |
+| "vk recorder" | `vk_rec.c` `rec_main` (~61) | `rec_begin` (~179) at the first submission part | 1. On unless AMD (`OOTPC_VK_RECORDER`, `rt_knob` default "0" on AMD, else "1"). Takes the priority of whichever thread called `rec_begin` first | Never (handle kept, never joined) |
 | "vk completion" | `vk_sync.c` `completion_main` (~382) | `vk_sync_start` (~471) | 1, normal | Joined in `vk_sync_shutdown` |
 | "vsync" | `gfx_present.c` `vsync_main` (~175) | `vsync_ensure` (~210) | 1, detached, highest | Never |
 | "fg present" | `gfx_present.c` `ng_thread` (~1098) | `ng_ready` (~1180), only when `vk_ngxfg_wanted()`; the comment at ~925 says 0 on Windows | 1, detached | Never |
-| "vk headroom" | `vk_headroom.c` `headroom_main` (~157) | `vk_headroom_start` from `vk_device.c` `vk_init`; off with `NX2NAVI_VRAM_HEADROOM=0` | 1, detached, below normal | After `vk_headroom_stop` |
-| "mem census" | `vk_memory.c` `census_main` (~3138) | `heap_log`, only with `NX2NAVI_MEM_CENSUS=1` | At most one at a time | After one walk |
+| "vk headroom" | `vk_headroom.c` `headroom_main` (~157) | `vk_headroom_start` from `vk_device.c` `vk_init`; off with `OOTPC_VRAM_HEADROOM=0` | 1, detached, below normal | After `vk_headroom_stop` |
+| "mem census" | `vk_memory.c` `census_main` (~3138) | `heap_log`, only with `OOTPC_MEM_CENSUS=1` | At most one at a time | After one walk |
 
 #### Pipelines
 
 | Thread | Entry | Started by, when | How many, priority | Ends |
 |---|---|---|---|---|
 | "pipe worker" | `vk_pipeline.c` `pipe_worker` (~3533) | `workers_start` (~3623), first use | `plat_cpu_usable()/4` clamped 2..`MAX_WORKERS` (4). Below normal for prebuild jobs, normal otherwise | Never |
-| "pipe lib worker" | `vk_pipeline.c` `lib_worker` (~3500) | `workers_start` (~3638), with GPL and `NX2NAVI_PIPE_WAIT` not `draw` | Pipe-worker count or 2 | Never |
-| "pipe prewarm" | `vk_pipeline.c` `warm_builder` (~4015) | `prewarm_run` (~4186) on the prewarm thread | min(cpus, 64) | Joined; ends at `PREWARM_PIPE_MS` (20 s) unless `NX2NAVI_PREWARM_FULL=1` or the whole warm after a driver change (`bf_decide`) |
+| "pipe lib worker" | `vk_pipeline.c` `lib_worker` (~3500) | `workers_start` (~3638), with GPL and `OOTPC_PIPE_WAIT` not `draw` | Pipe-worker count or 2 | Never |
+| "pipe prewarm" | `vk_pipeline.c` `warm_builder` (~4015) | `prewarm_run` (~4186) on the prewarm thread | min(cpus, 64) | Joined; ends at `PREWARM_PIPE_MS` (20 s) unless `OOTPC_PREWARM_FULL=1` or the whole warm after a driver change (`bf_decide`) |
 | "pipe list" | `warm_builder` (~5942) | `seed_pipelines`, preparation modes only | min(cpus, 64) | Joined |
-| "big compute" | `vk_pipeline.c` `bg_main` (~5140) | `bg_start` (~5252) by the last `lb_worker`; `NX2NAVI_LIB_PREBUILD_BIG_BG` (default 1) | 1, below normal; raised to normal when a dispatch waits for it | Joined in `lb_stop` |
-| "lib prebuild" | `vk_pipeline.c` `lb_worker` (~5418) | `lb_start` (~5707) from the boot prewarm; `NX2NAVI_LIB_PREBUILD` | `NX2NAVI_LIB_PREBUILD_THREADS` or 2 (max 16). Idle priority, normal around `P.lock` and shader loads. In the whole warm after a driver change (`bf_wait`): one per core (max 16) at normal priority while the start waits | When the list is done |
-| "lib warm check" | `vk_pipeline.c` `lw_main` (~5572) | `lw_start` (~5649); `NX2NAVI_LIB_WARM` (default 1) | 1, below normal | Joined in `lw_stop` |
+| "big compute" | `vk_pipeline.c` `bg_main` (~5140) | `bg_start` (~5252) by the last `lb_worker`; `OOTPC_LIB_PREBUILD_BIG_BG` (default 1) | 1, below normal; raised to normal when a dispatch waits for it | Joined in `lb_stop` |
+| "lib prebuild" | `vk_pipeline.c` `lb_worker` (~5418) | `lb_start` (~5707) from the boot prewarm; `OOTPC_LIB_PREBUILD` | `OOTPC_LIB_PREBUILD_THREADS` or 2 (max 16). Idle priority, normal around `P.lock` and shader loads. In the whole warm after a driver change (`bf_wait`): one per core (max 16) at normal priority while the start waits | When the list is done |
+| "lib warm check" | `vk_pipeline.c` `lw_main` (~5572) | `lw_start` (~5649); `OOTPC_LIB_WARM` (default 1) | 1, below normal | Joined in `lw_stop` |
 | "lib warm" | `vk_pipeline.c` `lw_worker` (~5532) | `lw_main` when the driver cache is cold | cpus/4 clamped 2..6, idle. In the whole warm after a driver change (`bf_wait`): one per core (max 32) at normal priority while the start waits | Joined in `lw_stop` |
 | "lib warm" | `vk_pipeline.c` `lb_warm_worker` (~5733) | `lb_warm_prepared` (~5794), preparation modes only | min(cpus, 64) | Joined |
 | "pipe autosave" | `vk_pipeline.c` `autosave_main` (~6390) | `vk_pipeline_autosave` (~6402) from the present thread, once | 1, detached, below normal, 500 ms loop | Never; not stopped by `vk_pipeline_shutdown` (lead L-15) |
@@ -314,14 +314,14 @@ platform's seven levels; "normal" when nothing sets one.
 
 | Thread | Entry | Started by, when | How many, priority | Ends |
 |---|---|---|---|---|
-| "xlate" | `gfx_shader.c` `xlate_worker` (~2070) | `start_workers` (~2127), first async job | `NX2NAVI_XLATE_PROCS` (default 2, 1..32) | Never |
+| "xlate" | `gfx_shader.c` `xlate_worker` (~2070) | `start_workers` (~2127), first async job | `OOTPC_XLATE_PROCS` (default 2, 1..32) | Never |
 | "shload" | `gfx_shader.c` `load_worker` (~2093) | Same | `LOADERS` = 3 | Never |
 | "use preload" | `gfx_shader.c` `use_preload` (~1304) | `use_preload_start` (~1335) | 1, below normal | After the scan |
 | "shader ids" | `gfx_shader.c` `ids_write_main` (~506) | `ids_note` (~515), once | 1 | After one write |
-| "shader prewarm" | `gfx_shader.c` `warm_worker` (~2314) | `gfx_shader_prewarm` (~2399) from `prewarm_run` | cpus, 1..64. Translator children raised to `NX2NAVI_PREWARM_XLATE` or min(cpus/2, 16) meanwhile | Joined |
+| "shader prewarm" | `gfx_shader.c` `warm_worker` (~2314) | `gfx_shader_prewarm` (~2399) from `prewarm_run` | cpus, 1..64. Translator children raised to `OOTPC_PREWARM_XLATE` or min(cpus/2, 16) meanwhile | Joined |
 | "shader prepare" | `gfx_shader.c` `prep_worker` (~2732) | `prepare_files` (~2787), preparation modes | 1..64 | Joined |
-| "shader carry" | `gfx_shader.c` `carry_main` (~3194) | `gfx_shader_carry_start` (~3305) from `prewarm_main`; `NX2NAVI_SHADER_CARRY` (default 1) | 1, lowest; own translator child at idle priority | After one pass |
-| Translator processes | `nx2navi_xlate.exe --serve` | `gfx_shader.c` `child_start` (~533) via `plat_child_start` | Pool `S.s[MAX_SVC=32]`, limit `NX2NAVI_XLATE_PROCS`, raised during prewarm | Kept for the life of the process |
+| "shader carry" | `gfx_shader.c` `carry_main` (~3194) | `gfx_shader_carry_start` (~3305) from `prewarm_main`; `OOTPC_SHADER_CARRY` (default 1) | 1, lowest; own translator child at idle priority | After one pass |
+| Translator processes | `ootpc_xlate.exe --serve` | `gfx_shader.c` `child_start` (~533) via `plat_child_start` | Pool `S.s[MAX_SVC=32]`, limit `OOTPC_XLATE_PROCS`, raised during prewarm | Kept for the life of the process |
 | "astc" | `tex_astc_mt.c` `worker` (~58) | `pool_init` via `plat_once` at the first large CPU ASTC decode | Up to 7 | Never |
 
 #### Audio and movies
@@ -342,7 +342,7 @@ platform's seven levels; "normal" when nothing sets one.
 |---|---|---|---|---|
 | "pads" | `input.c` `up_main` (~416) | `sdl_start` (~458) at the first poll | 1, detached | Never (unless SDL init fails) |
 | "motion" | `input.c` `motion_main` (~1159) | `input_motion_start` (~1186) from `ov_input.c` `ov_six_start` | 1, detached, 250 Hz loop | Never, also after the sensor stops |
-| "ds3-scan" | `input_ds3_win.c` `scan_thread` (~122) | `ds3_read` (~276) with `NX2NAVI_DS3` | 1, detached, 256 KiB stack | Never |
+| "ds3-scan" | `input_ds3_win.c` `scan_thread` (~122) | `ds3_read` (~276) with `OOTPC_DS3` | 1, detached, 256 KiB stack | Never |
 | "window" | `gfx_window_win.c` `window_main` (~643): the Win32 message loop | `wsys_open` (~729) | 1, detached | When `GetMessage` returns <= 0 |
 | "folder dialog" | `folder_pick_win.cpp` `pick_main` (~51) | `pick` (~90) from the menu | Per pick | After the dialog |
 | "save export" | `ui/menu.cpp` `share_export_main` (~1116) | `rows_saves` (~1176) | One at a time (`g_share_busy`) | After the export |
@@ -356,8 +356,8 @@ platform's seven levels; "normal" when nothing sets one.
 | "discord" | `discord_rpc.c` `discord_main` (~193) | `discord_init` from `main.c` | Never ("there is no shutdown path") |
 | "rtss" | `rtss_limit.c` `worker` (~245) | `start` (~319) at the first `rtss_limit_want` | Never |
 | "perfmon" | `perfmon.c` `sampler` (~360) | `perfmon_mode(2)` (~404) from the menu's overlay | When the full overlay is turned off |
-| Profiler sampler | `prof_win.c` `sampler_main` (~242), time-critical, suspends every other thread each 1 ms | `prof_sampler_start` (~386), only with `NX2NAVI_PROFILE` | When `prof_sampler_write` stops it (waits 2 s) |
-| "flight dump" | `flight.c` `dump_main` (~231), below normal | `start_dump` (~311), with `NX2NAVI_FLIGHT` | After one dump |
+| Profiler sampler | `prof_win.c` `sampler_main` (~242), time-critical, suspends every other thread each 1 ms | `prof_sampler_start` (~386), only with `OOTPC_PROFILE` | When `prof_sampler_write` stops it (waits 2 s) |
+| "flight dump" | `flight.c` `dump_main` (~231), below normal | `start_dump` (~311), with `OOTPC_FLIGHT` | After one dump |
 
 #### Threads inside libraries
 
@@ -392,7 +392,7 @@ finding.
   - TLR+0x100 and TLR+0x102 ("any thread may read them").
 - **Guest per-core data.** Kept without locks by the game itself, made safe by the virtual-core rule. A guest thread
   runs guest code only while it holds a core, and gives it up only where Horizon would switch.
-  `NX2NAVI_FREE_CORES=1` turns the gate off.
+  `OOTPC_FREE_CORES=1` turns the gate off.
 - **`g_se_lock`** (rwlock, ~2062): the `g_se[512]` system-event table.
 - **`g_fiber_lock`** (rwlock, ~2133): `g_fibers[]`. The `Fiber` fields written by `kern_fiber_initialize` outside the
   lock: protection not found (guest threads re-initialising and switching to a fiber).
@@ -749,7 +749,7 @@ with VRAM mirrors, no frame generation. Steps are in order, function by function
    2. Picks the next image index.
    3. `sleep_until(o->avail[idx])`: the image's previous present slot plus one period. This is back-edge pacing at
       the frame limit, using `plat_wait_ns` and then `plat_yield`.
-   4. Waits for the GPU to finish that image's newest present (`fence_wait`, `NX2NAVI_ACQUIRE_WAIT` default 1; 2
+   4. Waits for the GPU to finish that image's newest present (`fence_wait`, `OOTPC_ACQUIRE_WAIT` default 1; 2
       waits for the newest present of any image).
    5. `frame_start`.
 2. **Game logic.** The game's update runs on its own threads, stepped by the value `frame_rate.c` wrote at the last
@@ -777,7 +777,7 @@ with VRAM mirrors, no frame generation. Steps are in order, function by function
    1. Takes `sub_lock`.
    2. `fence = issued + 1`.
    3. `take_slot` → `claim_slot` reuses or allocates a command buffer.
-   4. `vkBeginCommandBuffer`, `ts_begin` (GPU timestamps with `NX2NAVI_TRACE=perf`).
+   4. `vkBeginCommandBuffer`, `ts_begin` (GPU timestamps with `OOTPC_TRACE=perf`).
    5. `rec_begin` hands the part to the recorder ring.
    6. `vk_exec_record`.
 7. **`vk_exec_record`** (`vk_exec.c` ~1666).
@@ -839,7 +839,7 @@ with VRAM mirrors, no frame generation. Steps are in order, function by function
 10. **End of the recording** (`vk_exec_record` ~1736).
     1. `vk_exec_pass_end`.
     2. `vk_exec_barrier`, `vk_exec_pool_marks`.
-    3. If there are write-backs (`NX2NAVI_WB_SPLIT`), `vk_sync_split_exec` ends the part that signals the executed
+    3. If there are write-backs (`OOTPC_WB_SPLIT`), `vk_sync_split_exec` ends the part that signals the executed
        timeline `exec_tl`.
     4. `vk_mem_mirror_end` records the copies of what the GPU wrote into mirrors back to guest memory. With lazy
        write-back, it arms those pages instead.
@@ -853,14 +853,14 @@ with VRAM mirrors, no frame generation. Steps are in order, function by function
        - `vk_mem_gpa_sync`;
        - `vk_mem_lazy_part_end`;
        - the mirror copies (`vk_mem_mirror_prologue`) in a command buffer of their own.
-    4. `queue_submit` (~115) takes `g_ql` raw and holds the submission. Up to `NX2NAVI_SUBMIT_BATCH` (default 4) are
+    4. `queue_submit` (~115) takes `g_ql` raw and holds the submission. Up to `OOTPC_SUBMIT_BATCH` (default 4) are
        held, for at most `HOLD_NS` (0.5 ms), then `hold_flush_locked` → `vkQueueSubmit2`.
     5. `vk_mem_note_submit`.
     6. `issued = fence`, broadcast to the completion thread.
     7. Releases `sub_lock`.
 12. **Wait after the frame's first submission.** Back in `nvnQueueSubmitCommands`, the first submission of each frame
     waits until the GPU has executed that submission's own passes. The wait is `exec_wait` on `exec_tl`, governed by
-    `NX2NAVI_SUBMIT_FINISH`, default mask 1. The comment explains why: the game rewrites data those passes read
+    `OOTPC_SUBMIT_FINISH`, default mask 1. The comment explains why: the game rewrites data those passes read
     without a fence.
 
 ### 4.3 GPU completion ("vk completion")
@@ -894,14 +894,14 @@ with VRAM mirrors, no frame generation. Steps are in order, function by function
     9. `rt_frame_presented`.
 15. **`vk_be_present`** (sync).
     1. Frame counter; `vk_dlssg_submitted`; `perf_present`.
-    2. With `NX2NAVI_PRESENT_HELD` (default on in sync mode), a present that finds held work waits for it, up to
+    2. With `OOTPC_PRESENT_HELD` (default on in sync mode), a present that finds held work waits for it, up to
        `PH_MAX` (8) submissions.
     3. Otherwise `present_image` (~215):
        1. Frame-level work: `vk_exec_frame_log`, `dynres_frame`, `vk_dlaa_frame`, `vk_sampler_aniso_live`,
           `vk_mem_census`.
        2. `vk_texture_get(t)` gets the presented texture's image, possibly recording an upload.
        3. `frame_hold` checks for skipped draws, a resize or an area load. If it holds the frame, the previous
-          picture stays and this present is dropped (`NX2NAVI_FRAME_HOLD_MS`, 120 ms allowance).
+          picture stays and this present is dropped (`OOTPC_FRAME_HOLD_MS`, 120 ms allowance).
        4. `vk_hdr_present_source`.
        5. `vk_upload_flush(0)`.
        6. The `PresentJob` goes to the "vk present" thread. At most one job waits, so the caller blocks while one is
@@ -911,7 +911,7 @@ with VRAM mirrors, no frame generation. Steps are in order, function by function
     2. `vk_present_blit` → `gfx_present.c` `present_image(defer=1)` (~1323), under `g_pl`.
     3. `vk_sync_submit(NULL, 0)`: an empty submission so deferred destruction waits for the blit. It may also replay
        held work.
-    4. `wait_until(pace_smooth(...))`: back-edge pacing to the slot. `NX2NAVI_PACE_SMOOTH` keeps a floor of 7/8 of
+    4. `wait_until(pace_smooth(...))`: back-edge pacing to the slot. `OOTPC_PACE_SMOOTH` keeps a floor of 7/8 of
        the recent interval.
     5. `vk_present_flip` → `flip_locked` → `vkQueuePresentKHR` under `g_ql` (or `vk_dlssg_present` /
        `vk_fg_present`).
@@ -932,7 +932,7 @@ with VRAM mirrors, no frame generation. Steps are in order, function by function
     6. `vkQueueSubmit2` under `vk_queue_lock`: waits on acquire, signals render-done, fences the slot.
     7. The flip is deferred to `vk_present_flip`.
 
-### 4.5 With `NX2NAVI_REPLAY_ASYNC=1` (off by default)
+### 4.5 With `OOTPC_REPLAY_ASYNC=1` (off by default)
 
 - **Submit.** `nvnQueueSubmitCommands` takes the front-end `submit_lock` and runs `nvn_submit_prepare_async`. That
   clones recordings still read by queued submissions.
@@ -978,7 +978,7 @@ back.
 | # | What it holds | Owner | Limit | Frees |
 |---|---|---|---|---|
 | 1 | Guest address space reservations (`memory.c` `mem_init` ~818): module window, kernel region (`RT_KERNEL_SIZE` 256 MiB), 14 GiB low region (stacks 256 MiB, heap), 64 GiB alias region, host-function window | `memory.c` | Fixed sizes | Never released; pages decommitted on heap shrink, `UnmapPhysicalMemory`, stack unmap |
-| 2 | Guest heap and alias mappings (the application pool) | `memory.c` `mem_set_heap_size`, `alias_map` | `NX2NAVI_APP_POOL`, else `rt_app_pool_bytes` (9809 MiB) + `res_heap_extra_bytes()`; heap `HEAP_CAP` 12 GiB | Committed on demand, decommitted when shrunk or unmapped |
+| 2 | Guest heap and alias mappings (the application pool) | `memory.c` `mem_set_heap_size`, `alias_map` | `OOTPC_APP_POOL`, else `rt_app_pool_bytes` (9809 MiB) + `res_heap_extra_bytes()`; heap `HEAP_CAP` 12 GiB | Committed on demand, decommitted when shrunk or unmapped |
 | 3 | Kernel-region allocator (`mem_kernel_alloc`, power-of-two classes, `KCLASSES` 29, `KCOMMIT` 64 KiB steps): thread TLR and TLS, shared fonts (up to 64 MiB each), the exception page | `memory.c`, `klock` | The kernel region; "kernel region exhausted" is fatal | Free lists; never decommitted |
 | 4 | Moved stacks `stack_maps[4096]`, `alias_pages` (16 MiB calloc), `module_perm[]` | `memory.c` | Fixed | Commit/decommit on map/unmap; tables never freed |
 | 5 | Lazy write-back segments `lzs` | `memory.c`, `frz_lock` | None found (realloc doubling from 256) | When touched, thawed or released before a mirror eviction; the array never shrinks |
@@ -989,7 +989,7 @@ back.
 | 10 | Fibers | `kernel.c` | `FIBER_MAX` 1024; 256 MiB reserve each | At `FinalizeFiber` |
 | 11 | System-event table `g_se` | `kernel.c` | 512; fatal "table full" | Entries never removed (L-10) |
 | 12 | Events | `kernel.c` | — | When `refs` reach 0 |
-| 13 | Critical-section trace buffer | `kernel.c` | `CRIT_N` × 32 B, only with `NX2NAVI_CRIT` | Never |
+| 13 | Critical-section trace buffer | `kernel.c` | `CRIT_N` × 32 B, only with `OOTPC_CRIT` | Never |
 | 14 | Dispatch table | `dispatch.c` | `TABLE_SPAN_LIMIT` 1 GiB reserved; host hash `HOST_CAP` 8192 | Never (sealed) |
 | 15 | Host-function registry | `hostfn.c` | `MAX_HOSTFN` 4096 | Never |
 | 16 | Guest `jmp_buf` table `jt` | `guest_setjmp.c` | `JMP_N` 1024; fatal beyond | Never removed (L-10) |
@@ -1005,7 +1005,7 @@ back.
 | 21 | Settings entries and strings | `cfg.c` | `CFG_MAX_KEYS` 512 | Old strings kept on every change "for readers" (L-24) |
 | 22 | Per-thread settings memo `cfg_memo` | `cfg.c` | 256 per thread | Thread exit |
 | 23 | RomFS index, overlays, open counters, `handles[65536]` | `romfs.c` | Fixed | Never |
-| 24 | RomFS whole-image mapping | `romfs.c` | Only with `NX2NAVI_ROMFS_MMAP` | Never |
+| 24 | RomFS whole-image mapping | `romfs.c` | Only with `OOTPC_ROMFS_MMAP` | Never |
 | 25 | zstd dictionaries | `ov_zstd.c` | `NDICT` 32, each ≤ `MAX_DICT` 64 MiB; beyond, the guest decoder runs | Never ("another thread may be decoding with one") |
 | 26 | zstd stream contexts | `ov_zstd.c` | `NSTREAM` 16 | Kept with the slot |
 | 27 | Per-thread `ZSTD_DCtx` in `host_decode` | `ov_zstd.c` | One per thread | Never |
@@ -1027,7 +1027,7 @@ back.
 | # | What it holds | Owner | Limit | Frees |
 |---|---|---|---|---|
 | 40 | Audio renderer tables (voices, pools, mixes, sinks, effects) | `audren.c` `renderer_new` | Voices ≤ 1024, mixes ≤ 256, sinks ≤ 256, effects ≤ 4096; game's work buffer 0x10000 | At renderer close |
-| 41 | Mixer output ring | `audio_mixer.c` | `RING_FRAMES` 16384 × 6 channels (about 340 ms); prefill `NX2NAVI_AUDIO_PREFILL_MS` 0..500, default 20 | At mixer close |
+| 41 | Mixer output ring | `audio_mixer.c` | `RING_FRAMES` 16384 × 6 channels (about 340 ms); prefill `OOTPC_AUDIO_PREFILL_MS` 0..500, default 20 | At mixer close |
 | 42 | Mixer work buffers, splitter ids (reallocated every update), limiter delay | `audio_mixer.c` | Limiter ≤ 6 × 192000 floats | At close |
 | 43 | Effect delay lines, 3D reverb (made lazily on the render thread) | `audio_effects.c`, `audio_reverb.c` | Delay ≤ 20000 ms at ≤ 192 kHz | At close |
 | 44 | Guest AUX/capture rings, circular sinks | `audio_mixer.c` | ≤ 16M samples (fatal above); sink ≤ 256 MiB | At close |
@@ -1044,7 +1044,7 @@ back.
 | 55 | Menu event queue | `ui/menu.cpp` | `EV_MAX` 256 | — |
 | 56 | Perf overlay history and histograms | `perfmon.c`, `perf.c` | `PERF_HISTORY` 120; fixed bins | Static |
 | 57 | Profiler tables | `prof_win.c` | About 15 MB static, `SLOW_DUMPS` 64 | Static |
-| 58 | Flight recorder ring and thumbnails | `flight.c`, `gfx_present.c` | `NX2NAVI_FLIGHT_FRAMES` (600, 64..7200) | Never; dump jobs freed by the dump thread |
+| 58 | Flight recorder ring and thumbnails | `flight.c`, `gfx_present.c` | `OOTPC_FLIGHT_FRAMES` (600, 64..7200) | Never; dump jobs freed by the dump thread |
 | 59 | Camera speed copies and temporaries | `camera_speed.c` | `copies[16]`; temporaries ≤ 64 MiB | Per search |
 
 ### 5.4 GPU memory (`vk_memory.c`, `vk_headroom.c`, `vk_gpa.c`)
@@ -1052,12 +1052,12 @@ back.
 **How the VRAM budget works.**
 
 - *Computation.* `vram_query` sums `heapUsage` and `heapBudget` over the device-local heaps (`VK_EXT_memory_budget`;
-  the driver's figure counts every process). `NX2NAVI_VRAM_BUDGET_MB` caps it (`budget_cap`).
+  the driver's figure counts every process). `OOTPC_VRAM_BUDGET_MB` caps it (`budget_cap`).
   `vk_mem_vram_live` counts free space inside VMA's blocks as room.
 - *Mirrors.* `mirror_create` evicts idle mirrors (`mirror_evict`) only when that frees enough. It may then exceed the
   budget while mirrors total no more than half of it (`MIRROR_SHARE` 2), asking textures for the room
   (`vk_texture_want_room`). Otherwise it refuses the pool, which stays imported (read over PCIe).
-- *Textures.* `vk_texture.c` `sweep_pressure` runs every 8 submits. Its limit is `NX2NAVI_TEX_VRAM_PRESSURE` percent
+- *Textures.* `vk_texture.c` `sweep_pressure` runs every 8 submits. Its limit is `OOTPC_TEX_VRAM_PRESSURE` percent
   of the budget, default 80.
 - *Headroom.* The headroom thread keeps one spare block per memory type while usage plus two blocks stays at or under
   85 % of VMA's budget. It does not apply the cap (D-04).
@@ -1065,20 +1065,20 @@ back.
 | # | What it holds | Owner | Limit | Frees |
 |---|---|---|---|---|
 | 60 | Pool records: imported host pools (`import_pool`), physical pools (dedicated device-local, `alloc_physical`, no budget check), virtual pools (page tables) | Guest threads via the back end | None found | Pool finalize; mirrored ones by `mirror_retire` on the completion thread |
-| 61 | VRAM mirrors of imported pools | Replay | The budget rules above; `NX2NAVI_MEMORY` auto/import/mirror/verify; `NX2NAVI_MIRROR_EVICT` (default 1) | Pool finalize, or `mirror_evict`: idle ≥ `MIRROR_IDLE` 120 submissions, ≤ `MAXV` 64 candidates, oldest first. Deferred to fence +2 |
+| 61 | VRAM mirrors of imported pools | Replay | The budget rules above; `OOTPC_MEMORY` auto/import/mirror/verify; `OOTPC_MIRROR_EVICT` (default 1) | Pool finalize, or `mirror_evict`: idle ≥ `MIRROR_IDLE` 120 submissions, ≤ `MAXV` 64 candidates, oldest first. Deferred to fence +2 |
 | 62 | Mirror retry state | Replay | `RETRY_SOON` 16, `RETRY_SUBS` 600 submissions; a pool refused for `MR_ALLOC` is never retried (L-23) | — |
 | 63 | Per-submission copy lists (`pend`, `wbl`, `mregions`) | Replay | Grow only | Reset each submission |
 | 64 | Flush ranges per pool | `flush_lock` | `FLUSH_RANGES` 32 | — |
 | 65 | Page-generation tables (`gen_chunk`, `cgen_chunk`, 256 MiB chunks of uint32 on first stamp) | `gen_lock` | `RT_ADDRESS_LIMIT` | Shutdown |
-| 66 | Shadow storage per imported pool, and base copies (one 4 KiB malloc per GPU-written page) | Shadow mode (`NX2NAVI_SHADOW`; Linux default) | None found | Pool finalize (L-24) |
-| 67 | Write-back merge snapshot chunks | Replay / completion | ≥ `SNAP_CHUNK` 1 MiB; pool ≤ `SNAP_POOL_N` 128 and budget/64 clamped 64-256 MiB; `NX2NAVI_WB_MERGE_MAX` 32 MiB | At fence; the excess destroyed |
+| 66 | Shadow storage per imported pool, and base copies (one 4 KiB malloc per GPU-written page) | Shadow mode (`OOTPC_SHADOW`; Linux default) | None found | Pool finalize (L-24) |
+| 67 | Write-back merge snapshot chunks | Replay / completion | ≥ `SNAP_CHUNK` 1 MiB; pool ≤ `SNAP_POOL_N` 128 and budget/64 clamped 64-256 MiB; `OOTPC_WB_MERGE_MAX` 32 MiB | At fence; the excess destroyed |
 | 68 | Lazy write-back command buffer and fence | `lz_init_lock` | One | Never freed explicitly |
 | 69 | Upload batches (command buffers and fences: inflight and spare) | `cmd_lock` | Grow only | Reused; shutdown |
 | 70 | Staging cache | `cmd_lock` | `STG_CACHE` 24 buffers, `STG_CACHE_BYTES` 192 MiB | At batch retire |
 | 71 | Staging VMA pool | — | `STG_BLOCK` 64 MiB blocks; `STG_MIN_BLOCKS` 4 kept on a discrete GPU (256 MiB of host memory), `STG_MIN_BLOCKS_UMA` 2 on an integrated one; requests ≤ 32 MiB; an open batch is submitted at `STG_FLUSH` 64 MiB of staging | — |
-| 72 | Staging arena | `cmd_lock` | `ARENA_CHUNK` 8 MiB, ≤ 2 MiB per request, `ARENA_KEEP` 8; `NX2NAVI_STG_ARENA` | At fence; shutdown |
+| 72 | Staging arena | `cmd_lock` | `ARENA_CHUNK` 8 MiB, ≤ 2 MiB per request, `ARENA_KEEP` 8; `OOTPC_STG_ARENA` | At fence; shutdown |
 | 73 | Deferred destruction list `dead[]` (images, views, buffers, host frees) | `cmd_lock` | None found | `vk_mem_collect` on the completion thread once the stamped value is reached |
-| 74 | Headroom spare (half a VMA block per device-local type; block `NX2NAVI_VMA_BLOCK_MB` 64, 16..256) | "vk headroom" | 85 % of VMA's budget; `NX2NAVI_VRAM_HEADROOM=0` off | Replaced, dropped when there is no room or commit is low, at stop |
+| 74 | Headroom spare (half a VMA block per device-local type; block `OOTPC_VMA_BLOCK_MB` 64, 16..256) | "vk headroom" | 85 % of VMA's budget; `OOTPC_VRAM_HEADROOM=0` off | Replaced, dropped when there is no room or commit is low, at stop |
 | 75 | Device address table (L1 65536 entries, `BLOCKS` 1024 × 16 MiB L2, `RECS` 65536, about 17 MiB) | `gpa_lock` | Fixed; when exhausted, logs and shaders read zeros | Free lists at fence +1 |
 | 76 | VMA allocator (`preferredLargeHeapBlockSize` = `vk_vma_block_size`) | `vk_device.c` | — | Shutdown |
 
@@ -1086,27 +1086,27 @@ back.
 
 **Texture cache eviction.**
 
-- *Release overflow.* `sweep_released`: `RELEASED_MAX` 2048 entries, and `NX2NAVI_TEX_RELEASED_MB` (default RAM/32
+- *Release overflow.* `sweep_released`: `RELEASED_MAX` 2048 entries, and `OOTPC_TEX_RELEASED_MB` (default RAM/32
   clamped 512-2048 MiB, raised by budget/4 up to 8192).
 - *Stale.* `drop_stale`: `STALE_FRAMES` 120 presents, `GPU_STALE_FRAMES` 1800.
 - *Overwritten.* `drop_overwritten`: `OVERWRITTEN_KEEP` 600.
 - *VRAM pressure.* `PRESSURE_STEP` 32 per check.
 - *Idle.* `evict_idle`: idle for `IDLE_ROUNDS` 240 pool walks and `STALE_FRAMES`; `EVICT_STEP` 64 per check.
 - *Disuse.* `evict_disused`: unsampled for `DISUSE_SECONDS` 120; retired, then destroyed after the pool sets turn over.
-- *Commit pressure.* `commit_evict`: `COMMIT_EVICT_STEP` 256 MiB, `COMMIT_LOW_KEEP` 256 MiB; `NX2NAVI_TEX_PROC_COMMIT_MB`
+- *Commit pressure.* `commit_evict`: `COMMIT_EVICT_STEP` 256 MiB, `COMMIT_LOW_KEEP` 256 MiB; `OOTPC_TEX_PROC_COMMIT_MB`
   (minimum 24576).
 - *Destruction.* Deferred (`vk_defer_image`, `vk_defer_free`).
 
 | # | What it holds | Owner | Limit | Frees |
 |---|---|---|---|---|
-| 77 | Texture image cache (`by_key`, `by_addr`). Memory comes from: pool memory; a VMA sub-allocation ≤ `SUBALLOC_MAX` 32 MiB; a reused image (`NX2NAVI_TEX_REUSE`); its own allocation (dedicated ≥ `DEDICATED_MIN` 32 MiB) | `tex_lock` | No count cap; the evictions above | The evictions above |
+| 77 | Texture image cache (`by_key`, `by_addr`). Memory comes from: pool memory; a VMA sub-allocation ≤ `SUBALLOC_MAX` 32 MiB; a reused image (`OOTPC_TEX_REUSE`); its own allocation (dedicated ≥ `DEDICATED_MIN` 32 MiB) | `tex_lock` | No count cap; the evictions above | The evictions above |
 | 78 | Disuse holds | `tex_lock` | `HOLDS_MAX` 65536; cleared when full | — |
 | 79 | Image memory requirements cache `img_reqs` | `tex_lock` | None found | Shutdown |
 | 80 | Reusable released images | `tex_lock` | ≤ 128 searched per create | With the release sweep |
 | 81 | Texture and sampler slots | `tex_lock` | Texture slots ≤ 1<<20 (fatal beyond); sampler slots ≤ 4096 | Shutdown |
 | 82 | Sampler cache | `tex_lock` | None found; keyed by parameters, DLSS LOD bias and anisotropy; `vkCreateSampler` failure is fatal (L-19) | Shutdown |
 | 83 | Failed-create hold ring | `tex_lock` | 32 entries, 2 s | — |
-| 84 | ASTC decode scratch | `vk_astc.c` `g_lock` | ≥ `SCRATCH_MIN` 32 MiB, `CHUNK_OUT` 16 MiB pieces; new per upload batch unless `NX2NAVI_ASTC_SCRATCH_KEEP=1` | Deferred |
+| 84 | ASTC decode scratch | `vk_astc.c` `g_lock` | ≥ `SCRATCH_MIN` 32 MiB, `CHUNK_OUT` 16 MiB pieces; new per upload batch unless `OOTPC_ASTC_SCRATCH_KEEP=1` | Deferred |
 | 85 | CPU ASTC worker pool | `tex_astc_mt.c` | 7 threads | Never |
 
 ### 5.6 Replay, submission, present (`vk_exec*.c`, `vk_usnap.c`, `vk_rec.c`, `vk_sync.c`, `gfx_present.c`)
@@ -1140,7 +1140,7 @@ back.
 | 110 | DLSS features and work images, motion-vector blocks | `vk_dlaa.c` | `DLSS_SIZES` 5; a size unused for 3600 evaluations is freed; `MVM_SLOTS` 16 | — |
 | 111 | Frame dump read-back buffers | `vk_dump.c` | `PNG_CAP` 2 GiB, `INFLIGHT_CAP` 3 GiB; debug only | After writing |
 | 112 | GPU breadcrumbs | `vk_crumbs.c` | `GP_SLOTS` 16384 | — |
-| 113 | Address bind reports | `vk_vaddr.c` | None found while `NX2NAVI_VA_REPORT` is on | Never |
+| 113 | Address bind reports | `vk_vaddr.c` | None found while `OOTPC_VA_REPORT` is on | Never |
 
 ### 5.7 Pipelines and shaders (memory and disk)
 
@@ -1150,17 +1150,17 @@ back.
 | 115 | Pipeline layouts, set layouts, update templates | `P.lock` | None found | Shutdown |
 | 116 | Stage libraries `libs[1024]` chained; failed builds cached as null | `P.lock` | None found | Shutdown (`libs_destroy`) |
 | 117 | Library and pipeline job queues | `P.lock` | None found | When built; dropped at shutdown |
-| 118 | `VkPipelineCache` in memory and `pipeline-cache.bin` | `cache_rw`, `save_lock` | Each file > `NX2NAVI_PIPELINE_CACHE_MAX_MB` (RAM / 32, 1024 to 4096 MB) starts empty, and no cache past it is written; in memory: the driver's, none found | Saved by "pipe autosave" at most every 20 s and at exit (waits ≤ 5 s) |
-| 119 | Pipeline binaries `pipeline-binaries.bin` | `PB.lock` | `NX2NAVI_PIPE_BINARIES_MAX_MB` 1024; `NX2NAVI_PIPE_BINARIES` default 0 | — |
+| 118 | `VkPipelineCache` in memory and `pipeline-cache.bin` | `cache_rw`, `save_lock` | Each file > `OOTPC_PIPELINE_CACHE_MAX_MB` (RAM / 32, 1024 to 4096 MB) starts empty, and no cache past it is written; in memory: the driver's, none found | Saved by "pipe autosave" at most every 20 s and at exit (waits ≤ 5 s) |
+| 119 | Pipeline binaries `pipeline-binaries.bin` | `PB.lock` | `OOTPC_PIPE_BINARIES_MAX_MB` 1024; `OOTPC_PIPE_BINARIES` default 0 | — |
 | 120 | `pipeline-keys.bin` and its `seen` set | `K.io` | None found (append-only) | Never |
-| 121 | `compute-used.bin` | `cu_io` | `NX2NAVI_COMPUTE_KEEP` 512 | — |
-| 122 | Large-compute builder's own pipeline cache | "big compute" | `NX2NAVI_BIG_BUILD_FREE_MB` 8192, `NX2NAVI_BIG_BUILD_MAX_MB` 4096 | Merged, then destroyed |
+| 121 | `compute-used.bin` | `cu_io` | `OOTPC_COMPUTE_KEEP` 512 | — |
+| 122 | Large-compute builder's own pipeline cache | "big compute" | `OOTPC_BIG_BUILD_FREE_MB` 8192, `OOTPC_BIG_BUILD_MAX_MB` 4096 | Merged, then destroyed |
 | 123 | Shader memory cache `buckets[4096]` (SPIR-V and reflection) | `cache_lock` | None found; "for the life of the process" | Only by the probe's `gfx_shader_drop_memory` |
 | 124 | Use records `use_buckets`, `use_files` | `cache_lock` | `USE_FILE_BUCKETS` 65536 buckets; entries none found | Never |
 | 125 | Failed shader keys | `failed_lock` | `FAILED_N` 4096; when full, failures are no longer remembered | — |
 | 126 | Shader disk cache: `shader-cache/` loose files, `shader-cache.pack`, `in/*.in`, records | `gfx_shader.c`, `tools/make_game.py` | None found on size; translators listed ≤ `IDS_MAX` 8; packed once 1,000 loose translations exist (`PACK_LOOSE_MIN`) | The carry pass prunes old translators' entries; the pack is replaced by a pruned copy at the next start |
 | 127 | Translation job and load queues `X.head`, `X.lhead` | `X.lock` | None found | When done |
-| 128 | Translator child processes | `S.lock` | `NX2NAVI_XLATE_PROCS` (2), `MAX_SVC` 32; raised during prewarm | Kept for the process |
+| 128 | Translator child processes | `S.lock` | `OOTPC_XLATE_PROCS` (2), `MAX_SVC` 32; raised during prewarm | Kept for the process |
 | 129 | GPU driver caches (per exe; NVIDIA's per-process disk cache on Linux) | The driver | Driver-defined | Driver-defined |
 
 That is 129 allocators, pools and caches.
@@ -1174,10 +1174,10 @@ the mapping passes' reading, cited, and not re-checked line by line.
 
 | # | Where | What it says | What the code does | Verified |
 |---|---|---|---|---|
-| D-01 | `docs/architecture.md` "Threads and cores"; `kernel.c` comment ~322 | Three application cores, three virtual cores | `kernel.c` `NCORE` = 6. Comment ~30: Switch 2 titles get cores 0-5. `NX2NAVI_CORES` can lower it | yes |
-| D-02 | `docs/architecture.md` "Graphics" | A recorder thread makes the `vkCmd*` calls | Only where `NX2NAVI_VK_RECORDER` is on: the default is off on AMD (`vk_rec.c` ~170, `rt_knob("VK_RECORDER", amd ? "0" : "1")`) | yes |
+| D-01 | `docs/architecture.md` "Threads and cores"; `kernel.c` comment ~322 | Three application cores, three virtual cores | `kernel.c` `NCORE` = 6. Comment ~30: Switch 2 titles get cores 0-5. `OOTPC_CORES` can lower it | yes |
+| D-02 | `docs/architecture.md` "Graphics" | A recorder thread makes the `vkCmd*` calls | Only where `OOTPC_VK_RECORDER` is on: the default is off on AMD (`vk_rec.c` ~170, `rt_knob("VK_RECORDER", amd ? "0" : "1")`) | yes |
 | D-03 | `vk.h` ~687, `vk_backend.c` ~581 | `vk_pipeline.c` implements `vk_program_release` and drops a released program's pipelines | No strong definition exists; the weak no-op in `vk_backend.c` always runs | yes |
-| D-04 | `vk_memory.c` ~656 | `NX2NAVI_VRAM_BUDGET_MB` caps "every decision here and in vk_texture.c" | `vk_headroom.c` `room` reads `vmaGetHeapBudgets` itself, without the cap | yes |
+| D-04 | `vk_memory.c` ~656 | `OOTPC_VRAM_BUDGET_MB` caps "every decision here and in vk_texture.c" | `vk_headroom.c` `room` reads `vmaGetHeapBudgets` itself, without the cap | yes |
 | D-05 | `memory.c` ~68 | "frz_lock is a leaf lock: nothing writes guest memory under it" | `lazy_drop_locked` and `lazy_piece_locked` call the back end's `lz_fetch` under it (a GPU copy into guest memory and a wait of up to 10 s); `mem_lazy_arm` calls `lz_clean` under it | yes |
 | D-06 | `vk_memory.c` ~1744 vs the log line in `evict_enabled` ~1766 | The comment: "Mirrors never go to make room for textures". The log line: idle mirrors make room "for textures under VRAM pressure" | `mirror_evict` is called only from `mirror_create`. The comment is right; the log line is wrong | partly (comment read) |
 | D-07 | `svc.c` ~45 `unimplemented[]` | 0x36 `SynchronizePreemptionState` is listed as never reached | `kernel.c` implements 0x36. The table is reached only after the kernel declines, so this has no effect | yes (listing) |
@@ -1193,7 +1193,7 @@ the mapping passes' reading, cited, and not re-checked line by line.
 | D-17 | `ov_input.c` ~2, `flight.c` ~10, `audio_mixer.c` ~786 | `input_poll` in `input_win.c`; `perf_present` in `prof_win.c`; `audio_renderer.c` | They are in `input.c`, `perf.c` and `audren.c` | no |
 | D-18 | `vk_fg.cpp` ~51 | The game's queue is shared with the recorder | The recorder never submits (`vk_rec.h`: "submitting and the command pool stay on the submitting thread") | no |
 | D-19 | `platform/win32.c` ~473 | The timer handle is "one handle per thread, kept until exit" | Kept until process exit: never closed when a thread exits | no |
-| D-20 | Task context and docs: app pool 9809 MiB | — | `memory.c` `mem_init` adds `res_heap_extra_bytes()` (resolution settings), and `NX2NAVI_APP_POOL` overrides it | yes |
+| D-20 | Task context and docs: app pool 9809 MiB | — | `memory.c` `mem_init` adds `res_heap_extra_bytes()` (resolution settings), and `OOTPC_APP_POOL` overrides it | yes |
 
 ---
 
@@ -1278,10 +1278,10 @@ suspicion.
   - `net_offline.c` spare events.
 - **L-26** *(Phase 3: F-3-06, suspected.)* `platform/win32.c`. Per-thread timer and file-event handles are never closed. One "save commit" thread per
   Commit and one "camera speed" thread per search leak a few handles each.
-- **L-27** *(Phase 3: F-3-07, suspected.)* `vk_headroom.c` `room`. It ignores `NX2NAVI_VRAM_BUDGET_MB`, so a capped test run is not the small card it
+- **L-27** *(Phase 3: F-3-07, suspected.)* `vk_headroom.c` `room`. It ignores `OOTPC_VRAM_BUDGET_MB`, so a capped test run is not the small card it
   claims to be.
 - **L-28** *(Phase 3: struck: bounded by the armed pages; 84-144 ranges measured.)* `memory.c` `lzs`. Lazy write-back segments grow without a cap, and every fault and arm scans them linearly.
-- **L-29** *(Phase 3: F-3-08, suspected for the non-default mode.)* `vk_usnap.c`. `U.wr` grows without pruning when `NX2NAVI_UBO_SNAPSHOT=0`. The arena free list is never
+- **L-29** *(Phase 3: F-3-08, suspected for the non-default mode.)* `vk_usnap.c`. `U.wr` grows without pruning when `OOTPC_UBO_SNAPSHOT=0`. The arena free list is never
   trimmed.
 - **L-30** *(Phase 3: F-3-09, suspected.)* `vk_exec_draw.c` `mesh_ring_entry` (~5048). The mesh ring's allocation handle is discarded, so it is never
   destroyed (shutdown only).
@@ -1328,7 +1328,7 @@ suspicion.
   - GPU 3.15 ms per frame, "bound: cpu";
   - 6 submits per frame, so it is not `vk_texture.c` `sweep_pressure`'s every-8-submits rhythm.
 
-  A profiled run (`NX2NAVI_PROFILE_SLOW`) would name it.
+  A profiled run (`OOTPC_PROFILE_SLOW`) would name it.
 - **L-45** *(Phase 3: not a growth of the host's replay (its time stays 5.5 ms); the cause is not determined.)* The CPU frame grows while standing in Hyrule Field toward dusk (`bl_fieldlong`).
   - Over 9 minutes the frame went from about 7.1 to 8.4 ms (140 → 118 fps).
   - The GPU's time stayed at 4.37 ms, and every window was "bound: cpu".
@@ -1371,8 +1371,8 @@ Phase 2 entered F-1-01 and F-1-02. Phase 3 (section 12, stopped before its end) 
 
 | ID | Sev | Subsystem | Location | What happens | Trigger | Status | Fix | Risk | Lead | Commit / verified |
 |---|---|---|---|---|---|---|---|---|---|---|
-| F-1-01 | S1 | Save data (7) / the game's own loader | Lifted `f_700112b3b0` = `main+0x112b3b0`, called from `main+0x74d7b0`/`0x74d660` | The process dies with `FATAL: access violation (0xc0000005) at host … (nx2navi+0x42419ae), reading address 0x150` in guest code while a save loads. **Cause traced (Phase 3, 12.3):** the save names the area `HyruleCastle_Child` (twice in `progress.sav`); the 1.1.1 RomFS has only `Banc/HyruleCastle/HyruleCastle_Static` and `_Dynamic`, with no `_Child` area. The game opens `Banc/HyruleCastle/HyruleCastle_Child_Static.bcett.byml.zs` (twice), then `.byml`, then the `_Dynamic` pair, gets "not found" for each, reads `Banc/GameBancParam/HyruleCastle_Child.game__banc__GameBancParam.bgyml`, and then reads through a null area object at +0x150. The host answered correctly: the files do not exist. The save's header bytes match the other 11 saves. | Load the test install's slot 1 (`E:\NX2navi-060b\game\profile\save\<user>\slot_01`: Kokiri Forest, child, 3 hearts, autosave dated 11/5/2026 12:07 a.m., blank thumbnail, `caption.sav` 11638 bytes against about 40 KB for the others) as the only slot (`E:\nx2devrun\out\audit\saves\one_d1`), then Load. Runs `probe_d1`, `probe_d1b`, `probe_d1_all`, `f101_fs` | confirmed: 4 of 4, including `ocarina_all.exe` (no audit code) and a file trace. Where the save came from (another game version, or an edited save) is not determined. It is the only Kokiri Forest save available | The host cannot repair the save. It can make the failure readable: when an area's `Banc/<area>/<name>_Static.bcett.byml` is asked for and absent, log one line that names the area and say in the crash report that the loaded save names an area this game version does not have (and see F-6-02 for showing it) | None for a log line. Refusing the load would change game behaviour: ask the user first | — | `58a8d21d`. The crash stays (the save cannot load). Verified that it now explains itself, run `p4_d1`: `RomFS: the game asked for the area HyruleCastle_Child (Banc/HyruleCastle/HyruleCastle_Child_Static.bcett.byml.zs), which this game version does not have; the save being loaded names it and cannot be loaded here`, and after the FATAL `fatal: the game asked for the area HyruleCastle_Child, which this game version does not have; a save that names it cannot be loaded` |
-| F-1-02 | S4 | In-game menu (21) | `ui/menu_skin.cpp` `skin_atlas_fill`, lambda `lattice` (~265) | `x * 374761393` and `y * 668265263` are signed `int` multiplications that overflow for x ≥ 6 (undefined behaviour; on this compiler they wrap, so the grain looks as meant) | Any start: the menu's font atlas is filled at start-up | confirmed by UBSan: a trap `ud1 0xc` (multiply overflow) at `nx2navi+0x11782fd2`, `addr2line` → `menu_skin.cpp:265` (run `san_ubsan`, section 11.4) | Do the hash in `unsigned` (`(unsigned)x * 374761393u + …`) | None: the same bits, no gameplay or format change | — | `cebdd4a9`. UBSan build without the ignore list (`ocarina_ubsan_fix.exe`), the route: `p4_ubsan` went through the whole route (261 s of world time) with no trap: the start no longer stops at `menu_skin.cpp:265`, and none of the changed code tripped a check |
+| F-1-01 | S1 | Save data (7) / the game's own loader | Lifted `f_700112b3b0` = `main+0x112b3b0`, called from `main+0x74d7b0`/`0x74d660` | The process dies with `FATAL: access violation (0xc0000005) at host … (ootpc+0x42419ae), reading address 0x150` in guest code while a save loads. **Cause traced (Phase 3, 12.3):** the save names the area `HyruleCastle_Child` (twice in `progress.sav`); the 1.1.1 RomFS has only `Banc/HyruleCastle/HyruleCastle_Static` and `_Dynamic`, with no `_Child` area. The game opens `Banc/HyruleCastle/HyruleCastle_Child_Static.bcett.byml.zs` (twice), then `.byml`, then the `_Dynamic` pair, gets "not found" for each, reads `Banc/GameBancParam/HyruleCastle_Child.game__banc__GameBancParam.bgyml`, and then reads through a null area object at +0x150. The host answered correctly: the files do not exist. The save's header bytes match the other 11 saves. | Load the test install's slot 1 (`E:\OOT-PC-060b\game\profile\save\<user>\slot_01`: Kokiri Forest, child, 3 hearts, autosave dated 11/5/2026 12:07 a.m., blank thumbnail, `caption.sav` 11638 bytes against about 40 KB for the others) as the only slot (`E:\nx2devrun\out\audit\saves\one_d1`), then Load. Runs `probe_d1`, `probe_d1b`, `probe_d1_all`, `f101_fs` | confirmed: 4 of 4, including `ocarina_all.exe` (no audit code) and a file trace. Where the save came from (another game version, or an edited save) is not determined. It is the only Kokiri Forest save available | The host cannot repair the save. It can make the failure readable: when an area's `Banc/<area>/<name>_Static.bcett.byml` is asked for and absent, log one line that names the area and say in the crash report that the loaded save names an area this game version does not have (and see F-6-02 for showing it) | None for a log line. Refusing the load would change game behaviour: ask the user first | — | `58a8d21d`. The crash stays (the save cannot load). Verified that it now explains itself, run `p4_d1`: `RomFS: the game asked for the area HyruleCastle_Child (Banc/HyruleCastle/HyruleCastle_Child_Static.bcett.byml.zs), which this game version does not have; the save being loaded names it and cannot be loaded here`, and after the FATAL `fatal: the game asked for the area HyruleCastle_Child, which this game version does not have; a save that names it cannot be loaded` |
+| F-1-02 | S4 | In-game menu (21) | `ui/menu_skin.cpp` `skin_atlas_fill`, lambda `lattice` (~265) | `x * 374761393` and `y * 668265263` are signed `int` multiplications that overflow for x ≥ 6 (undefined behaviour; on this compiler they wrap, so the grain looks as meant) | Any start: the menu's font atlas is filled at start-up | confirmed by UBSan: a trap `ud1 0xc` (multiply overflow) at `ootpc+0x11782fd2`, `addr2line` → `menu_skin.cpp:265` (run `san_ubsan`, section 11.4) | Do the hash in `unsigned` (`(unsigned)x * 374761393u + …`) | None: the same bits, no gameplay or format change | — | `cebdd4a9`. UBSan build without the ignore list (`ocarina_ubsan_fix.exe`), the route: `p4_ubsan` went through the whole route (261 s of world time) with no trap: the start no longer stops at `menu_skin.cpp:265`, and none of the changed code tripped a check |
 | F-1-03 | S1 | Services (5) | `ipc.c` `ipc_svc` 0x21/0x22 (~516), `kernel.c` `kern_handle_get` (~2008), `ipc_handle_closed` (~237) | `kern_handle_get` returns the session without a reference and `dispatch` uses it unlocked. A CloseHandle on another guest thread frees it mid-request. Domain tables (`objects`, `nobjects`) are also written unlocked while `dispatch` reads them | A guest thread closes a session while another is inside SendSyncRequest on it (the console keeps the session alive). The sessions here are made at boot, plus the audio renderer and amiibo | suspected (code read, `kern_handle_get` re-read by the auditor); not seen in any run | Take a reference under the kernel lock for the length of the request, released through the path `ipc_handle_closed` uses | Low; services only | L-09 | — |
 | F-1-04 | S1 | Files (6) | `ov_zstd.c` `stream_drop` (~340), `stream_take` (~326) | `stream_drop` clears the slot by pointer, not by owner: thread A looks up spent slot k for its stream and unlocks; thread B takes slot k (all 16 slots taken); A's `stream_drop` zeroes it; thread C takes it as free and resets the decoder context B is decoding with. The asset B decodes is corrupted | More than 16 stream states alive, so that slots are reused, with loader threads decoding at once. Phase 2 saw 0 of 16 slots taken at every snapshot (snapshots fall outside loads) | suspected (code re-read by the auditor) | `stream_drop(st, s)` clears only when `st->s == s`, under `stream_lock` | None | L-11 | `32f2a41a`. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
 | F-1-05 | S1 | Textures (13) | `vk_texture.c` `same_content` (~2489-2493), `upload` (~2264-2272) | `same_content` hashes a texture's guest storage with no readability check and no read hold; `upload` hashes it after `mem_readable` but outside `mem_read_hold`. If the game unmaps the storage between the check and the hash, the render thread reads decommitted memory: an access violation in host code | A texture of at most `CHASH_MAX` bytes whose storage is freed while a page change sends it through `make_fresh` / `make_fresh_snap` | suspected (code re-read by the auditor). Whether a change can be reported for a range just unmapped was not traced | Hash under `mem_read_hold`; in `same_content` treat a failed hold as "changed" | Low, textures only | — | `a9005e5c`. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
@@ -1381,7 +1381,7 @@ Phase 2 entered F-1-01 and F-1-02. Phase 3 (section 12, stopped before its end) 
 | F-1-08 | S1 | Kernel (3) | `kernel.c` `kern_bind_system_event`, `g_se[512]` (~2060-2095) | The system-event table keys on the event's guest address and entries are never removed; full is fatal ("table full") | A long session with many reloads | confirmed growth, the fatal not reached: `system events` went 8 → 10 across one reload in both route runs (about 250 reloads to the limit) | Reuse an entry whose event is no longer live (`se_live` 0) | Low | L-10 | `1a57cc21`. The full table was not reached in any run, so the new path has not run. `tests\sync_wake_check.py` (builds `kernel.c`) passes. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
 | F-1-09 | S1 | Save data (7), Files (6) | `fs_host.c` `read_directory` (~1307, no lock at all), `file_of` (~1068), `close_directory` (~1340); `romfs.c` `handle_source` | A directory listing or file handle is used after the lock is dropped (or with none taken): a CloseDirectory on another guest thread frees the listing `read_directory` is copying from; a CloseFile closes the host file a read is using | The game closes a handle on one thread while another uses it. That is a fault of the game's own; the console answers it with an error result, not a crash | suspected (code re-read by the auditor); not seen | Hold `lock` shared for the length of the call, or count users per slot | Low | L-02 | `d61cd9b9`. Directory listings only; file handles keep their window. Not reproduced before. `--probe-fs` and `tests\save_share_check.py` pass with the change |
 | F-1-10 | S1 | Audio (18) | `audren.c` `need` (~66-70), `audio_mixer.c` parameter checks (~641-1045) | Parameters the game supplies in RequestUpdate (limiter, reverb, sink sizes) are checked with `rt_fatal`; the console's renderer returns an error result instead | An effect configuration outside the checked ranges. The route (five areas, the pause menu) tripped none; dungeons and bosses, whose effects differ, could not be reached | suspected; not determined by a run | Return the error result and log once instead of ending the process | Changes what the game is told in that case: ask the user first | L-20 | — |
-| F-1-11 | S1 | Replay (11), GPU memory (12); cause not determined | The GPU fault is reported by `vk_crumbs.c` and the device-fault lines; the process ends in `vk_memory.c` ("upload submit failed (-4)") or `vk_sync.c` ("the wait for a submission's commands failed (-4; device lost?)") | The GPU reports a page fault and the device is lost while a save loads: `vk: device fault address 1: read invalid at 0x31f000000` (also `0x30b000000`, `0x311000000`), right after `vk: texture pool: an area load of about 4629 textures was made in 1 frames`; the GPU's last mark is `dispatch 3 of submission N: 293x1x1 groups, cs 3524d41df45a41e0`, started and finished | Loading the Hyrule Field day save (`saves\one_u3`) in `E:\nx2devrun` while the boot's pipeline prebuild is skipped there (F-4-11), so pipelines are built at their first draw | confirmed 3 times: runs `p3_l31_nosubmit` (`SUBMIT_FINISH=0`), `p3_l31_noacquire` (`ACQUIRE_WAIT=0`) and `p3_l31_default2` (default settings), three in a row. In the same state `p3_l31_default`, `p3_l31_nosubmit2` and `p3_market_prof` loaded without it; none of the earlier runs of Phases 2 and 3 (prebuild not skipped) had it. **Later data from the session diagnosing it** (its runs, `E:\nx2devrun\out\crash_matrix.txt`): the loss follows the lazy write-back's piece release, not the skipped prebuild: 0 lost in 15 loads of the night field save (`saves\one_u0`) with `NX2NAVI_WB_LAZY_CHUNK=0`, 0 in 10 with `NX2NAVI_WB_LAZY=0`, about 7 in 22 with it on, and one more in the day field (`out\bn_fday_new_2`). The read fault is at the first page of a 64 MiB device memory that holds a 26.6 MiB buffer and 125 images bound 2 s earlier. The mechanism is not known | `test-all-fixes` switches the piece release off by default (`6e3f29d4`, not on this branch: here `WB_LAZY_CHUNK` still defaults to 1). The cause itself is open | — | — | Not the audit's commit; the audit's own runs after it (`p4_*`, 7 save loads with the default) lost no device |
+| F-1-11 | S1 | Replay (11), GPU memory (12); cause not determined | The GPU fault is reported by `vk_crumbs.c` and the device-fault lines; the process ends in `vk_memory.c` ("upload submit failed (-4)") or `vk_sync.c` ("the wait for a submission's commands failed (-4; device lost?)") | The GPU reports a page fault and the device is lost while a save loads: `vk: device fault address 1: read invalid at 0x31f000000` (also `0x30b000000`, `0x311000000`), right after `vk: texture pool: an area load of about 4629 textures was made in 1 frames`; the GPU's last mark is `dispatch 3 of submission N: 293x1x1 groups, cs 3524d41df45a41e0`, started and finished | Loading the Hyrule Field day save (`saves\one_u3`) in `E:\nx2devrun` while the boot's pipeline prebuild is skipped there (F-4-11), so pipelines are built at their first draw | confirmed 3 times: runs `p3_l31_nosubmit` (`SUBMIT_FINISH=0`), `p3_l31_noacquire` (`ACQUIRE_WAIT=0`) and `p3_l31_default2` (default settings), three in a row. In the same state `p3_l31_default`, `p3_l31_nosubmit2` and `p3_market_prof` loaded without it; none of the earlier runs of Phases 2 and 3 (prebuild not skipped) had it. **Later data from the session diagnosing it** (its runs, `E:\nx2devrun\out\crash_matrix.txt`): the loss follows the lazy write-back's piece release, not the skipped prebuild: 0 lost in 15 loads of the night field save (`saves\one_u0`) with `OOTPC_WB_LAZY_CHUNK=0`, 0 in 10 with `OOTPC_WB_LAZY=0`, about 7 in 22 with it on, and one more in the day field (`out\bn_fday_new_2`). The read fault is at the first page of a 64 MiB device memory that holds a 26.6 MiB buffer and 125 images bound 2 s earlier. The mechanism is not known | `test-all-fixes` switches the piece release off by default (`6e3f29d4`, not on this branch: here `WB_LAZY_CHUNK` still defaults to 1). The cause itself is open | — | — | Not the audit's commit; the audit's own runs after it (`p4_*`, 7 save loads with the default) lost no device |
 | F-1-12 | S3 | Replay (11) | `vk_sync.c` `completion_main` (~395-431) | After the device is lost the completion thread can still take the timeline as advanced: it ends the process only when `vkWaitSemaphores` or `vkGetSemaphoreCounterValue` return an error, and a lost device may answer both with success and a signalled value. It then runs the callbacks of submissions that never finished (frees, record reuse, counter reports) before the next checked call reports the loss, so the first symptom in the log is a wrong one | Any device loss (F-1-11) | symptom confirmed, mechanism suspected: in `p3_l31_noacquire` the line `vk: occlusion query slot 96 not available after its fence, counted as visible` comes six lines before `vk: device fault`. Reported by the session diagnosing F-1-11; the code was re-read by the auditor (the two result checks are there, a check of the device itself is not) | Ask the device whether it is lost before running callbacks (a cheap checked call, or the fault query), and end with the fault report first | Low: only the path after a loss changes | — | — |
 | F-2-01 | S2 | NVN front end (10), Replay (11) | `vk_backend.c` `submit_sync` (~385-400), `ph_flush` (~366), `vk_be_present` sync branch (~546-557), `present_image` (~220-232) | The synchronous replay's front end takes no lock of its own. `ph_flush` is check-then-clear on `PH.on`, so two submitting threads can both present one held frame, and `present_image` (frame log, pending draws, `vk_dlaa_frame`, `frame_hold`, all unlocked globals) can run while another thread's replay writes the same state | Two guest threads inside QueueSubmitCommands or QueuePresentTexture at once, with a present held for event order | precondition confirmed, harm suspected. Run `p3_route`: `nvn: thread 36088 enters a submit on queue 0x134133020 while 1 other submit or present call run (overlap 1, frame 8086)`, then 31 more by frame 12847; the same in both Market runs from the pause menu's first frame. Four threads submit: one on 3 queues, the presenting thread on 4, two more on the present queue. No doubled present was seen (no "went out … after the game's present call" line in these runs) | One mutex around the synchronous `submit_sync` and the synchronous branch of `vk_be_present`; replays already serialise on `sub_lock` | Low to medium: a present may wait behind another thread's replay. No save or gameplay change, but it crosses subsystems 10 and 11: ask the user first | L-16 | — |
 | F-2-02 | S3 | NVN front end (10) | `nvn_api_core.c` `nvnQueueSubmitCommands` (`nvn_submits_in_frame++`, ~676), reset in `nvn_api_obj.c` `nvnQueuePresentTexture` (~868) | A plain `int` is incremented by every submitting thread and reset by the presenter. A lost update gives a frame's first submission no GPU wait (the white-frame case the wait exists for) or one wait too many | The overlapping submits of F-2-01 | suspected; the overlap is confirmed | Make the counter atomic (fetch-add, exchange at the present) | None | L-16 | `ca06d5c8`. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
@@ -1392,17 +1392,17 @@ Phase 2 entered F-1-01 and F-1-02. Phase 3 (section 12, stopped before its end) 
 | F-3-02 | S2 | Textures (13), Replay (11) | `vk_texture.c` `held_out` (~1853), `slot_resolve` (~3109-3124), `evict_disused` (~1863); `vk_exec_draw.c` `make_dummy` (~354-382) | A texture evicted for disuse leaves a hold that ends only at a shader mark or a lookup outside the pool refresh. If a pool-indexing shader that cannot be marked is built after evictions have started, further evictions stop but the keys already held stay held, and what only that shader samples shows its stand-in for good. The stand-ins are 1x1 images moved from UNDEFINED to GENERAL with no clear, so their colour is undefined | VRAM over 80 % of the budget or low commit, textures unsampled for 120 s, then an unmarkable pool shader. A second candidate for the white ground | suspected (code re-read by the auditor for `make_dummy`). The run planned for it (the route under a 6 GiB cap) was not done before Phase 3 was stopped | Clear the holds (and cancel retiring textures) when the first unmarkable shader appears; clear the stand-ins to a defined colour | Low; gives back VRAM that was freed | L-22 | — |
 | F-3-03 | S2 | GPU memory (12) | `vk_memory.c` `refuse` (~1745), `vk_mem_use` (~2140-2146) | `refuse` sets a retry time only for a budget refusal (`r->retry_sub = why == MR_BUDGET ? … : 0`). A pool whose mirror allocation failed (`MR_ALLOC`) stays refused until it is finalized and is read over the bus for the rest of the session | A device-local allocation failure (heap or commit exhausted) at the pool's first use | suspected (line re-read by the auditor). Not reproduced: `failed 0` in every `mem: mirror` line of every run here; the budget cap gives budget refusals, never this one | Give `MR_ALLOC` the same retry, and keep the refusal reason in the record so the counters stay right | Low | L-23 | `94ee6e78`. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
 | F-3-04 | S3 | Audio (18), Kernel (3) | `audio_mixer.c` change events (~1213-1218, ~1296, ~1365) | Each call of the audio device's change-event commands makes a new kernel event, which takes a slot of the handle table (`MAX_H` 4096, fatal when full) and is never closed; events past the 16th are never signalled | Each call of those commands. Handles grew 112 → 116 and 112 → 117 across one reload (section 11.3); which calls took them was not traced | suspected; the handle growth is measured, its source is not | One shared event per kind, as the other audio commands already use | Low | L-25 | — |
-| F-3-05 | S3 | Services (5) | `ipc.c` domain objects (`objects[32]`, `ipc.h` ~54; CloseVirtualHandle ~428) | A domain's object table is never compacted and closing a virtual handle frees nothing; the 33rd object is answered with an unknown-command error | A domain session that opens and closes sub-objects repeatedly (the applet proxy), for instance at each return to the title | suspected; needs a run with `NX2NAVI_TRACE=ipc` counting the commands per title return | Free the slot on close and reuse it | Low | L-25 | — |
+| F-3-05 | S3 | Services (5) | `ipc.c` domain objects (`objects[32]`, `ipc.h` ~54; CloseVirtualHandle ~428) | A domain's object table is never compacted and closing a virtual handle frees nothing; the 33rd object is answered with an unknown-command error | A domain session that opens and closes sub-objects repeatedly (the applet proxy), for instance at each return to the title | suspected; needs a run with `OOTPC_TRACE=ipc` counting the commands per title return | Free the slot on close and reuse it | Low | L-25 | — |
 | F-3-06 | S4 | Platform | `platform/win32.c` `sleep_timer` (~478), `plat_file_pread` / `plat_file_pwrite` events (~1267, ~1526), `plat_thread_detach` (~73) | Per-thread timer and event handles are never closed when a thread exits, and a detached thread's small record stays. One "save commit" thread per changed Commit and one "camera speed" thread per search leak about two handles each | Every save and every sensitivity change | suspected; tens per hour against a limit of millions | Close them when the thread ends | None | L-26 | — |
-| F-3-07 | S4 | GPU memory (12) | `vk_headroom.c` `room` (~112-120) | The headroom thread measures against the driver's budget, not the capped one, so under `NX2NAVI_VRAM_BUDGET_MB` it still keeps its spare blocks. A capped test run understates what a small card does | Any capped run | suspected (code read). The cap is a test switch | Compare against the smaller of the driver's budget and the cap | None outside capped runs | L-27 | — |
-| F-3-08 | S3 | Replay (11) | `vk_usnap.c` `vk_usnap_drop` (~433), `vk_usnap_begin` (~358), `arena_get` (~90) | With uniform snapshots switched off (`NX2NAVI_UBO_SNAPSHOT=0`, not the default) the GPU-write list is appended on every write and never pruned, and its linear scan slows without limit. In the default mode the list is pruned (199-250 entries at every snapshot) but the free arenas are never trimmed (3-6 arenas, 12-24 MiB measured) | Only with the switch off | suspected for the off mode; the default mode's sizes are measured and flat | Return early in `vk_usnap_drop` when snapshots are off; trim arenas idle for some submissions | None | L-29 | `3966d878`. Non-default mode only; not run in that mode. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
+| F-3-07 | S4 | GPU memory (12) | `vk_headroom.c` `room` (~112-120) | The headroom thread measures against the driver's budget, not the capped one, so under `OOTPC_VRAM_BUDGET_MB` it still keeps its spare blocks. A capped test run understates what a small card does | Any capped run | suspected (code read). The cap is a test switch | Compare against the smaller of the driver's budget and the cap | None outside capped runs | L-27 | — |
+| F-3-08 | S3 | Replay (11) | `vk_usnap.c` `vk_usnap_drop` (~433), `vk_usnap_begin` (~358), `arena_get` (~90) | With uniform snapshots switched off (`OOTPC_UBO_SNAPSHOT=0`, not the default) the GPU-write list is appended on every write and never pruned, and its linear scan slows without limit. In the default mode the list is pruned (199-250 entries at every snapshot) but the free arenas are never trimmed (3-6 arenas, 12-24 MiB measured) | Only with the switch off | suspected for the off mode; the default mode's sizes are measured and flat | Return early in `vk_usnap_drop` when snapshots are off; trim arenas idle for some submissions | None | L-29 | `3966d878`. Non-default mode only; not run in that mode. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
 | F-3-09 | S4 | Replay (11) | `vk_exec_draw.c` `mesh_ring_entry` (~5044-5053), `mesh_count_buf` (~4990) | The allocation handles of the mesh ring (48 KiB) and the count buffer (16 KiB) are dropped, so neither is ever freed | Once per process | suspected; a fixed 64 KiB | Keep the handles and destroy them at shutdown | None | L-30 | — |
 | F-3-10 | S3 | Textures (13) | `vk_texture.c` `upload` (~2336-2342 with ~2272) | When a texture's storage is released during its upload it is uploaded as zeros, but the content hash already holds the bytes from before. If the game maps the same bytes back, `same_content` matches and the upload is skipped: the texture stays zero | Storage unmapped in the middle of an upload, then mapped again with equal content | suspected (code read) | Clear `chash_ok` whenever the bytes that reached the image are not the storage's (the same change as F-3-01) | Low | — | `054bd556`. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
 | F-3-11 | S4 | GPU memory (12) | `vk_memory.c` `refuse` (~1747) | The log quota for mirror refusals is shared by all reasons (12 lines), so allocation-failure refusals can go unlogged behind budget refusals; only the `failed` count in the `mem: mirror` line shows them | Many budget refusals before the first allocation failure | suspected (code read) | A quota per reason | None | — | `94ee6e78`. With F-3-03. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
 | F-3-12 | S4 | Shaders (14) | `gfx_shader.c` memory cache (`buckets`, `mem_insert`) | The shader memory cache keeps every shader's SPIR-V and reflection for the life of the process, after its pipelines are built | Always | confirmed size: `shader memory cache 3564, 386.2 MiB` to `3676, 395.4 MiB` in every area, flat across the reload (section 11.3). It is bounded by the game's shaders, not growing | Drop the SPIR-V of shaders whose pipelines are all built, keeping what later variants need | Medium: a later pipeline variant would have to read the shader again from disk | L-24 | — |
 | F-4-01 | S2 | Replay (11), Textures (13) | `vk_exec_draw.c` `pool_unres` (~2231-2244), `pool_sync_entries` (~2496-2510) | The list of texture pool slots that resolve to no entry grows duplicates: a slot that resolves between two walks has its flag cleared but stays listed, and when it stops resolving `pool_unres` appends it again. Every 8th pool check walks the whole list, calling the slot retry for each copy, under the texture lock. In the Market the list reaches several times the number of slots that exist, and the walk becomes a stall | Standing in the Market (adult) for about a minute. It then repeats every 8th frame; game threads registering textures wait for the lock too | confirmed (12.3): `slots without one` 134371 and 160385 in `p3_market_t1`, 115652 in `bl_market_1`, 88824 in `bl_market_2`, against 32768 slots; the walk's own timer gives about 15 ms a walk in the last window; `texture lock held over 1 ms: 7792 ms (581 holds) … max 33.61 ms` from `bind_resources`; `slow replay frames 225 … its slowest op 20.0 ms (DRAW_MESH 225)`; 375 of 380 gaps between slow frames are 8 frames. In `p3_market_t2` the list fell back to 1273 and no stall came: it depends on timing | Never list a slot twice (drop the stale entry when its flag clears, or check membership), and bound the retries per walk | Low: the walk's result is unchanged, only its length. Textures and replay only | L-44 | `015a89dc`. Before: 134371 and 160385 list entries, walks of about 15 ms, 225 frames over 25 ms standing in the Market (`p3_market_t1`). After: three runs of three (`p4_market_1` to `_3`): the list stays at 524-3192 entries and the walk at 0.008-0.026 ms per switch; standing after the pause tour no frame reaches 20 ms (worst 14.2, 17.3 and 18.3 ms at 118.5, 145.7 and 139.6 fps); the texture lock is held over 1 ms for at most 149 ms in a period (longest hold 4.34 ms), against 7792 ms (33.61 ms) before |
 | F-4-02 | S3 | Upscaling (17) | `vk_dlaa.c` `evaluate` (~1645-1675), `release_kept` | A DLSS feature is created on the replaying thread the first time a render size is used, after a device idle wait when kept features are released first | The first frame of the scene after a load, the first frame of the pause menu (its own size), and each reload | confirmed with the mark added in `c85892ab`: `DLSS feature creates 23.5 ms` in the load frame, `16.4 ms` of a 22.4 ms frame at the pause menu's first frame (`p3_market_t1` frame 5663), `43.8 ms` and `44.9 ms` at the reload (`p3_route` frame 20156, `p3_route_cold` frame 18952) | Create the feature for the known sizes ahead of use (at boot or during the load), or on a worker with the previous output shown meanwhile | Medium: one more thread on the device; no gameplay change | L-47 | — |
-| F-4-03 | S3 | Replay (11) | `vk_exec.c` / `vk_exec_draw.c` replay of the first frames after a load | One or two frames some 10 frames after a load's big frame take 48-95 ms. With the columns added in `df6766aa` they read as replay time and nothing else: `slow frame 2122: 95.0 ms; blocked pipeline 0.0 xlate 0.0 texture 0.0 astc 0.0 fence 0.0 pacing 0.0 drain 0.0; replay 93.6` | Every save load | confirmed that the time is the replay's; which part of it is not determined (the timed Market run's nearest frame shows 2867 draws against the usual 1250-1900, slowest single draw 8.7 ms) | Not proposed until the part is named (a timed run with `NX2NAVI_REPLAY_TIME=1` on the route) | — | L-47 | — |
+| F-4-03 | S3 | Replay (11) | `vk_exec.c` / `vk_exec_draw.c` replay of the first frames after a load | One or two frames some 10 frames after a load's big frame take 48-95 ms. With the columns added in `df6766aa` they read as replay time and nothing else: `slow frame 2122: 95.0 ms; blocked pipeline 0.0 xlate 0.0 texture 0.0 astc 0.0 fence 0.0 pacing 0.0 drain 0.0; replay 93.6` | Every save load | confirmed that the time is the replay's; which part of it is not determined (the timed Market run's nearest frame shows 2867 draws against the usual 1250-1900, slowest single draw 8.7 ms) | Not proposed until the part is named (a timed run with `OOTPC_REPLAY_TIME=1` on the route) | — | L-47 | — |
 | F-4-04 | S2 | GPU memory (12) | `vk_memory.c` `pool_fini` (~382-387), `pool_init` | A pool's finalize flushes the uploads and calls `vkQueueWaitIdle` under the queue lock, on a guest thread, once per used pool; the lock blocks the render thread's submits and the present for that time. Pool initialize imports and allocates on the calling thread | Area changes and boot, when the game makes and frees many pools | confirmed for the time, suspected for the idle wait as its cause: `slow frame 459: 45.8 ms; … on any thread: pool init/finalize 45.8 ms (2, 288.0 MiB, longest 43.1 ms)` and `slow frame 522: 58.5 ms; … pool init/finalize 56.7 ms (71, 94.4 MiB, longest 3.0 ms)` (`bl_route_1`). The mark does not tell initialize from finalize | Wait for the pool's last fence instead of the whole queue, without holding the queue lock | Medium: the wait must still cover uploads and a present not yet drained | L-36 | — |
 | F-4-05 | S3 | Guest memory (4), GPU memory (12) | `memory.c` `lazy_drop_locked` / `lazy_piece_locked` (~474-507), `vk_memory.c` `lazy_fetch` (~2600), `mirror_evict` (~1829) | A lazily written range is fetched with a GPU copy and a wait inside the fault handler while `frz_lock` is held, which stalls every other fault, thaw and the replay's skip check for that time. `mirror_evict` does the same while holding the pool lock exclusively | A CPU read of an armed range, a file read near GPU pools, or a mirror eviction, with GPU work queued | suspected (code read); no deadlock path was found. The AMD-crash part of the lead is struck: lazy write-back is off by default on that driver | Mark the range as being fetched and drop `frz_lock` for the copy and wait | Medium: touches the piece protocol; no gameplay or save change | L-04 | — |
 | F-4-06 | S3 | Device and present (16), GPU memory (12) | `gfx_present.c` `flip_locked` (~306-316); `vk_memory.c` `vk_upload_flush(1)` (~3780-3791) | The present call runs under the queue lock that `queue_submit` waits for, and a blocking upload flush waits for its fences while holding `cmd_lock`, which every upload, deferred free and the completion thread need | A present that blocks (vsync modes, frame generation); texel reads, pool finalizes and menu art uploads | suspected (code read) | Note the fence, unlock, wait, lock again; a present queue of its own where the device has one | Low for the flush; medium for the queue | L-33 | — |
@@ -1411,12 +1411,12 @@ Phase 2 entered F-1-01 and F-1-02. Phase 3 (section 12, stopped before its end) 
 | F-4-09 | S3 | Input (20), Guest memory (4) | `camera_speed.c` `search_main` (~218-247) | The search for the camera speed array reads the whole guest heap, including every lazily written page, so each such piece faults and is fetched from the GPU (F-4-05) while the game runs | Changing the stick sensitivity mid-game | suspected (code read); the crash and race parts of the lead are struck (each piece is read under a hold, writes thaw first) | Skip ranges that are lazily armed | Low | L-13 | — |
 | F-4-10 | S4 | Pipelines (15), Movies (19) | `vk_pipeline.c` `vk_pipeline_compute` (~4949-4960); `ov_movie2.c` `run_stripes` (~287-301) | A dispatch whose compute pipeline another thread is building polls with 1 ms sleeps and the wait is not timed as a pipeline wait; each movie picture starts and joins four threads and allocates its planes anew | A compute pipeline not built yet; movies | suspected (code read) | A condition variable and the pipeline timer; a small worker pool and reused buffers | None | L-34 | — |
 | F-4-11 | S2 | Pipelines (15) | `vk_pipeline.c` `pm_set` (~4276), `vk_pipeline_prewarm_marker_clear` (~4284; called only from `boot.c` ~379 and the prebuild's end ~4223), `pm_skipped` (~4241) | `pipeline-prewarm-running.txt` exists while the boot builds the recorded pipelines, so that a driver crash there is noticed. No orderly exit clears it. A game closed during that boot build leaves it, the next start reads that as "the last start died", writes `pipeline-prewarm-skip.txt`, and from then on every start on that GPU and driver skips the prebuild: each recorded pipeline is built at its first draw, in play | Close the game window (or end the process) while the boot still builds pipelines, then start again | confirmed by an incident in the shared run folder: at 22:50 a scripted run was closed by its runner during boot (most likely this session's first `p3_market_prof` attempt, which gave way to another game then; its log was replaced by the repeat, so this is not proven), and the next start, another session's `out\gate_off`, logged `vk_pipeline: the last start died while the boot built pipelines (E:\nx2devrun/pipeline-prewarm-running.txt was left); E:\nx2devrun/pipeline-prewarm-skip.txt now skips that prebuild on this GPU and driver (10de:2b85:9b404000)`. Every later start there logs `prewarm: 4063 recorded pipelines not built ahead of play`. No driver crash had happened. The file is still there: it was not deleted, as other sessions run in that folder | Clear the marker on every orderly exit (the window close, the guest's exit, the runner's close), so only a real crash leaves it; give the skip an expiry or a retry | Low; pipelines only | — | `6c0b0b10`. Reproduced and verified with `route\prewarm_close.py` (the window closed one second after the marker appears, each exe on its own pipeline cache folder). Before the fix (`ocarina_audit_p3b.exe`, `p4_prewarm_old`): `marker seen 2.8 s after the start … after the exit the marker is LEFT`, and the next start `took the first for dead; skip file WRITTEN`. After (`ocarina_audit_fix.exe`, `p4_prewarm_fix`): `after the exit the marker is gone`, next start `no such line; skip file absent`. A process that is killed still leaves the marker, as meant |
-| F-5-01 | S3 | Textures (13) | `vk_texture.c` `alias_compatible` (~2567), `start_at` → `init_new` (~2755) | A new depth image made over a live depth target's memory starts cleared unless `depth_alias` is on and both are depth-only with one format; a shadow map that starts cleared shadows everything for one frame | The known one-frame dark shadow at the Castle Town gate | suspected cause of a known problem; `NX2NAVI_DEPTH_ALIAS_LOG=1` would line the dark frame up with an alias logged as cleared. Not run (the gate is not on the route) | Carry depth content across the alias for depth-stencil pairs and partial covers too | Rendering behaviour: needs the user's eye on the result | — | — |
-| F-5-02 | S2 | GPU memory (12) | `vk_memory.c` shadow storage (`shadow_sync_pool` ~1248, default on for the Linux build ~1676) | On the Linux build CPU-written pools reach the GPU through a per-submission snapshot; a write made after the snapshot goes with the next submission, so per-frame instance data can be one frame behind the buffers around it | The known foliage flicker on Linux with an AMD card | suspected cause of a known problem; cannot be run here (no Linux machine, no AMD card). `NX2NAVI_SHADOW=0` on that machine would tell this from the shader-side suspects in `docs/maxwell.md` | Depends on that test | — | — | — |
+| F-5-01 | S3 | Textures (13) | `vk_texture.c` `alias_compatible` (~2567), `start_at` → `init_new` (~2755) | A new depth image made over a live depth target's memory starts cleared unless `depth_alias` is on and both are depth-only with one format; a shadow map that starts cleared shadows everything for one frame | The known one-frame dark shadow at the Castle Town gate | suspected cause of a known problem; `OOTPC_DEPTH_ALIAS_LOG=1` would line the dark frame up with an alias logged as cleared. Not run (the gate is not on the route) | Carry depth content across the alias for depth-stencil pairs and partial covers too | Rendering behaviour: needs the user's eye on the result | — | — |
+| F-5-02 | S2 | GPU memory (12) | `vk_memory.c` shadow storage (`shadow_sync_pool` ~1248, default on for the Linux build ~1676) | On the Linux build CPU-written pools reach the GPU through a per-submission snapshot; a write made after the snapshot goes with the next submission, so per-frame instance data can be one frame behind the buffers around it | The known foliage flicker on Linux with an AMD card | suspected cause of a known problem; cannot be run here (no Linux machine, no AMD card). `OOTPC_SHADOW=0` on that machine would tell this from the shader-side suspects in `docs/maxwell.md` | Depends on that test | — | — | — |
 | F-6-01 | S3 | In-game menu (21) | `menu_assets.c` `dicts_load` (~56-73, callers ~92, ~125) | The dictionaries are loaded lazily with no lock, and `ndicts` is set to 0 before the load: a second caller meanwhile sees "loaded, none" and gets nothing. The menu's fonts then fall back for the whole run, as the font read is tried once | The "menu-art" thread and the present path both asking during the first frames | suspected (code read). Not reproduced: 54 of 54 logs here show `menu: the game's interface fonts: text ClarimoUDPE, titles CetraDisplayPro` | Load once behind a `plat_once` | None | L-14 | `b4bfb7b6`. Not reproduced before (54 of 54 logs had the game's fonts). The fixed exe's runs show the game's fonts too. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
 | F-6-02 | S3 | Launcher | `launcher/ui/app.py` `play_only` (~2175-2196) against `watch_game` (~1387-1399) | Started from the launcher, a fatal exit (codes 70, 71) shows the game's FATAL line; started from the Steam shortcut the launcher only logs the exit code, and the runtime raises no message itself: the window disappears | Any fatal exit of a game started from the shortcut, F-1-01 included | suspected (code re-read by the auditor) | Show the last FATAL line on codes 70 and 71 in `play_only` as well | Launcher only | — | — |
-| F-6-03 | S4 | Settings (8) | `nvn_api_obj.c` `nvnWindowAcquireTexture` (~833), `perf.c` `rt_knob` | `NX2NAVI_ACQUIRE_WAIT` is read with `rt_knob`, which maps every value but "0" and "ab" to 1 and "ab" to 2: the documented mode 2 cannot be chosen, and "ab" selects it instead of alternating | Setting the key to 2 or ab | suspected (code read); a diagnostics switch | Read it as a number | None | — | `4b47a10a`. The value 2 was not run. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
-| F-7-01 | S3 | NVN front end (10), Replay (11) | `nvn_api_core.c` `nvnQueueSubmitCommands` (~670-677, `NX2NAVI_SUBMIT_FINISH`, default mask 1), `nvn_api_obj.c` `nvnWindowAcquireTexture` (~832-843, `NX2NAVI_ACQUIRE_WAIT`) | Every frame the game's thread waits for the GPU to run the frame's first submission, and again at the acquire for the image's last present. While the GPU is ahead the waits are short; when the GPU is the slower side they make the CPU frame wait for it | Every frame; the cost should grow at high frame rates or with a loaded GPU | suspected; not determined. The A/B was started and is not valid: the run folder's pipeline state changed under it (F-4-11) and three of its runs lost the device (F-1-11). The one finished pair reads 99.9 fps with the waits and 121.1 without the submit wait in the day field, but the first run also carried more background pipeline builds. The comments say the submit wait prevents white frames in dialogue (3 % of frames without it) and the acquire wait is mostly covered by it | Depends on a valid A/B: drop the acquire wait when the submit wait is on, or wait on the passes' timeline | Changes when frames are drawn against the game's data rewrites (the white-frame case): ask the user first | L-31 | — |
+| F-6-03 | S4 | Settings (8) | `nvn_api_obj.c` `nvnWindowAcquireTexture` (~833), `perf.c` `rt_knob` | `OOTPC_ACQUIRE_WAIT` is read with `rt_knob`, which maps every value but "0" and "ab" to 1 and "ab" to 2: the documented mode 2 cannot be chosen, and "ab" selects it instead of alternating | Setting the key to 2 or ab | suspected (code read); a diagnostics switch | Read it as a number | None | — | `4b47a10a`. The value 2 was not run. Not reproduced before, so not shown fixed. Regression: the route with the fixed exe: `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6) |
+| F-7-01 | S3 | NVN front end (10), Replay (11) | `nvn_api_core.c` `nvnQueueSubmitCommands` (~670-677, `OOTPC_SUBMIT_FINISH`, default mask 1), `nvn_api_obj.c` `nvnWindowAcquireTexture` (~832-843, `OOTPC_ACQUIRE_WAIT`) | Every frame the game's thread waits for the GPU to run the frame's first submission, and again at the acquire for the image's last present. While the GPU is ahead the waits are short; when the GPU is the slower side they make the CPU frame wait for it | Every frame; the cost should grow at high frame rates or with a loaded GPU | suspected; not determined. The A/B was started and is not valid: the run folder's pipeline state changed under it (F-4-11) and three of its runs lost the device (F-1-11). The one finished pair reads 99.9 fps with the waits and 121.1 without the submit wait in the day field, but the first run also carried more background pipeline builds. The comments say the submit wait prevents white frames in dialogue (3 % of frames without it) and the acquire wait is mostly covered by it | Depends on a valid A/B: drop the acquire wait when the submit wait is on, or wait on the passes' timeline | Changes when frames are drawn against the game's data rewrites (the white-frame case): ask the user first | L-31 | — |
 | F-7-02 | S3 | Replay (11) | `vk_rec.c` `rec_begin` (~175), `rec_main` (~63); `vk_exec.c` `rec_claim` (~1650) | The recorder thread takes the priority of the thread that made the first submission and keeps it; later only the recording thread is raised and given the reserved core. The recorder then competes with some 85 guest threads, and the recording thread waits for it at the end of every part | Any load on the other cores | suspected (code read). The drains are measured: `recorder ring full 0 ms, drains 443 ms` over 49 s in `p3_market_t1`, about 0.07 ms a frame, so the cost was small on this PC | Raise the recorder's priority in `rec_claim` | Low | L-39 | — |
 | F-7-03 | S3 | Textures (13) | `vk_texture.c` `sweep_pressure` (~2021), `evict_idle` (~1716), `evict_disused` (~1871) | Under VRAM or commit pressure, every 8th submission the eviction scans walk the whole texture table under the texture lock; a scan that finds nothing does not back off, so it repeats for as long as the pressure lasts | VRAM over 80 % of the budget, or the process's commit over its bound (installed RAM, at least 24 GiB; the baseline's private bytes reach 25.8 GiB) | suspected for the cost; the capped run planned for it was not done | Back off after an empty scan, or keep an order of use | Low | L-35 | — |
 | F-7-04 | S4 | Diagnostics (22) | `nvn_api_obj.c` `nvnWindowAcquireTexture` (~839-841), `vk_sync.c` `vk_sync_fence_wait` | The acquire's GPU wait is counted as a fence wait and again as pacing, so the frame-time summary counts it twice and a frame bound by the GPU at the acquire reads as "pace" | Any frame that waits at the acquire | suspected (code read); diagnostics only | Count it once | None | — | — |
@@ -1424,7 +1424,7 @@ Phase 2 entered F-1-01 and F-1-02. Phase 3 (section 12, stopped before its end) 
 | F-8-02 | S1 | Save data (7), Settings and logging (8) | `main.c` `crash_handler` (~271-320), `dispatch.c` `rt_fatal` (~60-82), `fs_host.c` `save_commit` (~601-621) | The game's Commit returns once the commit is queued; a thread then copies and swaps (95-135 ms). The crash and fatal paths end the process without waiting for it. A crash inside that window leaves an unfinished copy, which the next start rolls back: the player loses a save the game reported as done | A crash or fatal within about a tenth of a second after a save | suspected (code re-read: `fs_save_flush` is called from the three normal exits only). The roll-back itself is confirmed safe (12.3) | Wait a bounded time for the pending commit in both paths, unless the crashing thread is the commit thread | Save path only; the format is unchanged | L-03 | `cd170dad`. Not reproduced before (a crash within a tenth of a second of a save). The new wait did not run in any run: no crash fell into a commit. `--probe-fs` and `tests\save_share_check.py` pass with the change |
 | F-8-03 | S3 | Input (20) | `input.c` `pad_read` (~817-832), `sdl_enter` (~481) | While SDL searches for devices (a pad pulled, a wireless pad asleep) every poll returns the last state read before, so buttons and stick held at that moment stay held for the search's length (120-240 ms per device notification, longer with a slow driver) | Unplugging the controller while moving | suspected (code read); cannot be run here (no hand on the controller) | Stop replaying the last state after about 150 ms without a fresh read | Input only | — | — |
 | F-8-04 | S3 | Input (20), In-game menu (21) | `ov_input.c` `npad_states` (~82-98) | The game is always told one controller is connected. A disconnect becomes "nothing pressed" and play goes on uncontrolled; the console would ask for a controller | A controller disconnect in play | suspected (code read) | Open the in-game menu when the primary pad goes away | Changes what the player sees on a disconnect (behaviour): ask the user first | — | — |
-| F-8-05 | S3 | Frame pacing (9) | `dynres.c` `dynres_read` (~51-54) | Dynamic resolution's default target is 16.7 ms whatever the frame limit, and a step is held for 45 frames, not for a time: at a 120 limit it reacts only once the rate has fallen to about 55, and at 240 fps the resolution can change five times a second | `NX2NAVI_DYN_RES=1` (off by default, not in the menu) above a 60 limit | suspected (code read) | Derive the default target from the limit; hold steps for a time | None to gameplay | L-42 | — |
+| F-8-05 | S3 | Frame pacing (9) | `dynres.c` `dynres_read` (~51-54) | Dynamic resolution's default target is 16.7 ms whatever the frame limit, and a step is held for 45 frames, not for a time: at a 120 limit it reacts only once the rate has fallen to about 55, and at 240 fps the resolution can change five times a second | `OOTPC_DYN_RES=1` (off by default, not in the menu) above a 60 limit | suspected (code read) | Derive the default target from the limit; hold steps for a time | None to gameplay | L-42 | — |
 | F-8-06 | S3 | Input (20) | `input.c` `shake_stick` (~706-722) | The shake key swings the stick on a wall-clock period (two frames at 30 fps), so at 120 or 240 fps each side lasts 8 or 16 game frames; a game check that counts swings in frames could miss them | The shake key at a high frame limit | suspected; not determined (needs a fused item and the key at 30, 120 and 240) | Count game steps instead of time | Input timing: ask the user first | L-42 | — |
 | F-8-07 | S3 | Frame pacing (9), Movies (19) | `frame_rate.c` `movie_cap_hz` (~194-209), `ov_movie2.c` `set_live` (~590, ~740) | The limit is held at 60 while a movie decoder is live, by design. A movie skipped without its end-of-stream picture or a Finalize would leave the decoder live and the game capped at 60 in play | Skipping a movie at a limit above 60 | suspected; not determined (no movie on the route) | End the cap when the decoder has had no sample for a time | Low | L-42 | — |
 
@@ -1584,7 +1584,7 @@ commits and fixed nothing. All the runs were on the reference PC (RTX 5090, driv
 branch over the lifted game in `work\lift-pickup`, run from `E:\nx2devrun`.
 
 **The three instrumentation commits.** Each one built and each was shown working by a run. Each costs nothing while
-`NX2NAVI_TRACE=perf` is off: a call and a branch per marked site; the size, scene and segment code runs only with the
+`OOTPC_TRACE=perf` is off: a call and a branch per marked site; the size, scene and segment code runs only with the
 trace.
 
 | Commit | What it adds | Shown working by |
@@ -1623,15 +1623,15 @@ the first area.
 
 **Running the instrumentation.**
 
-- `NX2NAVI_TRACE=perf`, plus `NX2NAVI_PERF_SLOW_MS=25` for a line per frame of 25 ms or more.
+- `OOTPC_TRACE=perf`, plus `OOTPC_PERF_SLOW_MS=25` for a line per frame of 25 ms or more.
 - A script line `@<ms> MARK <name>` names the route's segments.
-- `NX2NAVI_TEXUP_LOG_MS=16` adds the texture work per slow frame.
-- The dev folder's `nx2navi.ini` sets `perf_overlay = full`. Every run here (the earlier ones as well) took the
+- `OOTPC_TEXUP_LOG_MS=16` adds the texture work per slow frame.
+- The dev folder's `OOT-PC.ini` sets `perf_overlay = full`. Every run here (the earlier ones as well) took the
   overlay's counts and GPU timestamps.
 
 ### 11.1 Instrumentation map
 
-Every line below is written only with `NX2NAVI_TRACE=perf` unless the row says "always". "Added" names the Phase 2
+Every line below is written only with `OOTPC_TRACE=perf` unless the row says "always". "Added" names the Phase 2
 commit; the rest existed at `ed36773d`.
 
 **Frame-time markers (what a hitch waited for)**
@@ -1641,21 +1641,21 @@ commit; the rest existed at `ed36773d`.
 | Frame time per frame window | `perf: frame N: interval avg … max … (… fps)`, every 60 presents | `perf.c` `perf_present` | existed |
 | Frame time over a period | `frametime: 60 s|exit: … mean … fps, 1% low … fps, over 25/50/100 ms`, worst frames with their waits (always) | `perf.c` `ft_report` | existed |
 | Frame time per route segment (mean, 1% low, worst) | `segment: '<name>' frames a-b, world …: … mean … ms (… fps), 1% low … fps (… ms), worst … ms at frame …; …; ram …; vram …` | `perf.c` `seg_close` | added (c2) |
-| A hitch with its causes | `perf: slow frame N: … ms; blocked pipeline … xlate … texture … astc … fence … pacing …` (frames ≥ `NX2NAVI_PERF_SLOW_MS`, default 50) | `perf.c` `perf_present` | existed (render-thread waits) |
+| A hitch with its causes | `perf: slow frame N: … ms; blocked pipeline … xlate … texture … astc … fence … pacing …` (frames ≥ `OOTPC_PERF_SLOW_MS`, default 50) | `perf.c` `perf_present` | existed (render-thread waits) |
 | Pipeline creation on the render thread | `blocked pipeline` in the two lines above | `vk_pipeline.c` → `perf_end(PERF_PIPE)` | existed |
 | Pipeline creation on any thread | `; on any thread: … pipeline creates X ms (n, …, longest Y ms)` on the slow-frame line, and `perf: frame N: work in the window; on any thread: …` every 60 presents | `vk_pipeline.c` `pipe_create_in` → `perf.c` `perf_mark_add` | added (c1) |
 | Shader translation | `xlate` / `shader xlate` in the perf lines; `shader disk reads` | `gfx_shader.c` → `perf_end(PERF_XLATE)` | existed |
-| Texture decode and upload | `texture` / `astc` in the perf lines; `texup: frame N: …` per frame over `NX2NAVI_TEXUP_LOG_MS` (creation, uploads, staging, storage copy, ASTC record, flush, new device memory) | `vk_texture.c` `vk_texstat_frame` | existed |
+| Texture decode and upload | `texture` / `astc` in the perf lines; `texup: frame N: …` per frame over `OOTPC_TEXUP_LOG_MS` (creation, uploads, staging, storage copy, ASTC record, flush, new device memory) | `vk_texture.c` `vk_texstat_frame` | existed |
 | File IO | `file reads X ms (n, MiB, longest)` in the any-thread part | `romfs.c` `romfs_read` | added (c1) |
-| File IO, which files | `fs <t> rom <path>` per RomFS open (`NX2NAVI_TRACE=fs`) | `romfs.c` `fs_trace` | existed (opens only, no time) |
+| File IO, which files | `fs <t> rom <path>` per RomFS open (`OOTPC_TRACE=fs`) | `romfs.c` `fs_trace` | existed (opens only, no time) |
 | Decompression | `zstd decodes X ms (n, MiB out, longest)` in the any-thread part; `zstd: N calls on the host …` running totals (always, every 16384 calls) | `ov_zstd.c` `tracked_decode`, `stream_run`; `count` | added (c1) / existed |
 | Large allocations, guest side | `guest memory maps X ms (n, MiB)`: SetHeapSize, Map/UnmapPhysicalMemory | `memory.c` `mem_set_heap_size`, `alias_map` | added (c1) |
 | Large allocations, GPU pools | `pool init/finalize X ms (n, MiB)`: NVN memory pool initialize and finalize with their imports, device memory, mirror retire and GPU waits | `vk_memory.c` `vk_pool_init`, `vk_pool_fini` | added (c1) |
-| Large allocations, device memory | `device memory allocations n (MiB)`: every block and dedicated allocation VMA makes (no time; only while the headroom callback is installed, `NX2NAVI_VRAM_HEADROOM` default on) | `vk_headroom.c` `on_allocate` | added (c1) |
+| Large allocations, device memory | `device memory allocations n (MiB)`: every block and dedicated allocation VMA makes (no time; only while the headroom callback is installed, `OOTPC_VRAM_HEADROOM` default on) | `vk_headroom.c` `on_allocate` | added (c1) |
 | Large allocations, host heap | — | — | **missing**: there is no single funnel for the host's `malloc`; the big host allocations are named in section 5 instead |
 | GPU time and who bounds the frame | `perf: frame N: gpu avg … ; fence wait …; vram …; ram working set …, private …; bound: cpu|gpu|pace` | `perf.c` `perf_gpu_line` | existed |
-| Per-thread samples of a slow frame | `prof: slow frame N (… ms) -> <path>` (`NX2NAVI_PROFILE`, `NX2NAVI_PROFILE_SLOW`) | `prof_win.c` | existed (changes timing: not for the baseline, L-41) |
-| Per-frame record of any run part | `NX2NAVI_FLIGHT=1` dumps (`frames.tsv`) | `flight.c` | existed |
+| Per-thread samples of a slow frame | `prof: slow frame N (… ms) -> <path>` (`OOTPC_PROFILE`, `OOTPC_PROFILE_SLOW`) | `prof_win.c` | existed (changes timing: not for the baseline, L-41) |
+| Per-frame record of any run part | `OOTPC_FLIGHT=1` dumps (`frames.tsv`) | `flight.c` | existed |
 | Scene transitions | `scene: <area> loads (frame, world)`; `scene: <areas> settled (no area loaded for 10 s) …; ram …; vram …` followed by the memory snapshot | `romfs.c` `scene_note` → `perf.c` `perf_scene`, `seg_frame` | added (c2) |
 | Route segments | input script line `<tick> MARK <name>` or `@<ms> MARK <name>`; `segment: '<name>' starts at frame …` | `input.c` `script_apply` → `perf.c` `perf_segment` | added (c2) |
 
@@ -1667,7 +1667,7 @@ commit; the rest existed at `ed36773d`.
 | GPU memory | `vram U of B MiB` (driver budget figure, all processes) in the same lines; `mem: vram frame N: …`, `mem: vram by use frame N: …` (textures, released textures, mirrors, physical pools, ASTC scratch, headroom spare, other, free inside VMA blocks, outside VMA incl. swapchain/DLSS/pipelines/driver), heap lines, `mem: pools frame N` | `vk_memory.c` `vram_log`, `vram_use_log`, `heap_log`, `pool_census_log` | existed (every 600 presents) |
 | Sampled per scene and after every scene transition | `scene: <areas> settled (no area loaded for 10 s) at frame …; ram …; vram …` followed by the `mem: vram…` lines and the four `mem: sizes` lines; and the same snapshot at every segment's end | `perf.c` `seg_frame`, `seg_close` → `mem_snapshot` → `vk_memory.c` `vk_mem_snapshot`, `perf.c` `sizes_log` | added (c2, c3) |
 | Size of each cache and pool | `mem: sizes frame N, <group>: name count[/limit][, MiB]; …` in four groups, every 600 presents and with each snapshot | `perf.c` `sizes_log`, `perf_size`; one `*_sizes` function per subsystem (`memory.c`, `kernel.c`, `guest_setjmp.c`, `fs_host.c`, `romfs.c`, `ov_zstd.c`, `cfg.c`, `vk_memory.c`, `vk_gpa.c`, `vk_texture.c`, `vk_exec_draw.c`, `vk_sync.c`, `vk_usnap.c`, `nvn_api_cmd.c`, `vk_pipeline.c`, `gfx_shader.c`) | added (c3) |
-| Commit census (where committed memory lies) | `mem: commit census at frame …` | `prof_win.c` (`NX2NAVI_MEM_CENSUS=1`; it stalls frames by 65-240 ms, so not in the baseline) | existed |
+| Commit census (where committed memory lies) | `mem: commit census at frame …` | `prof_win.c` (`OOTPC_MEM_CENSUS=1`; it stalls frames by 65-240 ms, so not in the baseline) | existed |
 
 **Section 5's pools and caches against the figures.** By the numbers of section 5:
 
@@ -1706,7 +1706,7 @@ Everything the route uses lives outside the repository, under `E:\nx2devrun\out\
   game runs.
 - `route\baseline_table.py` reads the logs into the tables below.
 - `saves\` holds the save folders, copied (read only) from the user's save (`E:\nx2fix\profile-user\save\<user>`) and
-  from the test install's profile (`E:\NX2navi-060b\game\profile\save\<user>`):
+  from the test install's profile (`E:\OOT-PC-060b\game\profile\save\<user>`):
   - `u0`-`u5` and `d0`-`d5` are the whole folder with slot *k* copied into slot 0.
   - `one_u<k>` and `one_d<k>` hold slot *k* alone.
 - `probes\` holds the probes that found where each save loads, and the menu explorations.
@@ -1909,8 +1909,8 @@ times.
   - 20 are the one or two frames right after each save load, in every run: 48-68 ms, then 26-36 ms;
   - 10 are single frames of 25-34 ms: 9 during the route's reloads, 1 in the night field.
 
-The unnamed time is outside the recorded waits and marks: the game's own threads or the driver. `NX2NAVI_PROFILE` with
-`NX2NAVI_PROFILE_SLOW` can name them. It suspends every thread every millisecond (L-41), so it stayed out of the
+The unnamed time is outside the recorded waits and marks: the game's own threads or the driver. `OOTPC_PROFILE` with
+`OOTPC_PROFILE_SLOW` can name them. It suspends every thread every millisecond (L-41), so it stayed out of the
 baseline.
 
 **Other baseline observations** (recorded, not investigated):
@@ -1944,7 +1944,7 @@ baseline.
 **UBSan results.**
 
 1. Run `san_ubsan`: a trap at start-up, in the menu thread's font atlas.
-   - `FATAL: illegal instruction (0xc000001d) at host … (nx2navi+0x11782fd2)`.
+   - `FATAL: illegal instruction (0xc000001d) at host … (ootpc+0x11782fd2)`.
    - The instruction is `ud1 0xc(%eax),%eax`: check 12, multiply overflow.
    - `addr2line`: `ui/menu_skin.cpp:265`, the `lattice` lambda in `skin_atlas_fill`.
    - Ledger F-1-02.
@@ -1994,7 +1994,7 @@ baseline.
   - sizes for the items listed under "still no size figure" in 11.1;
   - the game's own threads: their CPU time in a frame stays unnamed, as above.
 - **Not measured:**
-  - the commit census (`NX2NAVI_MEM_CENSUS=1`), which stalls frames by 65-240 ms;
+  - the commit census (`OOTPC_MEM_CENSUS=1`), which stalls frames by 65-240 ms;
   - long sessions: the longest run is the 10-minute field stand; the multi-hour growth that section 10 asks about is
     not measured;
   - an AMD or Linux machine (not available).
@@ -2004,7 +2004,7 @@ baseline.
 ## 12. Phase 3: the eight passes (stopped before its end)
 
 Phase 3 was started on 2026-11-10 on branch `claude/audit-phase2-a12eef` and stopped at the user's request before its
-end. It changes no runtime behaviour: the four commits it adds only log under `NX2NAVI_TRACE=perf`. Nothing is fixed.
+end. It changes no runtime behaviour: the four commits it adds only log under `OOTPC_TRACE=perf`. Nothing is fixed.
 
 **Where it stands.**
 
@@ -2039,7 +2039,7 @@ window (F-1-03, F-1-04, F-1-06, F-1-09, F-2-04), and none of them was seen in an
 
 ### 12.2 Instrumentation added in Phase 3
 
-All four write only with `NX2NAVI_TRACE=perf`.
+All four write only with `OOTPC_TRACE=perf`.
 
 | Commit | What it adds | Shown working by |
 |---|---|---|
@@ -2050,7 +2050,7 @@ All four write only with `NX2NAVI_TRACE=perf`.
 
 ### 12.3 Evidence
 
-**F-1-01, the save that crashes on load** (run `f101_fs`, `NX2NAVI_TRACE=perf,fs`).
+**F-1-01, the save that crashes on load** (run `f101_fs`, `OOTPC_TRACE=perf,fs`).
 
 - The save's `progress.sav` names `HyruleCastle_Child` twice. The other 11 saves name `HyruleCastle`.
 - The 1.1.1 RomFS index has `Banc/HyruleCastle/HyruleCastle_Static` and `_Dynamic`, and `GameBancParam/HyruleCastle`. It
@@ -2080,9 +2080,9 @@ window before the commit thread has finished (F-8-02) and two Commits at once (F
 
 - With the replay column, every slow frame is the replay: `slow frame 11303: 20.3 ms; … drain 0.0; replay 18.0`.
   375 of 380 gaps between slow frames are 8 frames.
-- `NX2NAVI_REPLAY_TIME=1`: `slow replay frames 225, per frame: draws 23.2 ms (1253) … its slowest op 20.0 ms (DRAW_MESH
+- `OOTPC_REPLAY_TIME=1`: `slow replay frames 225, per frame: draws 23.2 ms (1253) … its slowest op 20.0 ms (DRAW_MESH
   225); texture lock held over 1 ms 19.9 ms`.
-- `NX2NAVI_LOCK_TIME=1`: `texture lock held over 1 ms: 7792 ms (581 holds): 00007FF67A6C43C0 7791.1 ms (580, max 33.61
+- `OOTPC_LOCK_TIME=1`: `texture lock held over 1 ms: 7792 ms (581 holds): 00007FF67A6C43C0 7791.1 ms (580, max 33.61
   ms)`. Against the link map that address is `bind_resources+0x1980`. A game thread waits behind it:
   `vk_texture_register+0x2c 768.9 ms (1963, max 26.81 ms)`.
 - The list walked there, from the `vk: texture pool sets:` line every 3600 pool switches (`slots without one`, and the
@@ -2141,15 +2141,15 @@ field's in the same way (111-114 fps standing against 126-128). The cause is not
 
 ### 12.4 What is left of Phase 3
 
-- **F-7-01 (L-31), the two GPU waits.** A valid A/B: default, `NX2NAVI_SUBMIT_FINISH=0` and `NX2NAVI_ACQUIRE_WAIT=0`,
+- **F-7-01 (L-31), the two GPU waits.** A valid A/B: default, `OOTPC_SUBMIT_FINISH=0` and `OOTPC_ACQUIRE_WAIT=0`,
   two runs each, in one pipeline state. `route\l31_table.py` reads them.
 - **F-8-01, the generation counter's rate.** One route run with `ocarina_audit_p3b.exe`, reading `page generations
   handed out` at two 600-frame lines.
-- **F-3-01, F-3-02, F-3-03, F-7-03 (L-21, L-22, L-23, L-35).** The route under `NX2NAVI_VRAM_BUDGET_MB=6144` with a long
+- **F-3-01, F-3-02, F-3-03, F-7-03 (L-21, L-22, L-23, L-35).** The route under `OOTPC_VRAM_BUDGET_MB=6144` with a long
   stand, for the disuse eviction and the scans. A budget cap cannot fail an allocation, so F-3-01 and F-3-03 need real
   memory exhaustion to reproduce.
 - **F-1-11.** Name the faulting read, and say whether the skipped prebuild causes it.
-- **F-4-03.** A timed route run (`NX2NAVI_REPLAY_TIME=1`) to name the replay's part in the frame after a load.
+- **F-4-03.** A timed route run (`OOTPC_REPLAY_TIME=1`) to name the replay's part in the frame after a load.
 - **Not reachable here, so not determined:** F-1-10 (dungeon and boss audio), F-5-01 (the gate), F-5-02 (Linux, AMD),
   F-8-03 and F-8-04 (a hand on the controller), F-8-06 (a fused item), F-8-07 (a movie).
 - **Not looked at:** pass 5 beyond the three known problems, and pass 6 beyond a read of the menu for clear bugs. The
@@ -2170,7 +2170,7 @@ is pushed.
 - A suspected finding that was never reproduced cannot be shown fixed. Its row says "not reproduced before" and names
   the regression checks that passed with the change.
 - Exe: `ocarina_audit_fix.exe`, built from `d61cd9b9`. Its runs use a pipeline cache folder of their own
-  (`NX2NAVI_PIPELINE_CACHE`, `E:\nx2devrun\out\audit\pcache`), so they neither depend on the shared folder's skip file
+  (`OOTPC_PIPELINE_CACHE`, `E:\nx2devrun\out\audit\pcache`), so they neither depend on the shared folder's skip file
   nor change it. Batch: `E:\nx2devrun\out\audit\route\p4_verify.sh`.
 
 ### 13.1 What was changed
@@ -2194,12 +2194,12 @@ The ledger's last column (section 8) has each commit with its evidence. In short
 | F-2-02 submit count | `ca06d5c8` | The count is atomic | not reproduced before |
 | F-6-01 menu dictionaries | `b4bfb7b6` | Loaded once behind a once-guard | not reproduced before |
 | F-3-08 uniform write list | `3966d878` | Pruned with snapshots off too | not run in that mode |
-| F-6-03 `NX2NAVI_ACQUIRE_WAIT` | `4b47a10a` | Read as a number | the value 2 was not run |
+| F-6-03 `OOTPC_ACQUIRE_WAIT` | `4b47a10a` | Read as a number | the value 2 was not run |
 
 **Regression runs with the fixed exe.**
 
 - The route (`p4_route`): `p4_route` went through every segment with no FATAL and committed the save five times. Its frame rates cannot be compared with the baseline: the exe name is new and it has a pipeline cache folder of its own, so pipelines were still compiling on other threads (Kakariko 118.1 fps against 140.7; 17 frames over 25 ms in the 12 s after the reload, against 0 and 6)
-- The Market (`p4_market_1` to `_3`, `NX2NAVI_REPLAY_TIME=1 NX2NAVI_LOCK_TIME=1`): three runs of three (`p4_market_1` to `_3`): the list stays at 524-3192 entries and the walk at 0.008-0.026 ms per switch; standing after the pause tour no frame reaches 20 ms (worst 14.2, 17.3 and 18.3 ms at 118.5, 145.7 and 139.6 fps); the texture lock is held over 1 ms for at most 149 ms in a period (longest hold 4.34 ms), against 7792 ms (33.61 ms) before
+- The Market (`p4_market_1` to `_3`, `OOTPC_REPLAY_TIME=1 OOTPC_LOCK_TIME=1`): three runs of three (`p4_market_1` to `_3`): the list stays at 524-3192 entries and the walk at 0.008-0.026 ms per switch; standing after the pause tour no frame reaches 20 ms (worst 14.2, 17.3 and 18.3 ms at 118.5, 145.7 and 139.6 fps); the texture lock is held over 1 ms for at most 149 ms in a period (longest hold 4.34 ms), against 7792 ms (33.61 ms) before
 - The save transaction (`--probe-fs`): `a crash at each of 6 commit steps recovers to the old save 3 times, the new one 3
   times, mixed 0 times; 3 backups`, `probe-fs: passed (186587 files, 64 sampled)`.
 - UBSan, no ignore list (`p4_ubsan`): `p4_ubsan` went through the whole route (261 s of world time) with no trap: the start no longer stops at `menu_skin.cpp:265`, and none of the changed code tripped a check

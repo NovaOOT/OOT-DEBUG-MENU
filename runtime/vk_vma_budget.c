@@ -16,7 +16,7 @@
 // Laptop, 4 GiB) leaving that heap out sent every allocation past the reserve to system memory, more than 4096 of them,
 // and the process's commit with them: with 16 GiB of RAM the system's commit ran out, host memory imports failed and the
 // device was lost. Without another device-local heap with room the allocation is made as asked. The reserve
-// (NX2NAVI_VRAM_RESERVE_MB, 512 with low_end_gpu = 1, else 0, off) is room left for allocations VMA does not make, which can come at
+// (OOTPC_VRAM_RESERVE_MB, 512 with low_end_gpu = 1, else 0, off) is room left for allocations VMA does not make, which can come at
 // once: AMD's contexts are made when the upscaler or the frame generation setting changes. An allocation that finds
 // no room that way is made as asked, as before. Allocations from a VMA pool and those for one memory type alone (the
 // headroom's anchors, vk_headroom.c) are made as asked.
@@ -31,7 +31,7 @@
 static VkDeviceSize reserve_bytes(void) {
     static int64_t r = -1;
     if (r < 0) {
-        const char *e = cfg_get("NX2NAVI_VRAM_RESERVE_MB");
+        const char *e = cfg_get("OOTPC_VRAM_RESERVE_MB");
         long mb = e && *e ? atol(e) : 0;
         r = (int64_t)(mb < 0 ? 0 : mb) << 20;
     }
@@ -67,7 +67,7 @@ static uint32_t budget_bits(VmaAllocator vma, uint32_t bits) {
     for (uint32_t h = 0; h < VK_MAX_MEMORY_HEAPS; h++)
         if ((full >> h & 1) && !(told >> h & 1))
             rt_log("vk: video memory heap %u full: %llu of its %llu MiB budget in use (%llu MiB of it VMA's), less %llu MiB "
-                   "kept free (NX2NAVI_VRAM_RESERVE_MB): new allocations go to the other device-local heaps while it is", h,
+                   "kept free (OOTPC_VRAM_RESERVE_MB): new allocations go to the other device-local heaps while it is", h,
                    (unsigned long long)(b[h].usage >> 20), (unsigned long long)(b[h].budget >> 20),
                    (unsigned long long)(b[h].statistics.blockBytes >> 20), (unsigned long long)(reserve >> 20));
     return out;

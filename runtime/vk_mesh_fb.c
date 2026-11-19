@@ -54,7 +54,7 @@ int vk_meshfb_init(void) {
     M.tried = 1;
     VkCtx *c = vk_ctx();
     if (!c) return 0;
-    uint64_t mb = (uint64_t)cfg_int("NX2NAVI_MESH_FALLBACK_MB");
+    uint64_t mb = (uint64_t)cfg_int("OOTPC_MESH_FALLBACK_MB");
     if (mb < 16) mb = 16;
     if (mb > 4096) mb = 4096;
     VkDeviceSize range = c->props.limits.maxStorageBufferRange & ~(VkDeviceSize)3, task = (mb << 20) / 8, mesh = (mb << 20) - task;

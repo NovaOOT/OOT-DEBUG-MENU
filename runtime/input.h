@@ -6,7 +6,7 @@
 
 // Bits of HidNpadButton (A=0 B=1 X=2 Y=3 StickL=4 StickR=5 L=6 R=7 ZL=8 ZR=9 Plus=10 Minus=11 Left=12 Up=13 Right=14
 // Down=15) and the stick directions (StickLLeft..Down 16-19, StickRLeft..Down 20-23, derived from the sticks).
-// Sticks are -32767..32767, up is +y. NX2NAVI_INPUT=none reports no input. Callable from any thread.
+// Sticks are -32767..32767, up is +y. OOTPC_INPUT=none reports no input. Callable from any thread.
 void input_poll(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry);
 // 1 when keyboard and mouse are the device the player used last, 0 when the gamepad is: what is shown for pointing
 // (menu_cursor.c shows the pointer in the game's menus only for the keyboard and mouse)
@@ -41,6 +41,15 @@ int menu_cursor_pointer(void);
 // The same for host UI (the text entry): never blocked. input_block(1) while a text entry is open: input_poll then
 // reports nothing; input_block(0) when it closes: nothing until all buttons and stick directions are released.
 void input_poll_ui(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry);
+// The debug hotkeys pressed (dbg_bind_poll's bits), for the game thread while it waits paused (debug_tools.c
+// dbg_pause_wait): the game's own input poll does not run then. Nothing reaches the game.
+uint64_t input_poll_paused(void);
+// The last button pressed while paused, pressed on the frame the pause lets through: input_pause_release when a step or
+// the resume lets a frame through, input_pause_frame from the frame hook when that frame is over.
+void input_pause_release(void);
+// The buttons the next frame let through will press (B_ bits; 0 when none was pressed while paused). Any thread.
+uint64_t input_pause_next(void);
+void input_pause_frame(void);
 void input_block(int on);
 // The in-game menu (ui/menu.h): input_menu(1) when it opens (input_poll reports nothing, the cursor is released), (0) when
 // it closes (nothing until every button and stick direction is released). Independent of input_block.
@@ -52,7 +61,7 @@ int input_menu_gate(int *held, int menu_open, uint64_t *buttons, int32_t sticks[
 int input_overlay_gate(int *held, uint64_t *buttons);   // L3+R3: 1 in the poll both go down
 int input_debug_gate(int *held, int on, int down);   // the menu button (debug_menu_button) pressed, input_map.c
 int input_pad_read(uint64_t *buttons, int32_t *lx, int32_t *ly);
-// The gamepad layout in effect (PAD_LAYOUT_*, input_map.h; NX2NAVI_PAD_LAYOUT, live); -1 without a gamepad. Any thread.
+// The gamepad layout in effect (PAD_LAYOUT_*, input_map.h; OOTPC_PAD_LAYOUT, live); -1 without a gamepad. Any thread.
 int input_pad_layout(void);
 // How far the open gamepad's left (pct[0]) and right (pct[1]) sticks are from the centre now, in percent of full
 // deflection, before the dead zone: the menu shows it on the dead zone rows, so a drifting stick's resting value can be
@@ -63,7 +72,7 @@ int input_pad_stick_percent(double pct[2]);
 enum { PAD_LABEL_NONE, PAD_LABEL_A, PAD_LABEL_B, PAD_LABEL_X, PAD_LABEL_Y, PAD_LABEL_CROSS, PAD_LABEL_CIRCLE,
        PAD_LABEL_SQUARE, PAD_LABEL_TRIANGLE };
 int input_pad_label(int pad);
-// The menu's remapping rows (Controls tab). input_map_snapshot copies the tables in effect (after any changed NX2NAVI_BIND_* line).
+// The menu's remapping rows (Controls tab). input_map_snapshot copies the tables in effect (after any changed OOTPC_BIND_* line).
 // input_capture polls the keys, the mouse buttons and the gamepad for a press: reset 1 takes what is held now as the
 // start (a held key counts once released and pressed again) and returns NONE; then it returns KEY or PAD with *id the
 // key or pad id (input_map.h) pressed since the last call, or CANCEL for Esc. Keys count only while the game window is in front.
@@ -75,10 +84,10 @@ int input_capture(int reset, int *id);
 uint32_t input_key_char(int key);
 // F8, the bug capture's key (bugcap.c; no KEY_ id), held while the game window is in front.
 int input_flight_key(void);
-// Insert, the frame dump's key (vk_dump.c, NX2NAVI_DUMP=key), held. On Windows also while another window is in front:
+// Insert, the frame dump's key (vk_dump.c, OOTPC_DUMP=key), held. On Windows also while another window is in front:
 // a player on a gamepad often leaves the focus elsewhere. Unbound in the game's default layout.
 int input_dump_key(void);
-// Untimed NX2NAVI_INPUT_SCRIPT lines, separated by ';' or newlines, queued now: each <frame> counts from the next tick
+// Untimed OOTPC_INPUT_SCRIPT lines, separated by ';' or newlines, queued now: each <frame> counts from the next tick
 // (frame_step_ticks), and they are ORed into the input like the script's. Returns how many were queued. The remote
 // console's "input" command (debug_remote.c run_command). Any thread.
 int input_script_live(const char *text);
@@ -99,12 +108,12 @@ int input_cursor_released(void);   // Esc or a non-client activation released th
 int input_rumble(uint16_t low, uint16_t high, uint32_t ms);
 // Motor value for a normalised amplitude: pow(a, curve) * strength, saturated to 0..65535. Pure.
 uint16_t rumble_motor(float a, float curve, float strength);
-// NX2NAVI_RUMBLE_TRIGGERS=1: input_rumble also drives the impulse triggers (Xbox) with the high motor's value.
+// OOTPC_RUMBLE_TRIGGERS=1: input_rumble also drives the impulse triggers (Xbox) with the high motor's value.
 int input_rumble_triggers_enabled(void);
 // HD rumble (input.c "HD rumble", rumble_hd.h): the game's vibration values as they are, for a gamepad with linear
 // actuators (a Switch Pro Controller, a Joy-Con or a pair of them). All callable from any thread.
 // input_rumble_hd_available: the gamepad the game reads is one of these (the menu's row).
-// input_rumble_hd_on: ... and NX2NAVI_RUMBLE_HD is 1 (live) and NX2NAVI_RUMBLE is not 0: input_rumble then leaves that
+// input_rumble_hd_on: ... and OOTPC_RUMBLE_HD is 1 (live) and OOTPC_RUMBLE is not 0: input_rumble then leaves that
 // gamepad's motors alone, and the caller posts every new value with input_rumble_hd.
 // input_rumble_hd: the game's newest value per side (v[0] left, v[1] right; live[s] 0: that side is at rest), the
 // amplitudes scaled by strength (1 = as they are). Returns at once: a thread of input.c writes the reports, the newest
@@ -115,10 +124,10 @@ int input_rumble_hd_on(void);
 void input_rumble_hd(const RumbleHdValue v[2], const int live[2], float strength);
 void input_rumble_hd_stop(void);
 
-// Motion (NX2NAVI_MOTION=0 turns it off, live). input_motion_start starts the sensor thread once: every 4 ms it reads the
+// Motion (OOTPC_MOTION=0 turns it off, live). input_motion_start starts the sensor thread once: every 4 ms it reads the
 // gamepad's gyro and accelerometer (when it has them) and feeds motion_global(). Callable from any thread.
 void input_motion_start(void);
-// NX2NAVI_MOTION is not "0" (a live setting: read again when cfg_version changes). Off: the sensor reads at rest.
+// OOTPC_MOTION is not "0" (a live setting: read again when cfg_version changes). Off: the sensor reads at rest.
 int input_motion_enabled(void);
 // SDL sensor values (accelerometer m/s^2, gyro rad/s, SDL gamepad axes) to the Switch controller frame motion_feed
 // takes (acceleration in G as gravity reads, rotation rad/s). The mapping is documented in input_win.c.

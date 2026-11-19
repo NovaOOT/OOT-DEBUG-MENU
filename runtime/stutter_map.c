@@ -1,4 +1,4 @@
-// The stutter map (NX2NAVI_STUTTER_MAP=1): what a play session's hitches were, area by area, and which pipelines and
+// The stutter map (OOTPC_STUTTER_MAP=1): what a play session's hitches were, area by area, and which pipelines and
 // shaders the draws met missing, so a long session says where the remaining stutters are and what the next pipeline
 // list (tools/pipeline_list.py merge) and shader preparation must take in. Off by default; while it is off every hook
 // returns at its first test.
@@ -99,10 +99,10 @@ static Cand cand[SM_AFTER + 1];
 static int n_cand;
 
 void stutter_map_init(void) {
-    stutter_map_on = cfg_bool("NX2NAVI_STUTTER_MAP");
+    stutter_map_on = cfg_bool("OOTPC_STUTTER_MAP");
     if (!stutter_map_on) return;
     snprintf(areas[0].name, sizeof areas[0].name, "%s", "(before the first area)");
-    rt_log("stutter map: on (NX2NAVI_STUTTER_MAP): a hitch is a frame over %.1f times the median of the %d before it "
+    rt_log("stutter map: on (OOTPC_STUTTER_MAP): a hitch is a frame over %.1f times the median of the %d before it "
            "and at least %.0f ms (or over %llu ms) whose next %d frames are under 1/%.1f of it (or one over %llu ms); "
            "frames within %llu s of an area load count as the load's; the map every %llu minutes and at exit",
            SM_HITCH_FACTOR, SM_MEDIAN_N, SM_HITCH_MIN_NS / 1e6, SM_HITCH_ANY_NS / 1000000ull, SM_AFTER, SM_AFTER_RATIO,

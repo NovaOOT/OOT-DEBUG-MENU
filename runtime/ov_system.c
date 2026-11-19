@@ -4,13 +4,13 @@
 // host. Stub rule: queries and initialisation succeed with neutral values, data paths stop with a named fatal.
 //
 // Environment:
-//   NX2NAVI_LANG=<Switch language code>   the game's language as given ("ja", "en-GB", "zh-Hant", ...)
-//   NX2NAVI_LOCALE=<BCP 47 tag>           else the language for this locale ("pt-BR"), else the Windows user locale;
+//   OOTPC_LANG=<Switch language code>   the game's language as given ("ja", "en-GB", "zh-Hant", ...)
+//   OOTPC_LOCALE=<BCP 47 tag>           else the language for this locale ("pt-BR"), else the Windows user locale;
 //                                      a language the game does not ship becomes en-US
-//   NX2NAVI_OPERATION_MODE=docked|handheld   operation and performance mode reported to the game (default docked)
-//   NX2NAVI_ASSUME_FOCUS=1|0              1 (default, the Game tab's row): GetCurrentFocusState always reports in focus,
+//   OOTPC_OPERATION_MODE=docked|handheld   operation and performance mode reported to the game (default docked)
+//   OOTPC_ASSUME_FOCUS=1|0              1 (default, the Game tab's row): GetCurrentFocusState always reports in focus,
 //                                      whatever the window says; 0: out of focus while the window is, as on a Switch
-//   NX2NAVI_SHARED_FONTS=<dir>            nn::pl shared fonts (tools/extract_fonts.py output), default
+//   OOTPC_SHARED_FONTS=<dir>            nn::pl shared fonts (tools/extract_fonts.py output), default
 //                                      <romfs>/../../firmware/shared-fonts
 #include <ctype.h>
 #include <stdio.h>
@@ -37,13 +37,13 @@ static void need(int ok, const char *what) {
 static const char *caller(Cpu *c, char *buf, int n) { return ldr_describe(c->x[30] - 4, buf, n); }
 
 // ==== nn::oe (services.c)
-// NX2NAVI_OPERATION_MODE: 1 handheld (OperationMode 0, PerformanceMode Normal 0), 0 docked (1, Boost 1). It follows the
+// OOTPC_OPERATION_MODE: 1 handheld (OperationMode 0, PerformanceMode Normal 0), 0 docked (1, Boost 1). It follows the
 // setting; the game is told of a change as the console tells it (ov_operation_mode_live).
 int ov_handheld(void) {
-    const char *e = cfg_value("NX2NAVI_OPERATION_MODE");
+    const char *e = cfg_value("OOTPC_OPERATION_MODE");
     if (!strcmp(e, "docked")) return 0;
     if (!strcmp(e, "handheld")) return 1;
-    rt_fatal("NX2NAVI_OPERATION_MODE must be docked or handheld, not '%s'", e);
+    rt_fatal("OOTPC_OPERATION_MODE must be docked or handheld, not '%s'", e);
 }
 
 // After a settings change (gfx_present.c window_settings_live): a new mode reaches the game through the applet messages
@@ -94,21 +94,21 @@ static const char *switch_language(const char *tag) {
     return "en-US";
 }
 
-// The game's language as a Switch language code (NX2NAVI_LANG, else NX2NAVI_LOCALE, else the Windows user locale). NX2navi
+// The game's language as a Switch language code (OOTPC_LANG, else OOTPC_LOCALE, else the Windows user locale). OOT-PC
 // accepts "zh-Hans" and "zh-Hant" for Chinese and falls back to Japanese for "zh-CN" and "zh-TW", so those two
-// spellings, which older nx2navi.ini files and menus wrote, are mapped to them.
+// spellings, which older OOT-PC.ini files and menus wrote, are mapped to them.
 const char *ov_language(void) {
     static const char *const codes[] = {"ja", "en-US", "fr", "de", "it", "es", "ko", "nl", "pt", "ru",
                                         "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR", "pl"};
-    const char *code = cfg_get("NX2NAVI_LANG");   // no fixed default: NX2NAVI_LOCALE or the Windows user locale decides when unset
+    const char *code = cfg_get("OOTPC_LANG");   // no fixed default: OOTPC_LOCALE or the Windows user locale decides when unset
     if (code && *code) {
         if (!strcmp(code, "zh-CN")) return "zh-Hans";
         if (!strcmp(code, "zh-TW")) return "zh-Hant";
         for (size_t i = 0; i < sizeof codes / sizeof *codes; i++)
             if (!strcmp(code, codes[i])) return codes[i];
-        rt_fatal("NX2NAVI_LANG '%s' is not a Switch language code", code);
+        rt_fatal("OOTPC_LANG '%s' is not a Switch language code", code);
     }
-    const char *tag = cfg_get("NX2NAVI_LOCALE");
+    const char *tag = cfg_get("OOTPC_LOCALE");
     char sys[85] = "en-US";
     if (!tag || !*tag) {
         if (*plat_user_locale()) snprintf(sys, sizeof sys, "%s", plat_user_locale());
@@ -184,7 +184,7 @@ static void ov_focus_mode(Cpu *c) {
 // mode 2: on a Switch the system then suspends the whole process while it is out of focus and sends Resume when it
 // returns. Here only the game's main thread stops (it waits in PopNotificationMessage for the next message) while its
 // loader threads, audio and clocks run on, and a load interrupted that way was seen to never finish (Linux, 1.4.3).
-// So NX2NAVI_ASSUME_FOCUS=1, the default, keeps it at 1; with 0 it follows the window through
+// So OOTPC_ASSUME_FOCUS=1, the default, keeps it at 1; with 0 it follows the window through
 // oe_set_focus. The caller of oe_set_focus also pushes OE_MSG_FOCUS_STATE_CHANGED.
 //
 // The setting is read on every focus change rather than once at start: a focus change is rare, the lookup is a short
@@ -192,7 +192,7 @@ static void ov_focus_mode(Cpu *c) {
 // a restart.
 static volatile int32_t focus_state = 1;
 void oe_set_focus(int in_focus) {
-    plat_xchg32(&focus_state, in_focus || atoi(cfg_value("NX2NAVI_ASSUME_FOCUS")) ? 1 : 2);
+    plat_xchg32(&focus_state, in_focus || atoi(cfg_value("OOTPC_ASSUME_FOCUS")) ? 1 : 2);
 }
 static void ov_focus_state(Cpu *c) { ret_x(c, (uint64_t)focus_state); }
 
@@ -888,12 +888,12 @@ static void ov_user_difference(Cpu *c) {
     ret_x(c, (uint64_t)((b->user.offset - a->user.offset) * 1000000000ll));
 }
 
-// ==== nn::pl shared fonts (shared_font.c). NX2navi asks for them only from its font loader, only with Simplified Chinese,
+// ==== nn::pl shared fonts (shared_font.c). OOT-PC asks for them only from its font loader, only with Simplified Chinese,
 // Korean or Traditional Chinese text, and only for type 0; tools/extract_fonts.py writes
 // them from the user's firmware. Each type is read on first use into guest-visible memory as the BFTTF file the pl
 // shared memory holds; Address is 8 bytes past the file start (after the BFTTF header) and Size the decoded font size.
 // The load state is always Loaded: the game spins until it is, so missing files stop with a named fatal at
-// Address/Size instead of a hang. NX2NAVI_SHARED_FONTS=<dir> overrides <romfs>/../../firmware/shared-fonts.
+// Address/Size instead of a hang. OOTPC_SHARED_FONTS=<dir> overrides <romfs>/../../firmware/shared-fonts.
 #define SHARED_FONT_TYPES 6
 #define BFTTF_MAGIC 0x7f9a0218u
 static const char *const font_files[SHARED_FONT_TYPES] = {
@@ -902,10 +902,10 @@ static const char *const font_files[SHARED_FONT_TYPES] = {
 static struct { PlatMutex lock; const uint8_t *file[SHARED_FONT_TYPES]; uint64_t size[SHARED_FONT_TYPES]; } fonts;
 
 const char *ov_shared_font_dir(char *buf, size_t n) {
-    const char *e = cfg_get("NX2NAVI_SHARED_FONTS");
+    const char *e = cfg_get("OOTPC_SHARED_FONTS");
     if (e && *e) snprintf(buf, n, "%s", e);
     else {
-        char exe[PLAT_PATH_MAX], probe[PLAT_PATH_MAX + 40];   // shared-fonts next to nx2navi.exe (tools/package_build.py), else the repo's
+        char exe[PLAT_PATH_MAX], probe[PLAT_PATH_MAX + 40];   // shared-fonts next to ocarina.exe (tools/package_build.py), else the repo's
         int len = plat_exe_path(exe, sizeof exe);
         char *cut = len && len < sizeof exe ? plat_last_sep(exe) : NULL;
         if (cut) *cut = 0;
@@ -944,7 +944,7 @@ static const uint8_t *font_data(Cpu *c, const char *fn, int64_t t) {
         FILE *f = fopen(path, "rb");
         if (!f)
             rt_fatal("nn::pl::%s(%lld) from %s: no shared font %s (needed for Chinese and Korean text); run "
-                     "tools/extract_fonts.py --firmware <firmware NCA dir> or set NX2NAVI_SHARED_FONTS", fn, (long long)t,
+                     "tools/extract_fonts.py --firmware <firmware NCA dir> or set OOTPC_SHARED_FONTS", fn, (long long)t,
                      caller(c, lr, sizeof lr), path);
         plat_fseek64(f, 0, SEEK_END);
         int64_t len = plat_ftell64(f);

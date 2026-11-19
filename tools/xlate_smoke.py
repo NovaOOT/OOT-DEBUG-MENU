@@ -1,4 +1,4 @@
-"""Smoke test for build/xlate/nx2navi_xlate(.exe): no game files needed.
+"""Smoke test for build/xlate/ootpc_xlate(.exe): no game files needed.
 
 Sends one hand-assembled Maxwell fragment shader (writes the constant colour 1.0, 0.5, 0.25, 1.0 to render target 0)
 through --serve, checks the reply, then sends a malformed line and checks the service survives and still answers. Two
@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXE = ROOT / "build" / "xlate" / ("nx2navi_xlate.exe" if os.name == "nt" else "nx2navi_xlate")
+EXE = ROOT / "build" / "xlate" / ("ootpc_xlate.exe" if os.name == "nt" else "ootpc_xlate")
 SPIRV_VAL = (Path(r"C:\msys64\ucrt64\bin\spirv-val.exe") if os.name == "nt"
              else Path(shutil.which("spirv-val") or "/usr/bin/spirv-val"))
 

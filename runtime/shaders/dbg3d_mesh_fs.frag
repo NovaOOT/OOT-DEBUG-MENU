@@ -8,7 +8,7 @@
 
 layout(location = 0) in vec3 rel;   // from the eye, in the mesh's steps (vk_dbg3d.c)
 layout(location = 1) in float vw;
-layout(location = 2) noperspective in vec3 bary;
+layout(location = 2) in vec3 bary;   // perspective-correct (dbg3d_mesh_vs.vert)
 layout(location = 4) flat in int edges;
 
 layout(location = 0) out vec4 o;

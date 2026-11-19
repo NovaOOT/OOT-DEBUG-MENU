@@ -2,8 +2,8 @@
 
 Part 1 runs Maxwell words encoded here from the field layouts of the translator's Decoders/InstDecoders.cs (integer and logic
 ops, SHFL.IDX with clamp and segment masks, LDS/STS sizes, F2F, HFMA2, FFMA rounding, PRMT, predicates, EXIT, BRA).
-Part 2, when build/xlate/nx2navi_xlate.exe exists, lowers SM86 HMMA.1688 / HMMA.16816, LDSM and MOVM with
-nx2navi_xlate --lower and checks the emulated result against exactly representable reference values (small
+Part 2, when build/xlate/ootpc_xlate.exe exists, lowers SM86 HMMA.1688 / HMMA.16816, LDSM and MOVM with
+ootpc_xlate --lower and checks the emulated result against exactly representable reference values (small
 integers, so every F16 rounding is exact and only the fragment layout can be wrong), and HFMA2.RELU as the translator
 runs it (the translator drops PRMT, so AmpereLowering.cs Half must not use it). tests/tensor_lowering_check.py checks
 the same lowerings against hardware results.

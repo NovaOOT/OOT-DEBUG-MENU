@@ -45,14 +45,14 @@ def _os_lock(f):
 
 def owner(path):
     """Who holds the lock file path, as its holder wrote it ("the launcher window (process 1234, since 14:02)"), or
-    'another NX2navi' when that cannot be read. Only worth asking after the lock was refused: the note of a holder
+    'another OOT-PC' when that cannot be read. Only worth asking after the lock was refused: the note of a holder
     that has ended stays."""
     try:
         with open(str(path) + '.owner', encoding='utf-8') as f:
             o = json.load(f)
         return f'{o["what"]} (process {int(o["pid"])}, since {time.strftime("%H:%M", time.localtime(o["since"]))})'
     except (OSError, ValueError, KeyError, TypeError, OverflowError):
-        return 'another NX2navi'
+        return 'another OOT-PC'
 
 
 class FileLock:

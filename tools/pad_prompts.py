@@ -3,7 +3,7 @@ art on the player's machine.
 
     python tools/pad_prompts.py --art FOLDER --game FOLDER [--style xbox|playstation|steamdeck|pc]
                                 [--layout position|label]
-                                [--binds nx2navi.ini]
+                                [--binds OOT-PC.ini]
 
 --art is a folder of button art with the file names of STYLES (tools/prompt_art.py) and KEY_ART below: the Source
 folder of a button prompt art pack, which holds XGamepad/Default, XGamepad/Light, P5Gamepad/Default, P5Gamepad/Light,
@@ -14,7 +14,7 @@ this tool on it). The art is read where it lies and never enters the repository.
 romfs.bin, as the setup writes them); --romfs names another, which may also be a folder of extracted files. Each pad
 style and layout becomes the overlay folder <game>/romfs-patches-<style> (layout position) or
 <game>/romfs-patches-<style>-label (layout label), and the keyboard and mouse <game>/romfs-patches-pc, each with a
-manifest.tsv: runtime/romfs.c overlay_init loads it in place of the game's files when nx2navi.ini has prompts = xbox,
+manifest.tsv: runtime/romfs.c overlay_init loads it in place of the game's files when OOT-PC.ini has prompts = xbox,
 playstation, steamdeck or pc (runtime/input_map.c input_prompts_folder). Without --style or --layout, every style or
 layout. The Steam Deck style has no art of its own: its buttons are named as an Xbox pad's face buttons and a
 PlayStation pad's shoulders and stick clicks, so it is drawn from those two pads' pictures (prompt_art.py STYLES).
@@ -26,7 +26,7 @@ for A show that button (A as B or circle, B as A or cross, X as Y or triangle, Y
 pad_layout = xbox, playstation and auto: Switch A is the bottom face button, so A shows A or cross, B shows B or
 circle, X shows X or square and Y shows Y or triangle.
 pc shows the first key each button has (PC_KEYS, Ocarina's defaults, with the bind_ lines of --binds over them; by
-default <game>/nx2navi.ini), the mouse buttons as a mouse, and for the right stick the mouse moving. A key bound
+default <game>/OOT-PC.ini), the mouse buttons as a mouse, and for the right stick the mouse moving. A key bound
 later shows after the tool runs again.
 
 What changes, the rest of each file staying as it is:
@@ -99,12 +99,12 @@ def pad_pictures(style, layout):
 
 
 # ---- keyboard and mouse (prompts = pc): every button shows the first key its bindings give it. The defaults are
-# runtime/input_map.c DEFAULT_KEYS; --binds takes the bind_ lines of a nx2navi.ini over them. The right stick is the
+# runtime/input_map.c DEFAULT_KEYS; --binds takes the bind_ lines of a OOT-PC.ini over them. The right stick is the
 # camera, which the mouse turns, so its prompts show the mouse moving (its arrow keys, a second source, do not show).
 PC_KEYS = {'A': 'e', 'B': 'lctrl', 'X': 'space', 'Y': 'mouse_l', 'L': 'q', 'R': 'r', 'ZL': 'mouse_r', 'ZR': 'f',
            'PLUS': 'tab', 'MINUS': 'm', 'LEFT': '1', 'UP': '2', 'RIGHT': '3', 'DOWN': '4', 'LCLICK': 'v', 'RCLICK': 'c',
            'LSTICK_UP': 'w', 'LSTICK_LEFT': 'a', 'LSTICK_DOWN': 's', 'LSTICK_RIGHT': 'd'}
-# The art's name of each key (nx2navi.ini names, runtime/input_map.c key_names); letters, digits and F keys are their
+# The art's name of each key (OOT-PC.ini names, runtime/input_map.c key_names); letters, digits and F keys are their
 # own. The art spells Ctrl as Crtl.
 KEY_ART = {'space': 'Space', 'tab': 'Tab', 'lshift': 'Shift', 'rshift': 'Shift', 'lctrl': 'Crtl', 'rctrl': 'Crtl',
            'lalt': 'Alt', 'up': 'Up', 'down': 'Down', 'left': 'Left', 'right': 'Right', 'enter': 'Enter',
@@ -119,7 +119,7 @@ KEY_LABELS = {'comma': ',', 'period': '.', 'equals': '=', 'num_decimal': '.', 'b
 
 
 def pc_keys(ini_text=None):
-    """PC_KEYS with the first key of each bind_<button> line of a nx2navi.ini text over it. A line without a key
+    """PC_KEYS with the first key of each bind_<button> line of a OOT-PC.ini text over it. A line without a key
     entry, or with key:default first, keeps the default (the prompt then shows a key the line took away)."""
     keys = dict(PC_KEYS)
     for line in (ini_text or '').splitlines():
@@ -811,8 +811,8 @@ def main():
     ap.add_argument('--romfs', type=Path, help='default <game>/romfs')
     ap.add_argument('--style', choices=sorted(STYLES) + ['pc'], help='default: every one')
     ap.add_argument('--layout', choices=sorted(FACE), help='default: both (pc has one)')
-    ap.add_argument('--binds', type=Path, help='pc: a nx2navi.ini whose bind_ lines the keys follow '
-                                               '(default <game>/nx2navi.ini when there is one)')
+    ap.add_argument('--binds', type=Path, help='pc: a OOT-PC.ini whose bind_ lines the keys follow '
+                                               '(default <game>/OOT-PC.ini when there is one)')
     ap.add_argument('--out', type=Path, help='the overlay folder, for one --style and --layout')
     ap.add_argument('--level', type=int, default=9, help='zstd level of the written files')
     args = ap.parse_args()
@@ -820,7 +820,7 @@ def main():
         ap.error('--game, or --out with --romfs')
     if args.out and not (args.style and (args.layout or args.style == 'pc')):
         ap.error('--out writes one folder: give --style and --layout')
-    binds = args.binds or (args.game / 'nx2navi.ini' if args.game and (args.game / 'nx2navi.ini').is_file() else None)
+    binds = args.binds or (args.game / 'OOT-PC.ini' if args.game and (args.game / 'OOT-PC.ini').is_file() else None)
     keys = pc_keys(binds.read_text(encoding='utf-8', errors='replace') if binds else None)
     romfs = Romfs(args.romfs or args.game / 'romfs')
     restbl = max((p for p in romfs.paths() if p.startswith('System/Resource/ResourceSizeTable.') and p.endswith('.zs')),

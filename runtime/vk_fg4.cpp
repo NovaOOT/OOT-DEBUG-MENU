@@ -1,6 +1,6 @@
 // Frame generation through AMD's FSR SDK 2.4: amd_fidelityfx_loader_vk.dll (vk_ffx4.cpp loads it) with
 // amd_fidelityfx_framegeneration_vk.dll next to the executable. vk_fg.cpp takes this path instead of the FSR 3.1
-// library's where the setting asks for it while FSR 4 is the upscaler (vk_fg.cpp use4, NX2NAVI_FSR4_FG), and its
+// library's where the setting asks for it while FSR 4 is the upscaler (vk_fg.cpp use4, OOTPC_FSR4_FG), and its
 // functions here are called by vk_fg.cpp alone. The
 // loader picks the frame generation and the swapchain for the card: the machine-learned FSR Frame Generation 4.x on
 // Radeon RX 9000 cards with Windows 11, FSR Frame Generation 3.1.x on every other. The log names both versions.
@@ -97,7 +97,7 @@ std::mutex g_lock;       // the probe: the menu asks from its thread, the presen
 int g_avail = -1;        // -1 not asked yet; 0 this path does not run here; 1 it does
 char g_sc_list[96];      // the swapchain versions the loader listed, for the log
 char g_fg_name[24];      // the frame generation version a context gets: the one asked for, else the first listed
-uint64_t g_fg_pin, g_sc_pin;   // NX2NAVI_FG4_VERSION, NX2NAVI_FG4_SWAPCHAIN (tests): the version asked for by its id; 0 the loader's choice
+uint64_t g_fg_pin, g_sc_pin;   // OOTPC_FG4_VERSION, OOTPC_FG4_SWAPCHAIN (tests): the version asked for by its id; 0 the loader's choice
 
 VkResult submit_game(uint32_t n, const VkSubmitInfo *si, VkFence fence) {
     vk_queue_lock();   // the game's queue is shared with the recorder and the present path
@@ -185,8 +185,8 @@ extern "C" int vk_fg4_available(void) {
     }
     char fg[96];
     char *sc = g_sc_list;
-    int nf = list_versions(FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION, cfg_get("NX2NAVI_FG4_VERSION"), fg, sizeof fg, &g_fg_pin);
-    int ns = list_versions(FFX_API_CREATE_CONTEXT_DESC_TYPE_FGSWAPCHAIN_VK, cfg_get("NX2NAVI_FG4_SWAPCHAIN"), sc, sizeof g_sc_list,
+    int nf = list_versions(FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION, cfg_get("OOTPC_FG4_VERSION"), fg, sizeof fg, &g_fg_pin);
+    int ns = list_versions(FFX_API_CREATE_CONTEXT_DESC_TYPE_FGSWAPCHAIN_VK, cfg_get("OOTPC_FG4_SWAPCHAIN"), sc, sizeof g_sc_list,
                            &g_sc_pin);
     a = nf > 0 && ns > 0;
     // the menu's name for it: the first of the list, which the loader takes when none is asked for (a test's version

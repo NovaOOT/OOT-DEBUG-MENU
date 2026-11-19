@@ -9,7 +9,7 @@ from pathlib import Path
 from .. import feed, jobs, versions
 
 
-def grab_gdi(x, y, w, h, path):
+def grab_gdi(x, y, w, h, path, hwnd=None, shape=None):
     """Windows: copy the screen rectangle with GDI and write it as PNG (art.png_bytes); no extra packages."""
     import ctypes
     from ctypes import wintypes
@@ -32,7 +32,11 @@ def grab_gdi(x, y, w, h, path):
     mem = gdi32.CreateCompatibleDC(screen)
     bmp = gdi32.CreateCompatibleBitmap(screen, w, h)
     old = gdi32.SelectObject(mem, bmp)
-    gdi32.BitBlt(mem, 0, 0, w, h, screen, x, y, 0x00CC0020)   # SRCCOPY
+    # Capture the client itself, even when another app is in front. A desktop rectangle captured that app instead.
+    user32.PrintWindow.argtypes = [vp, vp, wintypes.UINT]
+    user32.PrintWindow.restype = wintypes.BOOL
+    if not hwnd or not user32.PrintWindow(hwnd, mem, 3):
+        gdi32.BitBlt(mem, 0, 0, w, h, screen, x, y, 0x00CC0020)
 
     class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [('biSize', wintypes.DWORD), ('biWidth', wintypes.LONG), ('biHeight', wintypes.LONG),
@@ -49,6 +53,15 @@ def grab_gdi(x, y, w, h, path):
     user32.ReleaseDC(None, screen)
     a = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 4)[..., [2, 1, 0, 3]].copy()
     a[..., 3] = 255
+    if hwnd:
+        color, opacity, flags = wintypes.DWORD(), ctypes.c_ubyte(), wintypes.DWORD()
+        user32.GetLayeredWindowAttributes.argtypes=[vp,ctypes.POINTER(wintypes.DWORD),
+                                                   ctypes.POINTER(ctypes.c_ubyte),ctypes.POINTER(wintypes.DWORD)]
+        if user32.GetLayeredWindowAttributes(hwnd,ctypes.byref(color),ctypes.byref(opacity),ctypes.byref(flags)) and flags.value&1:
+            key=np.array([color.value&255,(color.value>>8)&255,(color.value>>16)&255],dtype=np.uint8)
+            a[...,3][np.all(a[...,:3]==key,axis=2)]=0
+    if shape is not None:
+        a[...,3]=np.minimum(a[...,3],shape)
     Path(path).write_bytes(art.png_bytes(a))
     return True
 
@@ -60,7 +73,21 @@ def grab(app, path):
     w, h = app.root.winfo_width(), app.root.winfo_height()
     if os.name == 'nt':
         try:
-            return grab_gdi(x, y, w, h, path)
+            import ctypes
+            user32=ctypes.WinDLL('user32')
+            user32.GetAncestor.argtypes=[ctypes.c_void_p,ctypes.c_uint]
+            user32.GetAncestor.restype=ctypes.c_void_p
+            hwnd=user32.GetAncestor(app.root.winfo_id(),2)
+            shape=None
+            if app.picture is None and app.root.attributes('-transparentcolor'):
+                import numpy as np
+                from . import art,picture
+                from .app import W,H
+                source=art._forest_source('forest-chassis.png',True)
+                alpha=picture.resize(np.repeat(source[...,3:4],3,axis=2),app.X(W),app.X(H))[...,0]
+                left,top=round(app.canvas.canvasx(0)),round(app.canvas.canvasy(0))
+                shape=np.where(alpha[top:top+h,left:left+w]>8,255,0).astype(np.uint8)
+            return grab_gdi(x, y, w, h, path, hwnd,shape)
         except Exception as e:
             app.ctx.log(f'selftest: screen capture failed: {e!r}')
     try:
@@ -88,7 +115,7 @@ def ahead_of(version):
 
 
 def fake_release(version='0.3.11'):
-    m = {'format': 1, 'version': version, 'app': {'name': f'OOT-DEBUG-MENU-app-{version}.zip', 'size': 1, 'sha256': '0'}}
+    m = {'format': 1, 'version': version, 'app': {'name': f'OOT-PC-app-{version}.zip', 'size': 1, 'sha256': '0'}}
     notes = ('- Each program module comes from the .nup package that holds it whole.\n'
              '- The PC stays awake while the game builds.\n- This launcher: one-click install, updates and play.')
     return feed.Release(m, notes)
@@ -98,7 +125,7 @@ def states(app):
     ctx = app.ctx
     s = app.settings
     s['dump'] = s.get('dump') or str(Path.home() / 'Downloads' / 'Ocarina of Time.nup')
-    s['game_dir'] = s.get('game_dir') or ('D:\\Games\\OOT-DEBUG-MENU' if os.name == 'nt' else '/games/OOT-DEBUG-MENU')
+    s['game_dir'] = s.get('game_dir') or ('D:\\Games\\OOT-PC' if os.name == 'nt' else '/games/OOT-PC')
     app.dumps = [Path(s['dump'])]
 
     def first_run():
@@ -172,14 +199,14 @@ def states(app):
 
     def import_saves():
         app.release, app.message, app.export_message = None, '', ''
-        app.save_message = ('Save imported from OOT-DEBUG-MENU-save-2026-11-09_17-30-05.zip (exported 2026-11-09 with OOT-DEBUG-MENU '
+        app.save_message = ('Save imported from OOT-PC-save-2026-11-09_17-30-05.zip (exported 2026-11-09 with OOT-PC '
                             '0.6.1). Your old save is in saves' + chr(92) + 'backup 2026-11-09 18.02.44.')
         app.show('saves', next(i for i, r in enumerate(app.rows_saves()) if r.label == 'Import a Save'))
 
     def export_save():
         app.save_message = ''
         app.export_message = ('Exported 14 files with the game' + chr(39) + 's log and settings to '
-                              + str(Path.home() / 'Downloads' / 'OOT-DEBUG-MENU-save-2026-11-09_17-30-05-bug-report.zip')
+                              + str(Path.home() / 'Downloads' / 'OOT-PC-save-2026-11-09_17-30-05-bug-report.zip')
                               + '.')
         app.show('saves', 0)
 
@@ -222,7 +249,7 @@ def states(app):
         import atexit
         import shutil
         import tempfile
-        game = Path(tempfile.mkdtemp(prefix='nx2navi-selftest-'))
+        game = Path(tempfile.mkdtemp(prefix='ootpc-selftest-'))
         atexit.register(shutil.rmtree, game, True)
         for name, files in (('HD Textures', 40), ('Better Menus', 12), ('Classic Music', 3)):
             for k in range(files):
@@ -231,7 +258,7 @@ def states(app):
                 f.write_bytes(b'0')
         (game / 'mods' / 'Old Plugin' / 'exefs').mkdir(parents=True)
         (game / 'mods' / 'Old Plugin' / 'exefs' / 'subsdk9').write_bytes(b'0')
-        (game / 'nx2navi.ini').write_text('[mods]\nmods_disabled = Classic Music\n', encoding='utf-8')
+        (game / 'OOT-PC.ini').write_text('[mods]\nmods_disabled = Classic Music\n', encoding='utf-8')
         s['game_dir'] = str(game)
         app.mods_page, app.mods_message = 0, ''
         app.show('mods', next(i for i, r in enumerate(app.rows_mods()) if r.label == 'HD Textures'))

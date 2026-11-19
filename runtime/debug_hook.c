@@ -259,9 +259,13 @@ static int material_of(const Keep *k, uint32_t base, uint32_t sub) {
     return (int)m < k->nmat ? (int)m : -1;
 }
 
+// Whether the polygon kept() last let through has material AirWall: emit marks the polygons it makes with it (the
+// walk is on one thread, kept() then emit() for each polygon).
+static int g_kept_air;
 static int kept(const Keep *k, uint32_t base, uint32_t sub) {
-    if (k->all && !k->walls) return 1;
+    if (k->all && !k->walls) return g_kept_air = 0, 1;
     int m = material_of(k, base, sub);
+    g_kept_air = m >= 0 && u32(k->b, k->mat + 16 * (size_t)m) == MAT_AIRWALL;
     if (k->solid) {   // a shape tag without a material: shown rather than lost
         return m < 0 || stops_player(k, m);
     }
@@ -276,6 +280,7 @@ static int kept(const Keep *k, uint32_t base, uint32_t sub) {
 typedef struct {
     uint32_t first;            // its first corner in the corner pool
     uint8_t n, target, wall;   // corners, 1 for a target object's part, DBG_POLY_ kind
+    uint8_t air;               // its material is AirWall
     float c[3];                // the middle, for the range test
     float r;                   // how far its corners reach from the middle: a wall far across still counts when it comes near
 } Poly;
@@ -345,7 +350,7 @@ static void emit(Out *o, const Xf *x, const float (*pts)[3], int n) {
         for (int k = 0; k < 3; k++) c[k] += q[i][k] / (float)n;
     }
     p->first = (uint32_t)o->npts;
-    p->n = (uint8_t)n, p->target = (uint8_t)o->target, p->wall = (uint8_t)o->wall;
+    p->n = (uint8_t)n, p->target = (uint8_t)o->target, p->wall = (uint8_t)o->wall, p->air = (uint8_t)g_kept_air;
     memcpy(p->c, c, sizeof c);
     p->r = 0;
     for (int i = 0; i < n; i++) {
@@ -1022,7 +1027,7 @@ static void hook_thread(void *arg) {
         }
         // the GPU takes the collision once the 3D path runs (an upscaler is on) and Show collision is on, and gives it
         // up when it is not wanted: the clips' second view, which also wants the collision, reads the polygons instead
-        int shown = (want & DBG_HOOK_COLLISION) && cfg_bool("NX2NAVI_DEBUG_VIEW_COLLISION");
+        int shown = (want & DBG_HOOK_COLLISION) && cfg_bool("OOTPC_DEBUG_VIEW_COLLISION");
         if (shown && !meshed && loaded[0] && vk_dbg3d_ready()) mesh_build(), meshed = 1;
         if (!shown && meshed) vk_dbg3d_mesh_drop(), meshed = 0;
         for (int t = 0; t < POLL_MS / 50 && H.want; t++) plat_sleep_ms(50);
@@ -1064,7 +1069,7 @@ static float g_reach[3] = {-1, -1, -1};   // per kind, the last question's: how 
 static int g_short[3];                    // and whether max ran out before range
 
 static void poly_out(DbgHookPoly *o, const Poly *q) {
-    o->n = q->n, o->target = q->target, o->wall = q->wall;
+    o->n = q->n, o->target = q->target, o->wall = q->wall, o->air = q->air;
     memcpy(o->p, H.pts + q->first, (size_t)q->n * sizeof *H.pts);
 }
 

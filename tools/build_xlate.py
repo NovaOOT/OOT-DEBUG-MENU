@@ -1,18 +1,18 @@
-"""Build the shader translator: build/xlate/nx2navi_xlate.exe (vendored translator 1.3.2 + patches, NativeAOT, SPIR-V for Vulkan).
+"""Build the shader translator: build/xlate/ootpc_xlate.exe (vendored translator 1.3.2 + patches, NativeAOT, SPIR-V for Vulkan).
 
 Copies tools/vendor/ryujinx to build/xlate/ryujinx, applies tools/xlate/patches/*.patch there (tools/vendor stays
 byte-identical), then runs `dotnet publish`. Needs the .NET 10 SDK, the MSVC build
-tools and vswhere.exe (docs/building.md). Run with .venv. On Linux it builds build/xlate/nx2navi_xlate for linux-x64, which
+tools and vswhere.exe (docs/building.md). Run with .venv. On Linux it builds build/xlate/ootpc_xlate for linux-x64, which
 NativeAOT links with the system's clang (no MSVC); NativeAOT builds for the OS it runs on only.
 
-Next to the exe it writes nx2navi_xlate.id: the translator identity, a sha256 over everything the build reads (this script,
+Next to the exe it writes ootpc_xlate.id: the translator identity, a sha256 over everything the build reads (this script,
 Program.cs, the csproj, the patches, the vendor tree). runtime/gfx_shader.c puts it into every shader cache key, so a
 translator change re-keys the cache without a hand-made KEY_VERSION bump. --id-only writes it for the exe already built
 (the caller vouches that the exe matches the sources).
 
   python tools/build_xlate.py [--id-only] [--out DIR]
 
---out builds into DIR instead of build/xlate (a task build dir: nx2navi.exe takes the translator next to it).
+--out builds into DIR instead of build/xlate (a task build dir: ocarina.exe takes the translator next to it).
 """
 
 import argparse
@@ -30,7 +30,7 @@ MNG_VENDOR = ROOT / "refs" / "MacNativeGames" / "vendor" / "ryujinx"
 XLATE = ROOT / "tools" / "xlate"
 BUILD = ROOT / "build" / "xlate"
 WIN = os.name == "nt"
-EXE = "nx2navi_xlate.exe" if WIN else "nx2navi_xlate"
+EXE = "ootpc_xlate.exe" if WIN else "ootpc_xlate"
 VSWHERE_DIR = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Visual Studio" / "Installer"
 
 
@@ -122,6 +122,9 @@ def prepare_sources() -> Path:
 
 # What the identity covers besides the sources: the publish settings in main(). Change it with them.
 BUILD_SETTINGS = "PublishAot=true InvariantGlobalization=true Release"
+# The name identity() hashes a file under: the csproj keeps its name from before the project was renamed to OOT-PC, so
+# the identity, and with it every shader cache keyed by it (runtime/gfx_shader.c), stays what it was.
+ID_NAMES = {"ootpc_xlate.csproj": "nx2navi_xlate.csproj"}
 
 
 def strip_code(text: str, xml: bool = False) -> str:
@@ -180,8 +183,8 @@ def identity() -> str:
     tree, the vendor tree and the patch files as they are."""
     h = hashlib.sha256()
     h.update(f"settings\0{BUILD_SETTINGS}\n".encode())
-    for name in ("Program.cs", "AmpereLowering.cs", "MeshSpirv.cs", "nx2navi_xlate.csproj"):
-        h.update(f"{name}\0{code_digest(XLATE / name)}\n".encode())
+    for name in ("Program.cs", "AmpereLowering.cs", "MeshSpirv.cs", "ootpc_xlate.csproj"):
+        h.update(f"{ID_NAMES.get(name, name)}\0{code_digest(XLATE / name)}\n".encode())
     tree = BUILD / "ryujinx"
     if (tree / "src").is_dir():
         for f in sorted(tree.rglob("*")):
@@ -204,7 +207,7 @@ def write_identity(exe: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--id-only", action="store_true", help="write nx2navi_xlate.id for the exe already built")
+    parser.add_argument("--id-only", action="store_true", help="write ootpc_xlate.id for the exe already built")
     parser.add_argument("--out", type=Path, help="build directory instead of build/xlate")
     parser.add_argument("--llvm", type=Path, help="Linux: an LLVM directory whose bin/clang and lld link the exe")
     parser.add_argument("--sysroot", type=Path, help="Linux: link against this sysroot's glibc instead of the host's "
@@ -231,12 +234,12 @@ def main() -> None:
     work = BUILD / "xlate"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
-    for name in ("Program.cs", "AmpereLowering.cs", "MeshSpirv.cs", "nx2navi_xlate.csproj"):
+    for name in ("Program.cs", "AmpereLowering.cs", "MeshSpirv.cs", "ootpc_xlate.csproj"):
         shutil.copy2(XLATE / name, work / name)
     out = BUILD / "publish"
     shutil.rmtree(out, ignore_errors=True)
     cmd = [
-        dotnet, "publish", str(work / "nx2navi_xlate.csproj"), "-c", "Release", "-r", "win-x64" if WIN else "linux-x64",
+        dotnet, "publish", str(work / "ootpc_xlate.csproj"), "-c", "Release", "-r", "win-x64" if WIN else "linux-x64",
         "-p:PublishAot=true", "-p:InvariantGlobalization=true", f"-p:RyuSrc={src}", "-o", str(out),
     ]
     if a.llvm:

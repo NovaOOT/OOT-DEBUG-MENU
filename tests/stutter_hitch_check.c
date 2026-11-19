@@ -7,7 +7,7 @@
 #include "../runtime/stutter_map.c"
 
 static uint64_t clock_ns;
-int cfg_bool(const char *name) { return !strcmp(name, "NX2NAVI_STUTTER_MAP"); }
+int cfg_bool(const char *name) { return !strcmp(name, "OOTPC_STUTTER_MAP"); }
 uint64_t kern_now_ns(void) { return clock_ns; }
 void plat_mutex_lock(PlatMutex *m) { (void)m; }
 void plat_mutex_unlock(PlatMutex *m) { (void)m; }

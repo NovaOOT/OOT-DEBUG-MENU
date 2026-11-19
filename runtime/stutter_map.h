@@ -1,4 +1,4 @@
-// The stutter map (NX2NAVI_STUTTER_MAP=1, stutter_map.c): for a play session, which frames hitched, in which area, what
+// The stutter map (OOTPC_STUTTER_MAP=1, stutter_map.c): for a play session, which frames hitched, in which area, what
 // the frame waited for, and which pipelines and shaders draws met missing, so the next pipeline list and shader
 // preparation can take them in.
 #pragma once

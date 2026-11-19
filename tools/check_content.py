@@ -22,13 +22,14 @@ BLOCKED_SUFFIXES = {
     ".bfres", ".bntx", ".bnsh", ".sarc", ".szs", ".zs", ".pack", ".byml",
     ".bgyml", ".msbt", ".bars", ".bwav", ".bfwav", ".bfstm", ".bfttf",
     ".bfotf", ".sharcb", ".webm",
+    ".z64", ".n64", ".v64",   # N64 ROMs
 }
 
 # ExeFS modules carry no extension.
 BLOCKED_NAMES = {"main", "sdk", "rtld", "subsdk0", "subsdk1", "main.npdm"}
 
 # Written by the code generator into every file it emits.
-GENERATED_MARKER = "NX2NAVI_" + "GENERATED_FROM_GAME_CODE"
+GENERATED_MARKER = "OOTPC_" + "GENERATED_FROM_GAME_CODE"
 
 # A prod.keys / title.keys line: name containing key, kek or seed, then hex.
 KEY_LINE = re.compile(

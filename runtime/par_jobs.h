@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 // Runs fn(arg, i) for every i in [0, n) on the pool's threads and the caller's, in no set order, and returns once all
-// have returned. A second caller while the pool runs a job, a pool that could not start, NX2NAVI_PAR_JOBS=0 or n 1 run
+// have returned. A second caller while the pool runs a job, a pool that could not start, OOTPC_PAR_JOBS=0 or n 1 run
 // every piece on the calling thread instead. fn must not call par_run itself (it would run its pieces alone).
 void par_run(int n, void (*fn)(void *arg, int i), void *arg);
 // The threads a job can spread over, the caller counted; 1 when the pool is off.

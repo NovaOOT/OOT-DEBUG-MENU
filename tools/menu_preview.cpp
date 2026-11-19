@@ -18,6 +18,10 @@
 
 #include <vector>
 
+#ifdef _WIN32
+#define strcasecmp _stricmp
+#endif
+
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -43,7 +47,7 @@ static const CfgMeta kMeta[] = {
 };
 static const struct { const char *key, *value; } kSet[] = {{"VK_PRESENT", "mailbox"}, {"PERF_OVERLAY", "full"}};
 
-static const char *strip(const char *name) { return strncmp(name, "NX2NAVI_", 8) ? name : name + 8; }
+static const char *strip(const char *name) { return strncmp(name, "OOTPC_", 6) ? name : name + 6; }
 
 extern "C" {
 const CfgMeta *cfg_meta(const char *key) {
@@ -80,7 +84,11 @@ const char *ov_language(void) { return "en-US"; }
 const char *plat_ui_language(void) { return "en"; }
 uint64_t plat_now_ns(void) {
     struct timespec t;
+#ifdef _WIN32
+    timespec_get(&t, TIME_UTC);
+#else
     clock_gettime(CLOCK_MONOTONIC, &t);
+#endif
     return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
 }
 void rt_log(const char *, ...) {}
@@ -150,95 +158,29 @@ static void triforce(ImDrawList *dl, float x, float y, float h, ImU32 col) {
 
 static void scene_menu(float w, float h, float scale, ImFont *title, bool first) {
     backdrop(w, h);
-    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(10, 6, 2, 150));
-    float ww = fminf(w * 0.88f, 1400 * scale), wh = fminf(h * 0.86f, 820 * scale);
-    ImGui::SetNextWindowPos(ImVec2(w * 0.5f, h * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(ww, wh), ImGuiCond_Always);
-    ImTextureID frame_tex;
-    const bool framed = menu_art(MENU_ART_FRAME_DECO, &frame_tex, nullptr, nullptr);
-    if (framed) ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-    ImGui::Begin("##menu", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
-    if (framed) ImGui::PopStyleVar();
-    const ImVec2 win_p = ImGui::GetWindowPos(), win_s = ImGui::GetWindowSize();
-    if (framed) {   // as menu.cpp layout_menu draws it
-        ImDrawList *fdl = ImGui::GetWindowDrawList();
-        const float ox = 15 * scale, oy = 30 * scale;
-        fdl->PushClipRectFullScreen();
-        for (int turned = 0; turned < 2; turned++)
-            menu_art_draw9_turned(fdl, MENU_ART_FRAME_DECO, ImVec2(win_p.x - ox, win_p.y - oy),
-                                  ImVec2(win_p.x + win_s.x + ox, win_p.y + win_s.y + oy), 96 * scale, 0.2f,
-                                  IM_COL32(236, 196, 112, 235), 0, turned);
-        fdl->PopClipRect();
-    }
-    const ImVec4 gold(0.93f, 0.76f, 0.38f, 1);
-    ImGui::PushFont(title);
-    ImVec2 at = ImGui::GetCursorScreenPos();
-    float th = ImGui::GetTextLineHeight();
-    triforce(ImGui::GetWindowDrawList(), at.x + th * 0.6f, at.y + th * 0.02f, th * 0.96f, ImGui::GetColorU32(gold));
-    ImGui::SetCursorScreenPos(ImVec2(at.x + th * 1.5f, at.y));
-    ImGui::TextColored(gold, "Ocarina of Time");
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::TextUnformatted(menu_text(UI_MENU_TITLE));
-    const float title_end = ImGui::GetItemRectMax().x;
-    ImGui::PopFont();
-    const char *version = "NX2navi 0.5.0  -  game 1.1.1";
-    float version_x = ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - ImGui::CalcTextSize(version).x;
-    if (ImGui::GetWindowPos().x + version_x >= title_end + ImGui::GetStyle().ItemSpacing.x * 2) {
-        ImGui::SameLine(version_x);
-        ImGui::TextDisabled("%s", version);
-    }
-    const ImGuiStyle &st = ImGui::GetStyle();
-    float bottom = ImGui::GetFrameHeight() + st.ItemSpacing.y * 2;
-    static const UiTextId tabs[] = {UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND, UI_MENU_TAB_CONTROLS};
-    if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_NoTabListScrollingButtons)) {
-        for (int k = 0; k < 4; k++) {
-            char label[96];
-            snprintf(label, sizeof label, "  %s  ###tab%d", menu_text(tabs[k]), k);
-            bool shown = skin_tab_item(label, menu_text(tabs[k]), 0, scale, title);
-            if (!shown) continue;
-            ImGui::Spacing();
-            opt_reserve_bottom(bottom);
-            if (first) opt_focus_first();
-            // the Display tab's first rows, as menu.cpp tab_screen shows them
-            opt_begin("##screen", scale);
-            opt_toggle("NX2NAVI_FULLSCREEN", UI_MENU_FULLSCREEN, UI_MENU_FULLSCREEN_DESC);
-            static const char *const sizes[] = {"", "1920x1080"};
-            static const char *const size_names[] = {"1920 \xC3\x97 1080", "1920 \xC3\x97 1080"};
-            opt_choice_list("NX2NAVI_WINDOW_SIZE", UI_MENU_WINDOW_SIZE, sizes, size_names, 2, UI_MENU_WINDOW_SIZE_DESC, 0);
-            opt_toggle_value("NX2NAVI_VK_PRESENT", UI_MENU_PRESENT_VSYNC, UI_MENU_PRESENT_DESC, "mailbox", "immediate");
-            static const char *const gpus[] = {""};
-            static const char *const gpu_names[] = {"NVIDIA GeForce RTX 3050 Ti Laptop GPU"};   // a long name
-            opt_choice_list("NX2NAVI_GPU_INDEX", UI_MENU_GPU, gpus, gpu_names, 1, UI_MENU_GPU_DESC, 0);
-            static const UiTextId perf[] = {UI_MENU_PERF_OFF, UI_MENU_PERF_FPS, UI_MENU_PERF_FULL};
-            opt_choice("NX2NAVI_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);
-            opt_group(UI_MENU_GRAPHICS);
-            static const UiTextId wide[] = {UI_MENU_GAME_ASPECT_16_9, UI_MENU_GAME_ASPECT_WINDOW, UI_MENU_GAME_ASPECT_21_9,
-                                            UI_MENU_GAME_ASPECT_32_9};
-            opt_choice("NX2NAVI_GAME_ASPECT", UI_MENU_GAME_ASPECT, wide, 4, UI_MENU_GAME_ASPECT_DESC);
-            opt_slider("NX2NAVI_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
-            opt_end();
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
-    }
-    ImGui::Spacing();
-    float y = ImGui::GetCursorPosY();
-    {
-        float sy = win_p.y + y, fh = ImGui::GetFrameHeight();
-        menu_art_draw(ImGui::GetWindowDrawList(), MENU_ART_GUIDE_BAR, ImVec2(win_p.x + st.WindowPadding.x, sy),
-                      ImVec2(win_p.x + win_s.x - st.WindowPadding.x, sy + fh), IM_COL32(96, 70, 36, 170));
-    }
-    const char *cont = menu_text(UI_MENU_CONTINUE), *restart = menu_text(UI_MENU_RESTART_YES), *quit = menu_text(UI_MENU_QUIT);
-    float bw = fmaxf(fmaxf(ImGui::CalcTextSize(cont).x, ImGui::CalcTextSize(restart).x), ImGui::CalcTextSize(quit).x) + st.FramePadding.x * 4;
-    float gap = st.ItemSpacing.x + skin_cursor_reach(scale);
-    ImGui::SetCursorPos(ImVec2(fmaxf(st.WindowPadding.x, ImGui::GetWindowWidth() - st.WindowPadding.x - bw * 3 - gap * 2), y));
-    skin_widget_button(cont, ImVec2(bw, 0), scale);
-    ImGui::SameLine(0, gap);
-    skin_widget_button(restart, ImVec2(bw, 0), scale);
-    ImGui::SameLine(0, gap);
-    skin_widget_button(quit, ImVec2(bw, 0), scale);
+    static const UiTextId ids[] = {UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND, UI_MENU_TAB_CONTROLS,
+                                   UI_MENU_TAB_MODS, UI_MENU_TAB_RANDOMIZER, UI_MENU_TAB_COOP, UI_MENU_TAB_DEBUG};
+    const char *categories[8];
+    for (int k=0;k<8;k++) categories[k]=menu_text(ids[k]);
+    skin_menu_begin(w,h,scale,title,categories,8,0,"OOT-PC 0.5.0",true,menu_text(UI_MENU_SCREEN_SUBTITLE));
+    opt_reserve_bottom(129*scale);
+    if (first) opt_focus_first();
+    opt_begin("##screen",scale);
+    opt_group(UI_MENU_SCREEN_GROUP);
+    opt_toggle("OOTPC_FULLSCREEN",UI_MENU_FULLSCREEN,UI_MENU_FULLSCREEN_DESC);
+    static const char *const sizes[]={"","1920x1080"};
+    static const char *const size_names[]={"1920 × 1080","2560 × 1440"};
+    opt_choice_list("OOTPC_WINDOW_SIZE",UI_MENU_WINDOW_SIZE,sizes,size_names,2,UI_MENU_WINDOW_SIZE_DESC,0);
+    opt_toggle_value("OOTPC_VK_PRESENT",UI_MENU_PRESENT_VSYNC,UI_MENU_PRESENT_DESC,"mailbox","immediate");
+    static const UiTextId perf[]={UI_MENU_PERF_OFF,UI_MENU_PERF_FPS,UI_MENU_PERF_FULL};
+    opt_choice("OOTPC_PERF_OVERLAY",UI_MENU_PERF_OVERLAY,perf,3,UI_MENU_PERF_OVERLAY_DESC);
+    opt_group(UI_MENU_GRAPHICS);
+    static const UiTextId wide[]={UI_MENU_GAME_ASPECT_16_9,UI_MENU_GAME_ASPECT_WINDOW,UI_MENU_GAME_ASPECT_21_9,UI_MENU_GAME_ASPECT_32_9};
+    opt_choice("OOTPC_GAME_ASPECT",UI_MENU_GAME_ASPECT,wide,4,UI_MENU_GAME_ASPECT_DESC);
+    opt_slider("OOTPC_SHARPNESS",UI_MENU_SHARPNESS,0,100,UI_MENU_SHARPNESS_DESC,5,"%.0f %%");
+    opt_end();
+    skin_menu_finish(scale,menu_text(UI_MENU_CONTINUE),menu_text(UI_MENU_RESTART_YES),menu_text(UI_MENU_QUIT),
+                     menu_text(UI_MENU_SAVED),false,menu_text(UI_MENU_NAV_HINT));
     ImGui::End();
 }
 
@@ -255,7 +197,7 @@ static void scene_overlay(float w, float h, float scale) {
     s.gpu_pct = 56, s.gpu_temp_c = 69, s.gpu_power_w = 107, s.gpu_clock_mhz = 1312, s.vram_used_mb = 5.3f * 1024,
     s.vram_total_mb = 20.0f * 1024;
     s.replay_ms = 0.60f, s.gpu_ms = 1.28f, s.pipe_wait_ms = 0, s.xlate_ms = 0, s.tex_uploads = 0;
-    p.version = "NX2navi 0.5.0, game 1.1.1";
+    p.version = "OOT-PC 0.5.0, game 1.1.1";
     snprintf(p.picture[0], 64, "1920x1080");
     snprintf(p.picture[1], 64, "2560x1440");
     snprintf(p.picture[3], 64, "AMD FSR 3.1 Performance");
@@ -404,8 +346,12 @@ int main(int argc, char **argv) {
     io.DisplaySize = ImVec2((float)w, (float)h);
     io.DeltaTime = 1.0f / 60;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
-    io.Fonts->AddFontFromFileTTF(font, 26.0f * scale);
-    ImFont *title = io.Fonts->AddFontFromFileTTF(font, 31.0f * scale);
+    io.Fonts->AddFontFromFileTTF(font, 30.0f * scale);
+    const char *title_file = font;
+#ifdef _WIN32
+    if (FILE *serif=fopen("C:/Windows/Fonts/georgia.ttf","rb")) { fclose(serif); title_file="C:/Windows/Fonts/georgia.ttf"; }
+#endif
+    ImFont *title = io.Fonts->AddFontFromFileTTF(title_file, 44.0f * scale);
     skin_atlas_add(io.Fonts);
     skin_atlas_fill(io.Fonts);
     uint8_t *atlas;

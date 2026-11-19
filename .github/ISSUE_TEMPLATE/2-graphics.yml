@@ -35,4 +35,4 @@ body:
     id: log
     attributes:
       label: Log
-      description: Drag `logs\nx2navi.log` from the game's folder into this field.
+      description: Drag `logs\ootpc.log` from the game's folder into this field.

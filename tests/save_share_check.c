@@ -88,6 +88,7 @@ int romfs_owns(const char *path) { (void)path; return 0; }
 int mem_probing(void) { return 0; }   // write_file asks before each write: no probe, no lazy heap here
 void mem_kernel_access(uint64_t a, uint64_t n) { (void)a, (void)n; }
 void fs_trace(const char *what, const char *path) { (void)what, (void)path; }
+void coop_game_rom_open(const char *path) { (void)path; }   // co-op watches for the title screen's start: not here
 const char *cfg_get(const char *name) { (void)name; return NULL; }   // every setting at its default
 void save_tree_note_read(const char *path, int slot) { (void)path, (void)slot; }   // no save tree here
 void save_tree_committed(const char *dir, int slot, const char *kind, const char *place) {
@@ -100,9 +101,9 @@ typedef struct { const char *name; GuestFn fn; } TestHostEntry;
 __attribute__((section(".ovr$a"), used)) static const TestHostEntry test_start[1];
 __attribute__((section(".ovr$z"), used)) static const TestHostEntry test_stop[1];
 #else
-extern const TestHostEntry __start_nx2navi_ovr[], __stop_nx2navi_ovr[];
-#define test_start __start_nx2navi_ovr
-#define test_stop __stop_nx2navi_ovr
+extern const TestHostEntry __start_ootpc_ovr[], __stop_ootpc_ovr[];
+#define test_start __start_ootpc_ovr
+#define test_stop __stop_ootpc_ovr
 #endif
 GuestFn hostfn_override(const char *name) {
     const TestHostEntry *p = test_start, *end = test_stop;

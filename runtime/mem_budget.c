@@ -90,7 +90,7 @@ static void budget_main(void *arg) {
 
 static void budget_start(void *arg) {
     (void)arg;
-    int tv = cfg_int("NX2NAVI_MEM_BUDGET_TEST_VRAM_MB"), tr = cfg_int("NX2NAVI_MEM_BUDGET_TEST_RAM_MB");
+    int tv = cfg_int("OOTPC_MEM_BUDGET_TEST_VRAM_MB"), tr = cfg_int("OOTPC_MEM_BUDGET_TEST_RAM_MB");
     B.test_mb[MEM_VRAM] = tv > 0 ? (uint64_t)tv : 0, B.test_mb[MEM_RAM] = tr > 0 ? (uint64_t)tr : 0;
     if (B.test_mb[MEM_VRAM] || B.test_mb[MEM_RAM])
         rt_log("mem_budget: a test pretends a smaller budget (video memory %llu MiB, system memory %llu MiB; 0: as it is): "

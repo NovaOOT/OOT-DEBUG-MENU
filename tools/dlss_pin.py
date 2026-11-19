@@ -47,7 +47,7 @@ def notice_text(linux=False):
     return (f'{p.name} is NVIDIA DLSS {VERSION}, unmodified, as published in NVIDIA\'s DLSS SDK\n'
             f'(https://github.com/NVIDIA/DLSS, tag v{VERSION}). Copyright NVIDIA Corporation.\n'
             '\n'
-            'It is not part of NX2navi and NX2navi\'s licence does not cover it. It is distributed under the\n'
+            'It is not part of OOT-PC and OOT-PC\'s licence does not cover it. It is distributed under the\n'
             f'NVIDIA RTX SDKs License, and its use is subject to that licence: {LICENSE_URL}\n'
             'NVIDIA licenses DLSS only for use on systems with NVIDIA GPUs.\n'
             '\n'

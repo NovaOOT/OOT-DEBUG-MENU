@@ -4,8 +4,8 @@ command line keeps working as before.
 
 It runs AppRun itself with --events, which does what the command line does (the package check, zbic, make_game.py,
 NVIDIA's DLSS, play.sh) and prints make_game.py's "@@" progress lines (tools/make_game.py, --events) plus its own for
-the steps around it. The last dump and folder are remembered in ~/.config/nx2navi/appimage.json, the last run's output
-in ~/.cache/nx2navi/build.log (Details opens it).
+the steps around it. The last dump and folder are remembered in ~/.config/ootpc/appimage.json, the last run's output
+in ~/.cache/ootpc/build.log (Details opens it).
 
 The window is one Tk canvas. The Tk that comes with python-build-standalone has no Xft, so its only font is X11's
 bitmap "fixed", unreadable on a high-DPI screen: text is drawn with Pillow in the desktop's own font (fc-match
@@ -27,9 +27,11 @@ import threading
 import tkinter as tk
 from pathlib import Path
 
-CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'nx2navi' / 'appimage.json'
-CACHE = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'nx2navi'
+CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'ootpc' / 'appimage.json'
+CACHE = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'ootpc'
 APPS = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share') / 'applications'
+# The settings from before the project was renamed to OOT-PC: read when the new file does not exist yet.
+LEGACY_CONFIG = CONFIG.parent.parent / 'nx2navi' / 'appimage.json'
 DEFAULT_OUT = Path.home() / 'Games' / 'Ocarina'
 
 # make_game.py's steps (STEPS, plus check) and AppRun's own around them, in the order they run
@@ -86,7 +88,8 @@ T = TEXT[lang()]
 
 def load_config():
     try:
-        return json.loads(CONFIG.read_text(encoding='utf-8'))
+        return json.loads((CONFIG if CONFIG.exists() or not LEGACY_CONFIG.is_file() else LEGACY_CONFIG)
+                          .read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
 
@@ -212,7 +215,7 @@ class App:
         self.status, self.status_color = T['ready'], 'dim'
         self.confirm = self.close_armed = False
         self.dirty = True
-        root.title(f"NX2navi – {T['title']}")
+        root.title(f"OOT-PC – {T['title']}")
         if icon and icon.is_file():
             try:
                 self.icon_img = tk.PhotoImage(file=str(icon))
@@ -497,12 +500,12 @@ class App:
     def add_shortcut(self):
         out = Path(self.out)
         try:
-            icon = out / 'nx2navi.png'
+            icon = out / 'ootpc.png'
             if self.icon and self.icon.is_file() and not icon.is_file():
                 icon.write_bytes(self.icon.read_bytes())
             APPS.mkdir(parents=True, exist_ok=True)
-            (APPS / 'nx2navi-ocarina.desktop').write_text(
-                '[Desktop Entry]\nType=Application\nName=Ocarina of Time (NX2navi)\n'
+            (APPS / 'ootpc-ocarina.desktop').write_text(
+                '[Desktop Entry]\nType=Application\nName=Ocarina of Time (OOT-PC)\n'
                 f'Exec={exec_quote(out / "play.sh")}\nPath={out}\nIcon={icon}\nTerminal=false\nCategories=Game;\n',
                 encoding='utf-8')
         except OSError:
@@ -524,7 +527,7 @@ def main():
     ap.add_argument('--apprun', type=Path, required=True)
     ap.add_argument('--icon', type=Path)
     a = ap.parse_args()
-    root = tk.Tk(className='nx2navi')
+    root = tk.Tk(className='ootpc')
     App(root, a.apprun, a.icon)
     root.mainloop()
 

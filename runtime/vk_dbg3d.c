@@ -17,7 +17,7 @@
 //     is shown, the mesh is left off and the menu draws the nearest polygons through vk_dbg3d_submit instead.
 //   the menu's triangles and lines (vk_dbg3d_submit): blended, tested against the mesh's depth and the scene's
 //     distances while Only what you can see is on, not written, so they never hide one another.
-// Settings read here: NX2NAVI_DEBUG_VIEW_COLLISION, _HIDE_MESHES, _VIEW_OCCLUDE, _VIEW_OPACITY, _VIEW_STYLE and
+// Settings read here: OOTPC_DEBUG_VIEW_COLLISION, _HIDE_MESHES, _VIEW_OCCLUDE, _VIEW_OPACITY, _VIEW_STYLE and
 // _COLLISION_RANGE.
 #include <math.h>
 #include <stdlib.h>
@@ -448,7 +448,7 @@ void vk_dbg3d_draw(VkCommandBuffer cb, VkImageView cv, VkFormat fmt, uint32_t w,
             mesh_free();
         }
     }
-    int coll = cfg_bool("NX2NAVI_DEBUG_VIEW_COLLISION") && G.mesh;
+    int coll = cfg_bool("OOTPC_DEBUG_VIEW_COLLISION") && G.mesh;
     VkDeviceSize toff = 0, loff = 0;
     int ntri = 0, nline = 0, occlude = 0;
     VkBuffer sb = shapes_buffer(&toff, &loff, &ntri, &nline, &occlude);
@@ -498,10 +498,10 @@ void vk_dbg3d_draw(VkCommandBuffer cb, VkImageView cv, VkFormat fmt, uint32_t w,
                                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &dii};
     rec_push(G.push, cb, VK_PIPELINE_BIND_POINT_GRAPHICS, G.layout, 0, 1, &wr);
     const VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    int hidden = cfg_bool("NX2NAVI_DEBUG_HIDE_MESHES") != 0, occ = cfg_bool("NX2NAVI_DEBUG_VIEW_OCCLUDE") != 0;
-    int opacity = cfg_int("NX2NAVI_DEBUG_VIEW_OPACITY");
+    int hidden = cfg_bool("OOTPC_DEBUG_HIDE_MESHES") != 0, occ = cfg_bool("OOTPC_DEBUG_VIEW_OCCLUDE") != 0;
+    int opacity = cfg_int("OOTPC_DEBUG_VIEW_OPACITY");
     opacity = opacity < 10 ? 10 : opacity > 100 ? 100 : opacity;
-    const char *st = cfg_value("NX2NAVI_DEBUG_VIEW_STYLE");
+    const char *st = cfg_value("OOTPC_DEBUG_VIEW_STYLE");
     int style = !strcmp(st, "solid") ? 2 : !strcmp(st, "both") ? 3 : 1;
 
     if (coll) {
@@ -521,7 +521,7 @@ void vk_dbg3d_draw(VkCommandBuffer cb, VkImageView cv, VkFormat fmt, uint32_t w,
         for (int a = 0; a < 3; a++) m.eye[a] = (pc.eye[a] - o[a]) / k;
         if (dbg_player_pos(m.player)) {
             for (int a = 0; a < 3; a++) m.player[a] = (m.player[a] - o[a]) / k;
-            m.player[3] = (float)cfg_int("NX2NAVI_DEBUG_COLLISION_RANGE") / k;
+            m.player[3] = (float)cfg_int("OOTPC_DEBUG_COLLISION_RANGE") / k;
         }
         if (hidden) m.test[0] = 1, m.test[1] = 0.03f, m.test[2] = 0.002f, m.test[3] = 1.0f;
         else m.test[0] = occ ? 1.0f : 0.0f, m.test[1] = 0.3f, m.test[2] = 0.02f, m.test[3] = (float)opacity / 100.0f;
@@ -563,7 +563,7 @@ void vk_dbg3d_draw(VkCommandBuffer cb, VkImageView cv, VkFormat fmt, uint32_t w,
 }
 
 // ---- the clips' second view (vk_dbg3d_view2)
-// A camera of its own beside the game's (above the player, to one side or in front, as NX2NAVI_DEBUG_CLIP_VIEW2 says)
+// A camera of its own beside the game's (above the player, to one side or in front, as OOTPC_DEBUG_CLIP_VIEW2 says)
 // sees the area's collision near the player as opaque faces coloured as the collision overlay colours them, the player
 // as an orange block in a ring with a line where they face, the game's camera as a white frustum, and the menu's 3D shapes of
 // the frame (vk_dbg3d_submit) over them. What lies between the camera and the player (a cave's ceiling seen from

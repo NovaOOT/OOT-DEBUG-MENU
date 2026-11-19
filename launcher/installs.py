@@ -1,5 +1,5 @@
 """The game versions installed side by side (setting `installs`): each version of Ocarina of Time the player built has
-a folder of its own, so it keeps its own saves (profile/, saves/), its own nx2navi.ini, mods and build. The setting
+a folder of its own, so it keeps its own saves (profile/, saves/), its own OOT-PC.ini, mods and build. The setting
 `game_dir` is the selected one's folder, and everything else in the launcher (Play, Saves, Mods, the Save Tree, a
 rebuild or an update) acts on that folder alone.
 
@@ -93,7 +93,7 @@ def forget(settings, version):
 
 def default_dir(base_dir, version):
     """Where a newly installed version goes: beside the selected game folder, named after it and the version
-    (C:\\Games\\OOT-DEBUG-MENU -> C:\\Games\\OOT-DEBUG-MENU-1.0.0). base_dir: that folder, or the default one."""
+    (C:\\Games\\OOT-PC -> C:\\Games\\OOT-PC-1.0.0). base_dir: that folder, or the default one."""
     base = Path(base_dir)
     return str(base.with_name(f'{base.name}-{version}'))
 

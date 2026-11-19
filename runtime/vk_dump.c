@@ -1,8 +1,8 @@
-// NX2NAVI_DUMP=<frame>: a frame dump for the Vulkan back end, which RenderDoc cannot capture (it hides
+// OOTPC_DUMP=<frame>: a frame dump for the Vulkan back end, which RenderDoc cannot capture (it hides
 // VK_EXT_external_memory_host). Between presents frame-1 and frame, the replay's command buffers also copy, after each
 // render pass, its colour and depth targets and, after each dispatch, the storage images it writes into host buffers;
 // the completion thread turns them into 8-bit PNGs once the submission is done. 3D textures (LUTs, volumes) sampled or
-// written in the frame are copied once each, slices side by side. Files in NX2NAVI_DUMP_DIR (default "dump"):
+// written in the frame are copied once each, slices side by side. Files in OOTPC_DUMP_DIR (default "dump"):
 //   pass_<seq>_t<i>_<w>x<h>_<vkformat>_<name>.png   colour target i (td: depth; img<slot>: storage image; lut<id>: 3D;
 //                                                    a BC target drawn through a block view: its blocks as that view)
 //   ..._tm.png                                       float formats: x/(1+x) of the same image (the plain one clamps);
@@ -12,22 +12,22 @@
 //   images.txt   per image: channel min/max, distinct texel values over the image and over its top quarter
 // Sampled 8-bit 2D textures up to TEX2D_CAP texels are copied once each as pass_<seq>_tex<id>_... at the end of the pass
 // that samples them; texture lines carry the storage address, mirror state, upload count and the image's and slot's
-// swizzle. Copies and texture clears are logged as "copy/clear after pass N". NX2NAVI_DUMP_LOG=<from> also logs the
-// frames from..frame-1 to passes.txt, with PNGs only of targets up to 64K texels. NX2NAVI_DUMP_BUF=<addr>:<size>[:...]
+// swizzle. Copies and texture clears are logged as "copy/clear after pass N". OOTPC_DUMP_LOG=<from> also logs the
+// frames from..frame-1 to passes.txt, with PNGs only of targets up to 64K texels. OOTPC_DUMP_BUF=<addr>:<size>[:...]
 // snapshots one GPU buffer range after every logged pass (buf_<pass>.bin and bufs.txt, see buf_snap).
 // PNGs are opaque (alpha dropped). Integer formats are scaled by the image maximum, depth by its min..max range, SNORM
 // as x/2+1/2, UNORM and sRGB bytes written as stored. Caps: MAX_PASSES passes copied, PNG_CAP bytes of PNGs.
-// NX2NAVI_DUMP_TEX=<id>|<w>x<h>[,...]: those texture slots, or 2D textures of that size, are copied where first sampled,
+// OOTPC_DUMP_TEX=<id>|<w>x<h>[,...]: those texture slots, or 2D textures of that size, are copied where first sampled,
 // whatever their format.
-// NX2NAVI_DUMP_UBO=<n>: each listed pipeline also prints the first n vec4 of its user uniform blocks (c3 and up; 1 means 16,
+// OOTPC_DUMP_UBO=<n>: each listed pipeline also prints the first n vec4 of its user uniform blocks (c3 and up; 1 means 16,
 // the cap is 4096), read from guest memory when the entry is listed. A block the submission rewrites with UpdateUniformBuffer shows its value from
 // before the submission (vk_exec_draw.c upd_note).
-// NX2NAVI_DUMP_SKIP_RUNS=1: a render pass with the same targets as the render pass before it is logged but not copied
+// OOTPC_DUMP_SKIP_RUNS=1: a render pass with the same targets as the render pass before it is logged but not copied
 // (the terrain decals draw one pass each into the G-buffer and would use up both caps).
-// NX2NAVI_DUMP_SHADERS=<hash>,...: copy images only for passes using those shader hashes; metadata covers the whole frame.
-// NX2NAVI_DUMP_RAW=1: also save each copied image's native texel bytes as .bin, for numerical analysis.
-// NX2NAVI_DUMP_KEY=<key> (Windows): each press of that key in the game window dumps the next frame to
-// NX2NAVI_DUMP_DIR/f<frame>. Keys: pause (also 1), scrolllock, insert, home, end, pageup, pagedown, f2-f7, f9, f12 (F1, F8,
+// OOTPC_DUMP_SHADERS=<hash>,...: copy images only for passes using those shader hashes; metadata covers the whole frame.
+// OOTPC_DUMP_RAW=1: also save each copied image's native texel bytes as .bin, for numerical analysis.
+// OOTPC_DUMP_KEY=<key> (Windows): each press of that key in the game window dumps the next frame to
+// OOTPC_DUMP_DIR/f<frame>. Keys: pause (also 1), scrolllock, insert, home, end, pageup, pagedown, f2-f7, f9, f12 (F1, F8,
 // F10 and F11 are the menu, the bug capture, the overlay and fullscreen). The game still gets a key it has bound.
 #include <math.h>
 #include <stdarg.h>
@@ -59,20 +59,20 @@ int vk_exec_raw_9e5(VkImage img, VkFormat f);                               // v
 #define TEX2D_CAP (1u << 20)        // texels of a sampled 2D texture that is dumped
 
 int vk_dump_armed;
-static uint64_t dump_frame, log_from;   // log_from: NX2NAVI_DUMP_LOG, first frame logged to passes.txt without images
+static uint64_t dump_frame, log_from;   // log_from: OOTPC_DUMP_LOG, first frame logged to passes.txt without images
 static char dir[400];
-static char base_dir[400];             // NX2NAVI_DUMP_DIR; with NX2NAVI_DUMP_WHITE each attempt goes to base_dir/f<frame>
-static uint64_t white_last;            // NX2NAVI_DUMP_WHITE: the frame dumped last (0: none), checked 3 presents on
+static char base_dir[400];             // OOTPC_DUMP_DIR; with OOTPC_DUMP_WHITE each attempt goes to base_dir/f<frame>
+static uint64_t white_last;            // OOTPC_DUMP_WHITE: the frame dumped last (0: none), checked 3 presents on
 static int white_tries, white_caught;
-static uint64_t dump_after;             // NX2NAVI_DUMP_AFTER
-static int dump_key;                    // NX2NAVI_DUMP_KEY: the Windows virtual-key code, 0 off
+static uint64_t dump_after;             // OOTPC_DUMP_AFTER
+static int dump_key;                    // OOTPC_DUMP_KEY: the Windows virtual-key code, 0 off
 static const char *dump_key_name;
 static FILE *passes_f, *images_f;
 static int seq, finished, copied;      // copied: passes and dispatches of the dump frame whose images were copied
-static int skip_runs, dump_ubo;        // NX2NAVI_DUMP_SKIP_RUNS, NX2NAVI_DUMP_UBO (vec4 per block, 0 for none)
+static int skip_runs, dump_ubo;        // OOTPC_DUMP_SKIP_RUNS, OOTPC_DUMP_UBO (vec4 per block, 0 for none)
 static int dump_raw, ncopy_shaders;
 static uint64_t copy_shaders[16];
-static uint32_t want_tex[16][2];       // NX2NAVI_DUMP_TEX: slot id and 0, or width and height
+static uint32_t want_tex[16][2];       // OOTPC_DUMP_TEX: slot id and 0, or width and height
 static int nwant_tex;
 static uint64_t last_targets;          // targets_sig of the last render pass; 0 after a dispatch
 static const char *pass_skip;          // why the current pass copies nothing, or NULL
@@ -374,7 +374,7 @@ static const char *copy_out(VkExec *ex, VkImage image, VkFormat vf, VkImageAspec
     return copy_region(ex, image, vf, aspect, level, layer, 0, (VkExtent3D){w, h, d}, w, h, d, name);
 }
 
-// ---- NX2NAVI_DUMP_BUF=<addr>:<size>[:<off>:<stride>:<w>:<h>]: after every pass and dispatch that is logged, the GPU
+// ---- OOTPC_DUMP_BUF=<addr>:<size>[:<off>:<stride>:<w>:<h>]: after every pass and dispatch that is logged, the GPU
 // buffer range is copied to a host buffer; when it differs from the previous copy it goes to buf_<pass>.bin, and
 // bufs.txt gets the changed bytes' extent plus, with the grid arguments, one map per dword of the w x h records of
 // `stride` bytes at `off` (each record a letter: its value's index in the table under the map).
@@ -658,7 +658,7 @@ static void describe_bindings(Str *b, const VkExec *ex, const VkPipeInfo *info) 
                        copy ? "(copy)" : "");
                 }
             sp(b, "\n");
-            // NX2NAVI_DUMP_UBO: also the small storage buffers' guest bytes (GPU results as of the last write-back); per-view
+            // OOTPC_DUMP_UBO: also the small storage buffers' guest bytes (GPU results as of the last write-back); per-view
             // constants (exposure and such) live in such buffers.
             for (int k = 0; dump_ubo && k < 16; k++) {
                 const p_bind_buf *u = &ex->ssbo[st][k];
@@ -984,7 +984,7 @@ static void open_files(void);
 void vk_dump_pass_end(VkExec *ex) {
     plat_mutex_lock(&rec_lock);
     if (dump_after && dump_frame == UINT64_MAX && ex->depth.tex && (uint64_t)(uintptr_t)ex->depth.tex->mem == dump_after) {
-        if (!passes_f) open_files();   // NX2NAVI_DUMP_WHITE and NX2NAVI_DUMP_MOVIE open them for each of their dumps
+        if (!passes_f) open_files();   // OOTPC_DUMP_WHITE and OOTPC_DUMP_MOVIE open them for each of their dumps
         dump_frame = frame_now();   // this pass and the rest of its frame
         rt_log("vk_dump: a pass drew into %#llx in frame %llu: it and the rest of the frame go to %s",
                (unsigned long long)dump_after, (unsigned long long)dump_frame, dir);
@@ -1030,7 +1030,7 @@ void vk_dump_dispatch(VkExec *ex, const GfxShader *cs, VkPipeline p, const VkPip
             d->z, (unsigned long long)shader_hash(cs), (unsigned long long)(ex->prog ? ex->prog->serial : 0),
             (unsigned long long)d->caller, (unsigned long long)ex->fence, b.s ? b.s : "");
     free(b.s);
-    if (dump_ubo) {   // NX2NAVI_DUMP_UBO: the NVN2 push constants as 64-bit words
+    if (dump_ubo) {   // OOTPC_DUMP_UBO: the NVN2 push constants as 64-bit words
         fprintf(passes_f, "    push:");
         for (int q = 0; q < 0x80; q += 8) {
             uint64_t v;
@@ -1127,18 +1127,18 @@ out:
 
 static void make_dirs(char *path) { plat_file_mkdir_p(path); }
 
-// NX2NAVI_DUMP_WHITE=1 (diagnosis): no frame is named; from frame 1800 each present looks at the thumbnail of the frame
+// OOTPC_DUMP_WHITE=1 (diagnosis): no frame is named; from frame 1800 each present looks at the thumbnail of the frame
 // three presents back (gfx_present.c vk_thumbs_*), and the first one whose picture left of the overlay and above the
 // dialogue box is blank white makes the dump take the next frame (white flashes come in runs of several frames).
 int vk_dump_white;   // vk_backend.c asks for a thumbnail of every present while it is set
 #define dump_white vk_dump_white
 
-// NX2NAVI_DUMP_MOVIE=<k>:<frame>[,<frame>...] (diagnosis): the k-th movie of the run (counted from 1 as each video
+// OOTPC_DUMP_MOVIE=<k>:<frame>[,<frame>...] (diagnosis): the k-th movie of the run (counted from 1 as each video
 // decoder comes up, ov_movie2.c ov_initialize) asks for a dump of the next present once it has shown each listed
 // frame, so a movie's picture can be followed through the game's passes at chosen moments. Each dump has its own
 // folder, base_dir/f<present>.
 static int movie_k, movie_n, movie_done;
-static int key_mode;   // NX2NAVI_DUMP=key (vk_dump_init)
+static int key_mode;   // OOTPC_DUMP=key (vk_dump_init)
 static uint64_t movie_at[8];
 static int movie_req;   // set by the movie's thread, taken by vk_dump_present
 
@@ -1149,14 +1149,14 @@ void vk_dump_movie_frame(int k, uint64_t shown) {
     rt_log("vk_dump: movie %d shows frame %llu: dumping the next present", k, (unsigned long long)shown);
 }
 
-// NX2NAVI_DUMP_FILE=<path> (diagnosis): every 8th present looks for that file (a relative path starts in the game
+// OOTPC_DUMP_FILE=<path> (diagnosis): every 8th present looks for that file (a relative path starts in the game
 // folder); when it is there, the present deletes it and asks for a dump of the next present, so a shell or a test
 // script takes dumps at the moments it chooses, as many as it likes. A number in the file (up to 8) dumps that many
 // consecutive frames, for what a frame hands to the next. Each dump has its own folder, base_dir/f<present>.
 static char dump_file[400];
 static int file_more;   // consecutive frames still to dump after the one named
 
-// passes.txt and images.txt in dir (a new folder per NX2NAVI_DUMP_WHITE attempt)
+// passes.txt and images.txt in dir (a new folder per OOTPC_DUMP_WHITE attempt)
 static void open_files(void) {
     make_dirs(dir);
     char path[600];
@@ -1165,7 +1165,7 @@ static void open_files(void) {
     snprintf(path, sizeof path, "%s/images.txt", dir);
     images_f = fopen(path, "w");
     if (!passes_f || !images_f) rt_fatal("vk_dump: cannot write to %s", dir);
-    // NX2NAVI_DUMP_BUF with dumps named as the run goes (key, white, movie): the log goes with each dump's folder
+    // OOTPC_DUMP_BUF with dumps named as the run goes (key, white, movie): the log goes with each dump's folder
     if (bd_size && !bufs_f) {
         snprintf(path, sizeof path, "%s/bufs.txt", dir);
         bufs_f = fopen(path, "w");
@@ -1173,35 +1173,35 @@ static void open_files(void) {
 }
 
 void vk_dump_init(void) {
-    const char *e = cfg_get("NX2NAVI_DUMP");
+    const char *e = cfg_get("OOTPC_DUMP");
     dump_white = rt_knob("DUMP_WHITE", "0");
-    // NX2NAVI_DUMP_AFTER=<address>: the first render pass whose depth target lives at that address and the rest of its frame
+    // OOTPC_DUMP_AFTER=<address>: the first render pass whose depth target lives at that address and the rest of its frame
     // (a target drawn once, at an area load)
-    const char *da = cfg_get("NX2NAVI_DUMP_AFTER");
+    const char *da = cfg_get("OOTPC_DUMP_AFTER");
     dump_after = da && *da ? strtoull(da, NULL, 0) : 0;
-    const char *dm = cfg_get("NX2NAVI_DUMP_MOVIE");
+    const char *dm = cfg_get("OOTPC_DUMP_MOVIE");
     if (dm && *dm) {
         char *q;
         movie_k = (int)strtol(dm, &q, 10);
         while ((*q == ':' || *q == ',') && movie_n < 8) movie_at[movie_n++] = strtoull(q + 1, &q, 10);
         if (movie_k < 1 || !movie_n) movie_k = 0;
     }
-    // NX2NAVI_DUMP=key: no frame is named; each press of Insert (input_dump_key: unbound in the game's layout, and read on
-    // Windows even while another window has the focus) dumps the frame after it into NX2NAVI_DUMP_DIR/f<frame>, as often
+    // OOTPC_DUMP=key: no frame is named; each press of Insert (input_dump_key: unbound in the game's layout, and read on
+    // Windows even while another window has the focus) dumps the frame after it into OOTPC_DUMP_DIR/f<frame>, as often
     // as it is pressed: for a glitch that comes and goes, caught by the player while it is on screen.
     key_mode = e && !strcmp(e, "key");
-    const char *df = cfg_get("NX2NAVI_DUMP_FILE");
+    const char *df = cfg_get("OOTPC_DUMP_FILE");
     if (df && *df) snprintf(dump_file, sizeof dump_file, "%s", df);
-    // NX2NAVI_DUMP_KEY: a key of ours, also outside NX2NAVI_DUMP=key
+    // OOTPC_DUMP_KEY: a key of ours, also outside OOTPC_DUMP=key
     {
         static const struct { const char *n; int vk; } keys[] = {
             {"1", 0x13}, {"pause", 0x13}, {"scrolllock", 0x91}, {"insert", 0x2d}, {"home", 0x24}, {"end", 0x23},
             {"pageup", 0x21}, {"pagedown", 0x22}, {"f2", 0x71}, {"f3", 0x72}, {"f4", 0x73}, {"f5", 0x74}, {"f6", 0x75},
             {"f7", 0x76}, {"f9", 0x78}, {"f12", 0x7b}};
-        const char *k = cfg_get("NX2NAVI_DUMP_KEY");
+        const char *k = cfg_get("OOTPC_DUMP_KEY");
         for (size_t i = 0; k && *k && i < sizeof keys / sizeof *keys; i++)
             if (!strcasecmp(k, keys[i].n)) dump_key = keys[i].vk, dump_key_name = i ? keys[i].n : "pause";
-        if (k && *k && strcmp(k, "0") && !dump_key) rt_log("vk_dump: NX2NAVI_DUMP_KEY=%s: not a key this knows (pause, scrolllock, insert, home, end, pageup, pagedown, f2-f7, f9, f12)", k);
+        if (k && *k && strcmp(k, "0") && !dump_key) rt_log("vk_dump: OOTPC_DUMP_KEY=%s: not a key this knows (pause, scrolllock, insert, home, end, pageup, pagedown, f2-f7, f9, f12)", k);
     }
     if (dump_white || dump_after) {
         dump_frame = UINT64_MAX;
@@ -1209,18 +1209,18 @@ void vk_dump_init(void) {
     } else if (movie_k || key_mode || dump_file[0] || dump_key) {
         dump_frame = UINT64_MAX;
     } else if (!e || !*e || !(dump_frame = strtoull(e, NULL, 10))) return;
-    const char *lf = cfg_get("NX2NAVI_DUMP_LOG");
+    const char *lf = cfg_get("OOTPC_DUMP_LOG");
     if (lf && *lf) log_from = strtoull(lf, NULL, 10);
-    const char *sr = cfg_get("NX2NAVI_DUMP_SKIP_RUNS");
+    const char *sr = cfg_get("OOTPC_DUMP_SKIP_RUNS");
     skip_runs = sr && *sr && *sr != '0';
-    const char *du = cfg_get("NX2NAVI_DUMP_UBO");
+    const char *du = cfg_get("OOTPC_DUMP_UBO");
     dump_ubo = du && *du ? atoi(du) : 0;
     if (dump_ubo == 1) dump_ubo = 16;
     if (dump_ubo > 4096) dump_ubo = 4096;
     if (dump_ubo < 0) dump_ubo = 0;
-    const char *raw = cfg_get("NX2NAVI_DUMP_RAW");
+    const char *raw = cfg_get("OOTPC_DUMP_RAW");
     dump_raw = raw && *raw && *raw != '0';
-    const char *shaders = cfg_get("NX2NAVI_DUMP_SHADERS");
+    const char *shaders = cfg_get("OOTPC_DUMP_SHADERS");
     for (const char *p = shaders; p && *p && ncopy_shaders < 16;) {
         char *end;
         uint64_t h = strtoull(p, &end, 16);
@@ -1228,18 +1228,18 @@ void vk_dump_init(void) {
         copy_shaders[ncopy_shaders++] = h;
         p = *end ? end + 1 : end;
     }
-    const char *wt = cfg_get("NX2NAVI_DUMP_TEX");
+    const char *wt = cfg_get("OOTPC_DUMP_TEX");
     for (char *q = (char *)wt; q && *q && nwant_tex < 16; q += *q == ',') {
         uint32_t *w = want_tex[nwant_tex++];
         w[0] = (uint32_t)strtoul(q, &q, 10);
         w[1] = *q == 'x' ? (uint32_t)strtoul(q + 1, &q, 10) : 0;
     }
-    const char *d = cfg_get("NX2NAVI_DUMP_DIR");
+    const char *d = cfg_get("OOTPC_DUMP_DIR");
     snprintf(base_dir, sizeof base_dir, "%s", d && *d ? d : "dump");
     snprintf(dir, sizeof dir, "%s", base_dir);
     char path[600];
     if (!dump_white && !movie_k && !key_mode && !dump_file[0]) open_files();
-    const char *bf = cfg_get("NX2NAVI_DUMP_BUF");
+    const char *bf = cfg_get("OOTPC_DUMP_BUF");
     if (bf && *bf) {
         char *q;
         bd_addr = strtoull(bf, &q, 0);
@@ -1258,7 +1258,7 @@ void vk_dump_init(void) {
     else rt_log("vk_dump: frame %llu goes to %s", (unsigned long long)dump_frame, dir);
 }
 
-// NX2NAVI_DUMP_KEY: its key went down since the last present (the game window has the focus).
+// OOTPC_DUMP_KEY: its key went down since the last present (the game window has the focus).
 static int key_pressed(void) {
 #ifdef _WIN32
     static int was;
@@ -1322,7 +1322,7 @@ void vk_dump_present(uint64_t frame) {
         open_frame(frame + 1);
         rt_log("vk_dump: frame %llu goes to %s", (unsigned long long)dump_frame, dir);
     }
-    if (key_mode && dump_frame == UINT64_MAX) {   // NX2NAVI_DUMP=key: a new press of Insert names the next frame
+    if (key_mode && dump_frame == UINT64_MAX) {   // OOTPC_DUMP=key: a new press of Insert names the next frame
         static int held;
         int now = input_dump_key();
         if (now && !held) {
@@ -1341,7 +1341,7 @@ void vk_dump_present(uint64_t frame) {
         open_frame(frame + 1);
         rt_log("vk_dump: %s found: frame %llu goes to %s", dump_file, (unsigned long long)dump_frame, dir);
     }
-    if (dump_key && dump_frame == UINT64_MAX && key_pressed()) {   // NX2NAVI_DUMP_KEY: our key names the next frame
+    if (dump_key && dump_frame == UINT64_MAX && key_pressed()) {   // OOTPC_DUMP_KEY: our key names the next frame
         file_more = 0;
         snprintf(dir, sizeof dir, "%s/f%llu", base_dir, (unsigned long long)(frame + 1));
         open_files();   // before the frame is named: its passes write to them
@@ -1373,7 +1373,7 @@ void vk_dump_present(uint64_t frame) {
         finished = 0;
         plat_mutex_unlock(&rec_lock);
     }
-    if (file_more > 0) {   // NX2NAVI_DUMP_FILE with a count: the next frame too
+    if (file_more > 0) {   // OOTPC_DUMP_FILE with a count: the next frame too
         file_more--;
         open_frame(frame + 1);
         rt_log("vk_dump: frame %llu goes to %s", (unsigned long long)dump_frame, dir);

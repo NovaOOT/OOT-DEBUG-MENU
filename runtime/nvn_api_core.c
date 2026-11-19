@@ -53,7 +53,7 @@ void nvn_guest_written(uint64_t addr, uint64_t size) {
     if (size) gfx_backend()->guest_written(addr, size);
 }
 
-// memcpy of pool storage the GPU rendered into must copy what the GPU wrote: NX2navi moves its generated grass maps
+// memcpy of pool storage the GPU rendered into must copy what the GPU wrote: OOT-PC moves its generated grass maps
 // between pools with memcpy. Copies below 1 KiB skip the check; the copy itself is memmove, as overlapping
 // arguments are undefined for memcpy anyway.
 static void ov_memcpy(Cpu *c) {
@@ -168,7 +168,7 @@ static int pool_gpu_visible(const pool_t *o) { return !(o->flags & NVN_MEMORY_PO
 
 // ---------- Device
 static const int devinfo[] = {   // Tegra X1 values (nnheaders nvn_DeviceConstantsNX.h, measured on SMO)
-    [0x00] = 55, [0x01] = 15,    // ABI: replaced by the title's rt_nvn_api_version (NX2NAVI 55.15, Switch 2 231.40)
+    [0x00] = 55, [0x01] = 15,    // ABI: replaced by the title's rt_nvn_api_version (OOTPC 55.15, Switch 2 231.40)
     [0x02] = 14, [0x03] = 65536, [0x04] = 256, [0x05] = 8, [0x06] = 16, [0x07] = 4, [0x08] = 16, [0x09] = 32,
     [0x0A] = 16, [0x0B] = 4, [0x0C] = 4, [0x0D] = 4, [0x0E] = 16, [0x0F] = 32, [0x10] = 32, [0x11] = 256, [0x12] = 256,
     [0x13] = 4, [0x14] = 8, [0x15] = 512, [0x16] = 256, [0x17] = 2, [0x18] = 256, [0x19] = 4096, [0x1A] = 131072,
@@ -301,7 +301,7 @@ NVN_API(nvnMemoryPoolBuilderSetStorage) {
 NVN_API(nvnMemoryPoolBuilderSetFlags) { ((pool_builder_t *)arg_p(c, 0))->flags = (uint32_t)arg_x(c, 1); }
 // NVNboolean nvnMemoryPoolInitialize(NVNmemoryPool *p, const NVNmemoryPoolBuilder *b)
 // Pool setup imports, mirrors and maps memory in the back end (the driver, VirtualAlloc): up to 20 ms on the game's
-// loader threads, which held a virtual core through it while job workers waited (NX2NAVI_CORE_DIAG). The thread gives
+// loader threads, which held a virtual core through it while job workers waited (OOTPC_CORE_DIAG). The thread gives
 // the core up, as for any blocking host call.
 static void pool_finalize(pool_t *o);
 
@@ -585,16 +585,54 @@ NVN_API(nvnQueueWaitSync) {
 }
 // NVNsyncWaitResult nvnSyncWait(const NVNsync *s, uint64_t timeout_ns): a sync never fenced reports a timeout at once;
 // a fenced one is released only after the back end completed that fence value
+// OOTPC_TRACE=perf: the game's SyncWaits by caller and thread, every 10 s: how many, how many had to wait, their time,
+// and how many submissions the waited fence was behind the newest at the call (0: the game waits for everything it
+// submitted, which leaves the GPU idle while it goes on).
+#define SW_KEYS 16
+static struct { uint64_t lr; uint32_t tid; uint64_t n, waited, ns, behind; } sw_tab[SW_KEYS];
+static PlatMutex sw_lock = PLAT_MUTEX_INIT;
+static uint64_t sw_t0;
+static void sync_wait_note(uint64_t lr, uint64_t fence, uint64_t ns, int waited) {
+    uint64_t now = plat_now_ns(), newest = __atomic_load_n(&last_fence, __ATOMIC_RELAXED);
+    uint32_t tid = plat_thread_id();
+    plat_mutex_lock(&sw_lock);
+    if (!sw_t0) sw_t0 = now;
+    int i = 0;
+    while (i < SW_KEYS && sw_tab[i].n && !(sw_tab[i].lr == lr && sw_tab[i].tid == tid)) i++;
+    if (i < SW_KEYS) {
+        sw_tab[i].lr = lr, sw_tab[i].tid = tid, sw_tab[i].n++;
+        if (waited) sw_tab[i].waited++, sw_tab[i].ns += ns, sw_tab[i].behind += newest > fence ? newest - fence : 0;
+    }
+    if (now - sw_t0 >= 10000000000ull) {
+        double secs = (double)(now - sw_t0) / 1e9;
+        for (int k = 0; k < SW_KEYS && sw_tab[k].n; k++)
+            rt_log("nvn: SyncWait from %#llx on thread %u: %.1f calls/s, %.1f/s waited, %.2f ms/s waiting, the fence %.2f "
+                   "submissions behind the newest on average",
+                   (unsigned long long)sw_tab[k].lr, sw_tab[k].tid, sw_tab[k].n / secs, sw_tab[k].waited / secs,
+                   sw_tab[k].ns / 1e6 / secs, sw_tab[k].waited ? (double)sw_tab[k].behind / (double)sw_tab[k].waited : 0.0);
+        memset(sw_tab, 0, sizeof sw_tab);
+        sw_t0 = now;
+    }
+    plat_mutex_unlock(&sw_lock);
+}
+
 NVN_API(nvnSyncWait) {
     const sync_t *s = arg_p(c, 0);
     uint64_t timeout = arg_x(c, 1);
     if (!s->fenced) { ret_x(c, NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED); return; }
     const GfxBackend *b = gfx_backend();
-    if (b->fence_done() >= s->fence) { b->cpu_synced(s->fence); ret_x(c, NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED); return; }
+    if (b->fence_done() >= s->fence) {
+        if (rt_trace & RT_TRACE_PERF) sync_wait_note(c->x[30], s->fence, 0, 0);
+        b->cpu_synced(s->fence);
+        ret_x(c, NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED);
+        return;
+    }
     int ok;
     {
         NVN_BLOCKING();
+        uint64_t t0 = rt_trace & RT_TRACE_PERF ? plat_now_ns() : 0;
         ok = b->game_wait(s->fence, timeout);
+        if (t0) sync_wait_note(c->x[30], s->fence, plat_now_ns() - t0, 1);
     }
     if (ok) b->cpu_synced(s->fence);
     ret_x(c, ok ? NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED : NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED);
@@ -687,7 +725,7 @@ NVN_API(nvnQueueFinish) {
     }
     gfx_backend()->cpu_synced(gfx_backend()->fence_done());
 }
-// ---------- Submit latency guard for NX2navi 1.2.1's per-object uniform double buffer
+// ---------- Submit latency guard for OOT-PC 1.2.1's per-object uniform double buffer
 // NVN starts the GPU when QueueSubmitCommands returns, within microseconds; here the replay into Vulkan takes 15-30 ms
 // first, and the GPU reads uniform memory only after it. The game's producer f_70008c6460 (thread 0x103e, p56)
 // rewrites the half of its per-object uniform blocks that was front until the last flip, 14-23 ms after the submit
@@ -695,17 +733,17 @@ NVN_API(nvnQueueFinish) {
 // the replay, and that frame draws other objects' matrices (phantom rocks, flat far field).
 // The guard makes the producer wait, at its commit point, until the newest submit has been replayed and completed.
 // lod_entered / lod_issued count submits that entered QueueSubmitCommands / reached the back end; lod_fence holds
-// the fence of the last LOD_RING. NX2NAVI_LOD_GUARD=0 turns the wait off.
+// the fence of the last LOD_RING. OOTPC_LOD_GUARD=0 turns the wait off.
 #define LOD_RING 64
 _Thread_local uintptr_t gfx_submit_queue;
-int nvn_submits_in_frame;   // nvnQueueSubmitCommands calls since the last nvnQueuePresentTexture (NX2NAVI_SUBMIT_FINISH)
+int nvn_submits_in_frame;   // nvnQueueSubmitCommands calls since the last nvnQueuePresentTexture (OOTPC_SUBMIT_FINISH)
 static uint64_t lod_entered, lod_issued, lod_fence[LOD_RING];
 
 // void nvnQueueSubmitCommands(NVNqueue *q, int n, const NVNcommandHandle *handles): replayed on this thread with its
-// core given up (section 2.2), or queued for the replay thread (NX2NAVI_REPLAY_ASYNC, vk_backend.c); the newest fence
+// core given up (section 2.2), or queued for the replay thread (OOTPC_REPLAY_ASYNC, vk_backend.c); the newest fence
 // value is what QueueFenceSync records. With the queue the fence covers replay and GPU, so the LOD guard below waits
 // for both.
-// NX2NAVI_TRACE=perf (nvn_api.h): which threads submit and present, and whether two of these calls run at once. The
+// OOTPC_TRACE=perf (nvn_api.h): which threads submit and present, and whether two of these calls run at once. The
 // synchronous replay's front end (vk_backend.c submit_sync, vk_be_present's held present, nvn_submits_in_frame) takes
 // no lock of its own, so it relies on one thread at a time; this tells a run whether that holds.
 void nvn_call_note(int present, uintptr_t q, int enter) {
@@ -778,18 +816,18 @@ NVN_API(nvnQueueSubmitCommands) {
     // part of a frame drew with the next frame's data, distant characters wrote NaN and bloom spread it (white dialogue
     // frames, 3% of them in 100 s of dialogue; none with this wait, at the same 58-59 fps: the GPU is idle at that
     // point). Copies of the data at submit made it worse, a mix of two frames' versions.
-    // NX2NAVI_SUBMIT_FINISH=<mask>: bit i waits after the i-th submission of a frame (default 0x1); a plain 1 waits
+    // OOTPC_SUBMIT_FINISH=<mask>: bit i waits after the i-th submission of a frame (default 0x1); a plain 1 waits
     // after every submission, 0 never.
     // Since the staged mirror uploads (vk_memory.c) the copies of guest memory a submission reads are taken while the
     // replay records it, and the wait ends once the replay has submitted it (vk_sync_recorded_wait); the GPU's wait
     // below remains for a submission whose GPU reads guest memory itself.
     // The wait (exec_wait, vk_sync.c vk_sync_exec_wait) ends when the GPU has run the submission's passes and the
     // results the game reads once it goes on are in its memory, the last frame's occlusion counts among them; the
-    // write-backs and the completion thread's other side effects are not waited for. NX2NAVI_WB_SPLIT=0 makes it
+    // write-backs and the completion thread's other side effects are not waited for. OOTPC_WB_SPLIT=0 makes it
     // the fence's wait, which covers those too (vk_sync.c "the executed timeline" has what each leaves out and costs).
     static long long finish_mask = -2;
     if (finish_mask == -2) {
-        const char *e = cfg_get("NX2NAVI_SUBMIT_FINISH");
+        const char *e = cfg_get("OOTPC_SUBMIT_FINISH");
         finish_mask = e && *e ? strtoll(e, NULL, 0) : 1;
         if (e && *e && finish_mask == 1 && !(e[0] == '0' && (e[1] == 'x' || e[1] == 'X'))) finish_mask = -1;   // "1": all
     }
@@ -812,7 +850,7 @@ static void obs_release_read(Cpu *c) {
     if (rt_game_version != 121 || lr != 0x70008c70c8ull) return;   // the address is 1.2.1's: no other build has this producer there
     static int on = -1;
     if (on < 0) {
-        on = cfg_bool("NX2NAVI_LOD_GUARD");
+        on = cfg_bool("OOTPC_LOD_GUARD");
     }
     if (!on || *(volatile uint8_t *)(uintptr_t)(obj + 0x528) != *(volatile uint8_t *)(uintptr_t)(obj + 0x529)) return;
     uint64_t e = __atomic_load_n(&lod_entered, __ATOMIC_SEQ_CST);

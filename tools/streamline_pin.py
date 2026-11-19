@@ -1,5 +1,5 @@
 """NVIDIA Streamline's runtime for DLSS Frame Generation (runtime/vk_dlssg.c): tools/make_launcher.py and
-tools/make_kit.py put it in the release's or the kit's bin/dlssg/ beside nx2navi_dlssg.dll (tools/build_dlssg.py), and
+tools/make_kit.py put it in the release's or the kit's bin/dlssg/ beside ootpc_dlssg.dll (tools/build_dlssg.py), and
 tools/make_game.py place_dlssg copies the whole set beside the game.
 
 The files are NVIDIA's own builds from the Streamline SDK release at a pinned version, unmodified: the SDK archive is
@@ -18,7 +18,7 @@ URL = f'https://github.com/NVIDIA-RTX/Streamline/releases/download/v{VERSION}/st
 SIZE = 276016170
 SHA256 = '32041e51db0cab709a271b72a352281b690c2abbd669a827809401a5dd23956b'
 
-DLL = 'nx2navi_dlssg.dll'   # this repository's runtime/dlssg/, built by tools/build_dlssg.py
+DLL = 'ootpc_dlssg.dll'   # this repository's runtime/dlssg/, built by tools/build_dlssg.py
 # The set tools/make_game.py DLSSG_FILES names: without all of it the game leaves DLSS Frame Generation off.
 FILES = (DLL, 'sl.interposer.dll', 'sl.common.dll', 'sl.dlss_g.dll', 'sl.pcl.dll', 'sl.reflex.dll', 'nvngx_dlssg.dll')
 NOTICE = 'dlssg-NOTICE.txt'
@@ -96,7 +96,7 @@ def extract(archive, dest):
 
 
 def place(dll, sdk, dest):
-    """DLSS Frame Generation into dest (a release's or the kit's bin/dlssg/): nx2navi_dlssg.dll, Streamline's
+    """DLSS Frame Generation into dest (a release's or the kit's bin/dlssg/): ootpc_dlssg.dll, Streamline's
     interposer and the plugins it loads, and NGX's nvngx_dlssg.dll from the SDK folder resolve returned, the two
     licence texts, and a notice naming each file's sha256."""
     dll, sdk, dest = Path(dll), Path(sdk), Path(dest)
@@ -104,12 +104,12 @@ def place(dll, sdk, dest):
         raise SystemExit(f'{dll} does not exist')
     srcs = {n: (dll if n == DLL else sdk / 'bin' / 'x64' / n) for n in FILES}
     dest.mkdir(parents=True, exist_ok=True)
-    lines = ['DLSS Frame Generation for NX2navi. nx2navi_dlssg.dll is NX2navi\'s own code (runtime/dlssg/), built',
+    lines = ['DLSS Frame Generation for OOT-PC. ootpc_dlssg.dll is OOT-PC\'s own code (runtime/dlssg/), built',
              'with the Streamline SDK\'s headers. The other files are NVIDIA\'s own builds, unmodified, from the',
              f'Streamline {VERSION} SDK (https://github.com/NVIDIA-RTX/Streamline): the sl.*.dll files under its',
              'MIT licence (streamline-LICENSE.txt), nvngx_dlssg.dll under the NVIDIA RTX SDKs License',
              '(nvidia-rtx-sdks-LICENSE.txt), which licenses it only for use on systems with NVIDIA GPUs. They are not',
-             'part of NX2navi and NX2navi\'s licence does not cover them.', '']
+             'part of OOT-PC and OOT-PC\'s licence does not cover them.', '']
     for n, p in srcs.items():
         shutil.copy2(p, dest / n)
         lines.append(f'{n} sha256 {sha256_file(p)}')

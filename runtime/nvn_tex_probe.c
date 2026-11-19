@@ -1,4 +1,4 @@
-// nx2navi.exe --probe-nvn-tex: texture storage size, block height, alignment and mip offsets of nvn_tex.c.
+// ocarina.exe --probe-nvn-tex: texture storage size, block height, alignment and mip offsets of nvn_tex.c.
 // Contains code Copyright (c) 2026 jhaizhou (MIT; see THIRD_PARTY_NOTICES.md).
 // The 40 size and block-height goldens are original-SDK CPU queries for uncompressed and BC3-sRGB boundary cases; no game bytes.
 // The old rounded-up heuristic mismatches 16 of them, including the 160x160 case. Block-linear address checks

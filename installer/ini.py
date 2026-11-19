@@ -1,6 +1,6 @@
-"""nx2navi.ini: set the game language and keep everything else (keys and syntax as runtime/cfg.c reads them).
+"""OOT-PC.ini: set the game language and keep everything else (keys and syntax as runtime/cfg.c reads them).
 
-A new file starts from nx2navi.ini.example, whose lines are all commented defaults. The language goes into `lang`
+A new file starts from OOT-PC.ini.example, whose lines are all commented defaults. The language goes into `lang`
 (a Switch language code, runtime/ov_system.c): an active `lang = ...` line is rewritten in place, else the commented
 `# lang = ...` line of the example is activated, else the line is added to [language] (created at the end if
 missing). Other lines, comments and line order stay as they are, byte for byte: the file's byte order mark, its line
@@ -10,7 +10,7 @@ import os
 import re
 from pathlib import Path
 
-# runtime/ov_system.c: the codes NX2NAVI_LANG offers. Each language appears once, under the code the game accepts.
+# runtime/ov_system.c: the codes OOTPC_LANG offers. Each language appears once, under the code the game accepts.
 LANGUAGES = ('ja', 'en-US', 'en-GB', 'fr', 'fr-CA', 'de', 'it', 'es', 'es-419', 'nl', 'pt', 'pt-BR', 'ru', 'ko',
              'zh-Hans', 'zh-Hant')
 # Older installer builds wrote these two codes; they are read as the canonical ones and rewritten on the next install.
@@ -19,8 +19,8 @@ ALIASES = {'zh-CN': 'zh-Hans', 'zh-TW': 'zh-Hant'}
 # firmware folder when the player gives one.
 NEED_SHARED_FONTS = ('ko', 'zh-Hans', 'zh-Hant')
 
-ACTIVE = re.compile(r'^(\s*)(?:nx2navi_)?lang(\s*=\s*)(.*?)(\s*)$', re.IGNORECASE)
-COMMENTED = re.compile(r'^\s*[#;]\s*(?:nx2navi_)?lang\s*=.*$', re.IGNORECASE)
+ACTIVE = re.compile(r'^(\s*)(?:ootpc_)?lang(\s*=\s*)(.*?)(\s*)$', re.IGNORECASE)
+COMMENTED = re.compile(r'^\s*[#;]\s*(?:ootpc_)?lang\s*=.*$', re.IGNORECASE)
 SECTION = re.compile(r'^\s*\[(.*)\]\s*$')
 BOM = '﻿'
 
@@ -90,9 +90,9 @@ def read(path):
 
 
 def write(dest, lang, example=None):
-    """Write dest/nx2navi.ini with lang; an existing file keeps every other line byte for byte (set_language).
+    """Write dest/OOT-PC.ini with lang; an existing file keeps every other line byte for byte (set_language).
     Returns the path."""
-    path = Path(dest) / 'nx2navi.ini'
+    path = Path(dest) / 'OOT-PC.ini'
     old = None
     if path.is_file():
         text = old = read(path)
@@ -103,7 +103,7 @@ def write(dest, lang, example=None):
     new = set_language(text, lang)
     if new == old:
         return path
-    tmp = path.with_name('nx2navi.ini.tmp')
+    tmp = path.with_name('OOT-PC.ini.tmp')
     with open(tmp, 'w', encoding='utf-8', errors='surrogateescape', newline='') as f:
         f.write(new)
     os.replace(tmp, path)

@@ -1,8 +1,8 @@
-// nx2navi.exe --probe-vkmem: texture memory checks. The CPU part: block-linear copies against an
+// ocarina.exe --probe-vkmem: texture memory checks. The CPU part: block-linear copies against an
 // independent reference, ASTC void-extent blocks, and the NVN -> VkFormat table against GPU0. The GPU part:
 // guest heap imported as a VkBuffer, write watch against CPU, GPU and ReadFile writes, the virtual-pool page table,
 // and textures uploaded from block-linear storage and read back, among them ASTC textures at the texture detail in
-// effect (NX2NAVI_TEXTURE_DETAIL=reduced or low to check the levels left out).
+// effect (OOTPC_TEXTURE_DETAIL=reduced or low to check the levels left out).
 // The reference swizzler walks the GOBs in storage order and places each byte by bit operations, so it shares no
 // addressing code with nvn_bl_offset.
 #include <stdio.h>
@@ -543,7 +543,7 @@ static int test_table_mirror(uint8_t *guest) {
     g_gpu_checks += 4;
     printf("probe-vkmem: a pool that gets its mirror in a recorded submission: the device address table names the mirror "
            "after it, with guest memory as the twin (%s)\n",
-           vk_mem_gpa_late() ? "by a store in queue order, after the mirror's first copy" : "changed at once, NX2NAVI_GPA_LATE=0");
+           vk_mem_gpa_late() ? "by a store in queue order, after the mirror's first copy" : "changed at once, OOTPC_GPA_LATE=0");
     bad = 0;
 done:
     vk_sync_finish();
@@ -642,7 +642,7 @@ static int test_table_store(uint8_t *guest) {
     if (!vk_mem_shadow_storage() || !vk_gpa_wanted() || !vk_mem_shadow_table_stores()) {
         printf("probe-vkmem: stores through the device address table into a shadow copy: skipped (%s)\n",
                !vk_mem_shadow_storage() ? "no shadow storage" : !vk_gpa_wanted() ? "no device address table"
-                                                                                   : "NX2NAVI_SHADOW_TABLE_STORES is not 1");
+                                                                                   : "OOTPC_SHADOW_TABLE_STORES is not 1");
         return 0;
     }
     pool_t pool = {.magic = NVN_POOL_MAGIC, .flags = 0x24, .mem = guest + 0xB00000, .size = 0x10000,
@@ -1011,7 +1011,7 @@ static int detail_retry(pool_t *pool, uint64_t off, uint64_t room) {
 }
 
 static int test_detail(pool_t *pool) {
-    const char *v = cfg_value("NX2NAVI_TEXTURE_DETAIL");
+    const char *v = cfg_value("OOTPC_TEXTURE_DETAIL");
     int most = !strcmp(v, "full") ? 0 : !strcmp(v, "reduced") ? 1 : !strcmp(v, "low") ? 2 : vk_texture_detail_auto();
     // 1024x1024 with 6 levels (two levels less at low), a 256x256 array of 3 layers (one less below full), and the
     // ones the rule leaves whole: 128x128, and 512x512 without smaller levels
@@ -1061,11 +1061,11 @@ static int test_textures(pool_t *tpool, pool_t *phys) {
 #ifdef _WIN32   // elsewhere an import's pinning can mark pages written again without a CPU write: the count is not exact
     GCHECK(re1 == re0 + 1, "storage rewritten: %llu re-uploads (want 1)", (unsigned long long)(re1 - re0));
     // The same bytes written again, so that every page of the storage shows a write. The texture is over 64 KiB: with
-    // NX2NAVI_TEX_SAME_BIG it is compared by content and left as it is, without the switch it is uploaded again. Other
+    // OOTPC_TEX_SAME_BIG it is compared by content and left as it is, without the switch it is uploaded again. Other
     // bytes upload either way, and the image holds them. After two comparisons in a row that found other bytes its
     // uploads take no hash any more, so the same bytes written again then upload with the switch too.
     {
-        int big = rt_knob("TEX_SAME_BIG", "0") == 1;
+        int big = rt_knob("TEX_SAME_BIG", "1") == 1;
         volatile uint8_t *sm = (volatile uint8_t *)t.mem;
         uint64_t re2, re3, re4, re5;
         GCHECK(t.L.size > (64u << 10), "the RGBA8 texture's storage is %llu bytes, not over 64 KiB", (unsigned long long)t.L.size);
@@ -1088,7 +1088,7 @@ static int test_textures(pool_t *tpool, pool_t *phys) {
         vk_texture_stats(NULL, NULL, &re5);
         GCHECK(re5 == re4 + 1, "the same bytes after two rewrites in a row: %llu re-uploads (want 1: no hash is taken any "
                "more)", (unsigned long long)(re5 - re4));
-        printf("probe-vkmem: a texture over 64 KiB written again with its own bytes: %s (NX2NAVI_TEX_SAME_BIG=%d); other "
+        printf("probe-vkmem: a texture over 64 KiB written again with its own bytes: %s (OOTPC_TEX_SAME_BIG=%d); other "
                "bytes upload, and after two rewrites in a row the same bytes do too\n",
                big ? "left as it is" : "uploaded again", big);
         g_gpu_checks += 5;
@@ -1225,7 +1225,7 @@ static void image_bytes(VkImage image, uint32_t w, uint32_t h, uint8_t *out) {
     vmaDestroyBuffer(c->vma, rb, ra);
 }
 
-// The kept-stale rule (vk_texture.c stale_kept, slot_resolve; NX2NAVI_TEX_STALE_KEPT, default on). The slot of a
+// The kept-stale rule (vk_texture.c stale_kept, slot_resolve; OOTPC_TEX_STALE_KEPT, default on). The slot of a
 // texture the CPU writes, finalized with its texture, goes on showing that texture's own image while the image still
 // holds the texture: the game finalizes ahead of the replay of the frames it recorded before. The image is sampled as
 // it is, so bytes the storage gets after the finalize do not reach it and nothing is uploaded. With the switch off the
@@ -1256,7 +1256,7 @@ static int test_stale_kept(pool_t *tpool) {
                "storage's later bytes (%llu uploads and %llu re-uploads since the finalize)",
                (unsigned long long)(up1 - up0), (unsigned long long)(re1 - re0));
     } else {
-        GCHECK(!after && up1 == up0 && re1 == re0, "a finalized CPU slot resolves with NX2NAVI_TEX_STALE_KEPT=0");
+        GCHECK(!after && up1 == up0 && re1 == re0, "a finalized CPU slot resolves with OOTPC_TEX_STALE_KEPT=0");
     }
     // In a later submission: an entry's storage is checked for writes once per submission (vk_texture_by_id_locked),
     // and this one's was at the first lookup above.
@@ -1268,7 +1268,7 @@ static int test_stale_kept(pool_t *tpool) {
     GCHECK(!memcmp(got, ref2[0], sizeof got), "slot 9 registered again does not hold the bytes the storage has now");
     vk_texture_release(&k);
     free(ref[0]), free(ref2[0]);
-    printf("probe-vkmem: a finalized slot of a CPU-written texture: %s (NX2NAVI_TEX_STALE_KEPT=%d); registered again it "
+    printf("probe-vkmem: a finalized slot of a CPU-written texture: %s (OOTPC_TEX_STALE_KEPT=%d); registered again it "
            "holds the storage's bytes of then\n",
            on ? "its own image as it was, whatever the storage gets afterwards" : "nothing", on);
     g_gpu_checks += on ? 6 : 5;
@@ -1347,7 +1347,7 @@ static int split_case(pool_t *pool, uint64_t off, uint64_t serial, int both, int
     GCHECK(s2 && s2->image == img2, "the slot of the second descriptor left its own image when the first came back");
     image_bytes(s2->image, SPLIT_W, SPLIT_H, got);
     *what = split_what(got, first, lin[0]);
-    // a shader sampled the slot: with NX2NAVI_TRACE=perf the log names an entry that never had content
+    // a shader sampled the slot: with OOTPC_TRACE=perf the log names an entry that never had content
     uint32_t marks[8] = {0};
     marks[6] = 1;
     vk_pool_marks_read(marks, 8);
@@ -1388,7 +1388,7 @@ static int test_split(pool_t *pool) {
            (unsigned long long)made[1][2][0], (unsigned long long)made[2][2][0], (unsigned long long)made[0][2][1],
            (unsigned long long)made[1][2][1], (unsigned long long)made[2][2][1]);
     for (int k = 0; k < 3; k++) {
-        // off: an image nothing filled (zeros with NX2NAVI_FIX_ZERO, the default; else whatever the memory held)
+        // off: an image nothing filled (zeros with OOTPC_FIX_ZERO, the default; else whatever the memory held)
         GCHECK(vk_fix_zero() ? what[0][k] == 0 : what[0][k] != 1, "with split fill off the slot shows %s in case %d: the "
                "sequence no longer leaves the second descriptor an empty image", names[what[0][k]], k);
         GCHECK(!made[0][k][0] && !made[0][k][1], "with split fill off an entry was filled in case %d", k);

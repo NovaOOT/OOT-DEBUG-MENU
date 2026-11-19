@@ -1,14 +1,15 @@
-/* OOT-DEBUG-MENU.exe: the launcher's own program, in the launcher folder (launcher/paths.py).
+/* OOT-PC.exe: the launcher's own program, in the launcher folder (launcher/paths.py).
 
    1. A Python staged by an update (python.next) replaces python\ while nothing runs from it.
    2. The release named by app\current.txt starts: python\pythonw.exe app\<version>\launcher\start.pyw with this
-      program's arguments, the launcher folder as working folder and in NX2NAVI_LAUNCHER_ROOT.
+      program's arguments, the launcher folder as working folder and in OOTPC_LAUNCHER_ROOT.
    3. When that release fails to start (exit code 86 from start.pyw, or any non-zero exit within six seconds) and
       app\previous.txt names another complete release, current.txt goes back to it and it starts with
       --rolled-back <version>.
 
    Its own commands, for the launcher and the setup: --desktop-shortcut on|off, --shortcuts on|off (Desktop and Start
-   menu). No console window (-mwindows). */
+   menu), --rebrand (an install from before the rename to OOT-PC: its shortcuts and its Settings > Apps entry take the
+   new names, common.h rebrand). No console window (-mwindows). */
 #include "common.h"
 
 #define STARTUP_FAILED 86
@@ -44,15 +45,15 @@ static long start_release(const wchar_t *root, const wchar_t *ver, const wchar_t
     wchar_t python[PATHN];
     swprintf(python, PATHN, L"%ls\\python\\pythonw.exe", root);
     if (!path_exists(python)) {
-        message(L"The launcher's Python is missing. Run OOT-DEBUG-MENU-Setup.exe again to repair the installation.");
+        message(L"The launcher's Python is missing. Run OOT-PC-Setup.exe again to repair the installation.");
         return 1;
     }
     swprintf(cmd, 32768, L"\"%ls\" \"%ls\\app\\%ls\\launcher\\start.pyw\" %ls %ls", python, root, ver, args, extra);
-    SetEnvironmentVariableW(L"NX2NAVI_LAUNCHER_ROOT", root);
+    SetEnvironmentVariableW(L"OOTPC_LAUNCHER_ROOT", root);
     STARTUPINFOW si = {.cb = sizeof si};
     PROCESS_INFORMATION pi;
     if (!CreateProcessW(python, cmd, NULL, NULL, FALSE, 0, NULL, root, &si, &pi)) {
-        message(L"The launcher could not be started. Run OOT-DEBUG-MENU-Setup.exe again to repair the installation.");
+        message(L"The launcher could not be started. Run OOT-PC-Setup.exe again to repair the installation.");
         return 1;
     }
     CloseHandle(pi.hThread);
@@ -66,6 +67,7 @@ static long start_release(const wchar_t *root, const wchar_t *ver, const wchar_t
 
 static int shortcut_command(const wchar_t *root, int argc, wchar_t **argv)
 {
+    if (argc == 2 && !wcscmp(argv[1], L"--rebrand")) return rebrand(root) ? 0 : 1;
     for (int i = 1; i + 1 < argc; i++) {
         int on = !wcscmp(argv[i + 1], L"on");
         if (!wcscmp(argv[i], L"--desktop-shortcut")) return set_shortcut(root, 1, on) ? 0 : 1;
@@ -95,7 +97,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR args, int show
     if (!read_line(file, ver, 128) || !release_ok(root, ver)) {
         swprintf(file, PATHN, L"%ls\\app\\previous.txt", root);
         if (!read_line(file, ver, 128) || !release_ok(root, ver)) {
-            message(L"OOT-DEBUG-MENU's files are incomplete. Run OOT-DEBUG-MENU-Setup.exe again to repair the installation.");
+            message(L"OOT-PC's files are incomplete. Run OOT-PC-Setup.exe again to repair the installation.");
             return 1;
         }
     }
@@ -112,6 +114,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR args, int show
         start_release(root, prev, args ? args : L"", extra);
         return 0;
     }
-    if (code == STARTUP_FAILED) message(L"OOT-DEBUG-MENU could not start. data\\logs\\crash.log in its folder says why.");
+    if (code == STARTUP_FAILED) message(L"OOT-PC could not start. data\\logs\\crash.log in its folder says why.");
     return (int)code;
 }

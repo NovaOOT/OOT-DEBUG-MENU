@@ -5,14 +5,17 @@
 #include "platform/platform.h"
 #include "cfg.h"
 #include "mods.h"
+#include "n64actors.h"
+#include "n64pose.h"
 #include <string.h>
+#include <stdio.h>
 #include <limits.h>
 #include <stdlib.h>
 
 // The supported game build exposes a player equipment component with generation-checked actor links.
 // Selection follows those links and the equipment's model-binding parent; proximity is never an identity.
-#define OWNER_MODELS 128
-#define OWNER_ACTORS 22
+#define OWNER_MODELS MOTION_OWNER_MODELS
+#define OWNER_ACTORS (22 + MOTION_OWNER_PLAYER_ITEMS)
 typedef struct {
     uint64_t actor, link;
     uint32_t generation, kind;
@@ -34,7 +37,7 @@ static int owner_on;
 
 static void owner_init(void *unused) {
     (void)unused;
-    // NX2NAVI_SELECTIVE_MOTION (selective_motion; default 1, 0 off: the estimate from colour and depth). On, every guest
+    // OOTPC_SELECTIVE_MOTION (selective_motion; default 1, 0 off: the estimate from colour and depth). On, every guest
     // submission walks the player's actor, equipment and models in guest memory (motion_owner_capture), each scene
     // draw is looked up in that list (vk_fg_pose.inc pose_owner), and the player's meshes are drawn a second time
     // into the motion vectors DLSS, FSR 3.1 and frame generation read.
@@ -47,13 +50,19 @@ static int keep_player(void) {
     static volatile int on;
     unsigned v = cfg_version();
     if (v != seen)
-        on = RT_OOT && cfg_bool("NX2NAVI_DEBUG_HIDE_MESHES") && !cfg_bool("NX2NAVI_DEBUG_HIDE_PLAYER"), seen = v;
+        on = RT_OOT && cfg_bool("OOTPC_DEBUG_HIDE_MESHES") && !cfg_bool("OOTPC_DEBUG_HIDE_PLAYER"), seen = v;
     return on;
 }
 static volatile int transformed;
 static volatile uint64_t transform_model;
 static volatile uint64_t preview_actor;
 void motion_owner_set_preview(uint64_t actor) { preview_actor = actor; }
+static uint64_t preview_gear[MOTION_OWNER_PREVIEW_GEAR];   // under owner_lock
+static int npreview_gear;
+static uint64_t player_items[MOTION_OWNER_PLAYER_ITEMS], player_items_of;   // under owner_lock
+static uint64_t standins[MOTION_OWNER_STANDINS];   // under owner_lock
+static int nstandins;
+static int nplayer_items;
 // The Transformations mod (its folder name) is on for this run: the transformation masks' models are its bodies.
 static int transform_mod(void) {
     static int known, on;
@@ -76,7 +85,7 @@ int motion_owner_transformed(void) { return RT_OOT ? transformed : MOTION_TRANSF
 uint64_t motion_owner_transform_model(void) { return RT_OOT && transformed ? transform_model : 0; }
 int motion_owner_enabled(void) {
     plat_once(&owner_once, owner_init, NULL);
-    return owner_on || keep_player() || (RT_OOT && transform_mod());
+    return owner_on || keep_player() || (RT_OOT && transform_mod()) || n64pose_wanted() || n64actors_wanted();
 }
 int motion_owner_selective(void) {
     plat_once(&owner_once, owner_init, NULL);
@@ -105,8 +114,11 @@ static uint64_t player_actor(void) {
 }
 uint64_t motion_owner_preview(void) {
     uint64_t p = preview_actor;
-    char name[18];
-    return p && read_at(field(p, 0x20), name, sizeof name) && !memcmp(name, "PouchPlayer_Child", 18) ? p : 0;
+    char name[18];   // the child's preview or the adult's
+    return p && read_at(field(p, 0x20), name, sizeof name) &&
+                   (!memcmp(name, "PouchPlayer_Child", 18) || !memcmp(name, "PouchPlayer_Adult", 18))
+               ? p
+               : 0;
 }
 static int actor_link(uint64_t link, OwnerActor *out) {
     struct { uint64_t table; uint32_t generation, padding; } a, b;
@@ -144,6 +156,19 @@ static uint32_t equipment_flags(uint64_t actor) {
     name[sizeof name - 1] = 0;
     uint32_t transform = transform_mask(name);
     if (transform) return transform_mod() ? transform : 0;
+    // (the Stone of Agony hangs on his chest in the remake only: N64 Link draws nothing in its place)
+    static const char *const n64_items[] = {"Item_Ocarina_", "Weapon_Range_", "Item_Boomerang", "Item_Hammer",
+                                            "Item_Bottle", "Item_DekuStick", "Item_AgonyStone"};
+    for (size_t k = 0; k < sizeof n64_items / sizeof *n64_items; k++)
+        if (!strncmp(name, n64_items[k], strlen(n64_items[k]))) return MOTION_OWNER_KEPT | MOTION_OWNER_N64_ITEM;
+    // the N64 game's eight masks (the remake's others keep their own model), the boots, the gauntlets and bracelet
+    static const char *const n64_masks[] = {"Keaton", "Skull", "Spooky", "Bunny", "Goron", "Zora", "Gerudo", "Truth"};
+    const char *mask = !strncmp(name, "Armor_", 6) ? strstr(name, "_Mask_") : NULL;
+    for (size_t k = 0; mask && k < sizeof n64_masks / sizeof *n64_masks; k++)
+        if (strstr(mask + 6, n64_masks[k])) return MOTION_OWNER_KEPT | MOTION_OWNER_N64_ITEM;
+    if (!strncmp(name, "Armor_", 6) && (strstr(name, "Gauntlet") || strstr(name, "HeavyBoot") || strstr(name, "HoverBoot")))
+        return MOTION_OWNER_KEPT | MOTION_OWNER_N64_WEAR;
+    if (!strncmp(name, "Item_", 5) || !strncmp(name, "Armor_Glass", 11)) return MOTION_OWNER_KEPT;
     return !strncmp(name, "Weapon_Sword_", 13) || !strncmp(name, "Weapon_Shield_", 14)
                ? MOTION_OWNER_RIGID_EQUIPMENT : 0;
 }
@@ -199,6 +224,19 @@ static void refresh(uint64_t frame, int force) {
             actors[count++] = a;
         }
     }
+    // The items the game keeps as actors of their own and hangs from the player only while in use
+    // (motion_owner_set_player_items), once their name still reads as one and while they hang from him.
+    for (int i = 0; player_items_of == player && i < nplayer_items && count < OWNER_ACTORS; i++) {
+        uint64_t a = player_items[i], at = 0;
+        char name[8] = {0};
+        uint32_t state;
+        if (!plat_mem_read(a + 0x20, &at, 8) || !at || !plat_mem_read(at, name, 5) || memcmp(name, "Item_", 5) ||
+            !read_at(a + 0x2c, &state, 4) || (uint32_t)(state - 7) < 5 || !parent_is_player(a, player))
+            continue;
+        unsigned k;
+        for (k = 0; k < count && actors[k].actor != a; ++k) {}
+        if (k == count) actors[count++] = (OwnerActor){a, 0, 0, 22 + (uint32_t)i};
+    }
     for (unsigned i = 0; i < count; ++i)
         if (!collect_models(player, actors[i], 0)) { O.count = 0; break; }
     if (player_actor() != player || component(player, 0x200) != equipment) O.count = 0;
@@ -206,6 +244,20 @@ static void refresh(uint64_t frame, int force) {
     // equipment is not linked from it and stays untracked.
     uint64_t preview = O.count ? motion_owner_preview() : 0;
     if (preview && !collect_models(player, (OwnerActor){preview, 0, 0, 0}, MOTION_OWNER_PREVIEW)) O.count = 0;
+    // and the equipment hung from it, as the scan listed it (motion_owner_set_preview_gear)
+    for (int i = 0; preview && O.count && i < npreview_gear; i++) {
+        uint64_t a = preview_gear[i];
+        uint32_t state;
+        if (!read_at(a + 0x2c, &state, 4) || (uint32_t)(state - 7) < 5 || !parent_is_player(a, preview)) continue;
+        if (!collect_models(player, (OwnerActor){a, 0, 0, MOTION_OWNER_PREVIEW_KIND}, MOTION_OWNER_PREVIEW)) {
+            O.count = 0;
+            break;
+        }
+    }
+    // the characters N64 Graphics draws (motion_owner_set_standins), while there is room
+    for (int i = 0; O.count && i < nstandins && O.count < OWNER_MODELS; i++)
+        O.models[O.count++] = (MotionOwner){.player = player, .model = standins[i],
+                                            .kind = MOTION_OWNER_STANDIN_KIND, .flags = MOTION_OWNER_N64_ACTOR};
     for (unsigned i = 0; i < O.count; ++i) {
         MotionOwner *m = &O.models[i];
         for (unsigned j = 0; j < nprevious; ++j) {
@@ -286,6 +338,45 @@ void motion_owner_observe(Cpu *c, uint64_t address, uint64_t size) {
                 b->ambiguous = 1;
     } else if (owner && !existing) ++O.capacity_misses;
     plat_mutex_unlock(&owner_lock);
+}
+int motion_owner_hangs_from(uint64_t actor, uint64_t parent) {
+    return actor && parent && parent_is_player(actor, parent);
+}
+void motion_owner_set_preview_gear(const uint64_t *actors, int n) {
+    if (n < 0) n = 0;
+    if (n > MOTION_OWNER_PREVIEW_GEAR) n = MOTION_OWNER_PREVIEW_GEAR;
+    plat_mutex_lock(&owner_lock);
+    memcpy(preview_gear, actors, (size_t)n * sizeof *actors);
+    npreview_gear = n;
+    O.valid = 0;   // the next lookup collects again
+    plat_mutex_unlock(&owner_lock);
+}
+void motion_owner_set_player_items(uint64_t player, const uint64_t *actors, int n) {
+    if (n < 0) n = 0;
+    if (n > MOTION_OWNER_PLAYER_ITEMS) n = MOTION_OWNER_PLAYER_ITEMS;
+    plat_mutex_lock(&owner_lock);
+    memcpy(player_items, actors, (size_t)n * sizeof *actors);
+    nplayer_items = n, player_items_of = player;
+    O.valid = 0;
+    plat_mutex_unlock(&owner_lock);
+}
+void motion_owner_set_standins(const uint64_t *models, int n) {
+    if (n < 0) n = 0;
+    if (n > MOTION_OWNER_STANDINS) n = MOTION_OWNER_STANDINS;
+    plat_mutex_lock(&owner_lock);
+    if (n != nstandins || memcmp(standins, models, (size_t)n * sizeof *models)) O.valid = 0;
+    memcpy(standins, models, (size_t)n * sizeof *models);
+    nstandins = n;
+    plat_mutex_unlock(&owner_lock);
+}
+int motion_owner_models(MotionOwner *out, int max) {
+    if (!motion_owner_enabled()) return 0;
+    plat_mutex_lock(&owner_lock);
+    refresh(O.producer_frame, 0);
+    int n = 0;
+    for (unsigned i = 0; i < O.count && n < max; ++i) out[n++] = O.models[i];
+    plat_mutex_unlock(&owner_lock);
+    return n;
 }
 static int binding_address_order(const void *a, const void *b) {
     uint64_t x = ((const MotionOwnerBinding *)a)->address, y = ((const MotionOwnerBinding *)b)->address;

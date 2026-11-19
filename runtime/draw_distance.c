@@ -1,4 +1,4 @@
-// Foliage draw distance (debug menu, View; NX2NAVI_DEBUG_DRAW_DISTANCE, game builds 1.1.1 and 1.0.0): how far out the grass tufts,
+// Foliage draw distance (debug menu, View; OOTPC_DEBUG_DRAW_DISTANCE, game builds 1.1.1 and 1.0.0): how far out the grass tufts,
 // bushes, flowers and low trees are drawn. Each area's Foliage/ResFoliageScene/<area>.game__foliage__ResFoliageScene
 // file may set a LodSetting (and LodSetting_hh for handheld) of Dist_* and Range_* keys; the reader of those keys
 // (f_7002bed300, a field visitor) takes each missing key from a table of defaults in main's read-only data, and most
@@ -23,7 +23,7 @@ static const float kGame[DISTANCES] = {40, 60, 35, 30, 40, 135, 10, 45};
 
 void dbg_draw_distance_init(void) {
     if (!RT_OOT) return;
-    double k = cfg_double("NX2NAVI_DEBUG_DRAW_DISTANCE");
+    double k = cfg_double("OOTPC_DEBUG_DRAW_DISTANCE");
     if (!(k > 0) || k == 1.0) return;
     uint64_t at = MOD_MAIN_BASE + FOLIAGE_DEFAULTS, end;
     float now[DISTANCES], v[DISTANCES];

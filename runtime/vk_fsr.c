@@ -2,8 +2,8 @@
 // the game's output, EASU scales the game's crop rectangle to the swapchain size and RCAS sharpens it, in place of the
 // bilinear vkCmdBlitImage. When the game's output is larger than the window (Ocarina draws 2560x1440 docked, so a
 // 1920x1080 window shrinks it), EASU does not apply (it only enlarges): a bilinear blit shrinks the crop into the first
-// intermediate image and RCAS sharpens that, which gives back some of the detail the shrink blurs. NX2NAVI_UPSCALER=
-// fsr|bilinear picks it, NX2NAVI_SHARPNESS (0..100, 0 = no RCAS pass) sets RCAS; both apply at the next frame.
+// intermediate image and RCAS sharpens that, which gives back some of the detail the shrink blurs. OOTPC_UPSCALER=
+// fsr|bilinear picks it, OOTPC_SHARPNESS (0..100, 0 = no RCAS pass) sets RCAS; both apply at the next frame.
 //
 // Per frame: EASU reads the source through a view of its own format (the same colour conversion the blit does) and
 // writes an RGBA16F image of the picture's size on the swapchain (all of it, or the part between black bars,
@@ -220,9 +220,9 @@ int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, 
                   VkImage dst, const int out[4]) {
     int cw = crop[2], ch = crop[3];
     uint32_t dw = (uint32_t)out[2], dh = (uint32_t)out[3];
-    if (strcmp(cfg_value("NX2NAVI_UPSCALER"), "fsr") || !fmt || (dw == (uint32_t)cw && dh == (uint32_t)ch))
+    if (strcmp(cfg_value("OOTPC_UPSCALER"), "fsr") || !fmt || (dw == (uint32_t)cw && dh == (uint32_t)ch))
         return idle_note(slot), 0;
-    int sharp = cfg_int("NX2NAVI_SHARPNESS");
+    int sharp = cfg_int("OOTPC_SHARPNESS");
     if (sharp < 0) sharp = 0;
     if (sharp > 100) sharp = 100;
     // EASU only enlarges: a picture smaller than the crop in either direction takes the shrink path, which without

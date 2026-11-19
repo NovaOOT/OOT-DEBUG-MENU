@@ -141,7 +141,7 @@ class AvailableRamTest(Tmp):
         self.member_of('/app.scope')
         self.limit('app.scope', 8 * GIB, 0)
         with mock.patch.dict(os.environ), mock.patch.object(gen.os, 'cpu_count', return_value=32):
-            os.environ.pop('NX2NAVI_LIFT_JOBS', None)
+            os.environ.pop('OOTPC_LIFT_JOBS', None)
             jobs, why = gen.pick_jobs(None)
         self.assertEqual(jobs, 4, why)
 

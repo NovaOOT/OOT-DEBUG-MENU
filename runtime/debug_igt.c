@@ -1,4 +1,4 @@
-// Speedrun timer for the debug menu (debug_tools.h). Game build 1.1.1 only.
+// Speedrun timer for the debug menu (debug_tools.h). Game builds 1.1.1 and 1.0.0.
 //
 // In-game time (IGT) is real time with the loading screens taken out: it stops while Sequence_IsLoadingBanc is set or
 // there is no player actor (the title screen, the moments of an area change). RTA, real time, runs alongside. Splits
@@ -25,9 +25,9 @@ static uint64_t split_ns[DBG_SPLITS], best_ns[DBG_SPLITS];
 static char split_name[DBG_SPLITS][48], last_area[64];
 static uint32_t k_loading, k_area;
 
-int dbg_igt_enabled(void) { return cfg_bool("NX2NAVI_DEBUG_IGT"); }
-int dbg_igt_autosplit(void) { return cfg_bool("NX2NAVI_DEBUG_IGT_AUTOSPLIT"); }
-int dbg_igt_autostart(void) { return cfg_bool("NX2NAVI_DEBUG_IGT_AUTOSTART"); }
+int dbg_igt_enabled(void) { return cfg_bool("OOTPC_DEBUG_IGT"); }
+int dbg_igt_autosplit(void) { return cfg_bool("OOTPC_DEBUG_IGT_AUTOSPLIT"); }
+int dbg_igt_autostart(void) { return cfg_bool("OOTPC_DEBUG_IGT_AUTOSTART"); }
 
 static void load_best(void) {
     uint64_t size = 0;

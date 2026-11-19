@@ -1,7 +1,7 @@
-"""The game's own settings, nx2navi.ini in the game folder, for the few the launcher's Settings switch.
+"""The game's own settings, OOT-PC.ini in the game folder, for the few the launcher's Settings switch.
 
 Read the way runtime/cfg.c reads the file: a UTF-8 byte order mark is skipped, lines starting with #, ; or [ are
-not settings, a key is matched without regard to case and with or without its NX2NAVI_ prefix, a value in double
+not settings, a key is matched without regard to case and with or without its OOTPC_ prefix, a value in double
 quotes loses them, an empty value leaves the setting as it was (its default, or an earlier line's value), and the last
 line with a value wins. Sections do not matter to the game; a key the file does not have yet goes under its section,
 as the game writes it.
@@ -12,17 +12,25 @@ runtime/cfg.c cfg_save_to does not: rebuilding it from nothing would lose its li
 import os
 from pathlib import Path
 
-PREFIX = 'NX2NAVI_'
+PREFIX = 'OOTPC_'
+LEGACY_PREFIX = 'NX2NAVI_'   # the prefix before the project was renamed to OOT-PC; runtime/cfg.c still reads it
+LEGACY_NAME = 'nx2navi.ini'
 BOM = '﻿'
 
 
 def _path(game_dir):
-    return Path(game_dir) / 'nx2navi.ini'
+    """OOT-PC.ini, or in a game folder from before the rename the old file while it is the only one: the game built
+    before the rename still reads it, and the next build copies it to the new name (tools/make_game.py legacy_names)."""
+    new, old = Path(game_dir) / 'OOT-PC.ini', Path(game_dir) / LEGACY_NAME
+    return old if not new.exists() and old.is_file() else new
 
 
 def _key(text):
     k = text.strip().upper()
-    return k[len(PREFIX):] if k.startswith(PREFIX) else k
+    for p in (PREFIX, LEGACY_PREFIX):
+        if k.startswith(p):
+            return k[len(p):]
+    return k
 
 
 def _text(game_dir):

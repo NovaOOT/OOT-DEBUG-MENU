@@ -78,7 +78,7 @@ def main():
         env['PATH'] = str(MSYS_BIN) + os.pathsep + env.get('PATH', '')
     src = (ROOT / 'runtime' / 'input.c').read_text(encoding='utf-8')
     body = cut(src, 'enum { AXIS_REST', '\nstatic void stick(')
-    with tempfile.TemporaryDirectory(prefix='nx2navi-pad-rest-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='ootpc-pad-rest-') as tmp:
         c = Path(tmp) / 'check.c'
         c.write_text(HARNESS % body, encoding='utf-8')
         exe = Path(tmp) / ('check.exe' if win else 'check')

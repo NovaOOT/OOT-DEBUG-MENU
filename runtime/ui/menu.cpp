@@ -314,9 +314,14 @@ static uint64_t g_cost_ns, g_cost_frames;   // CPU time of layout and recording 
 // Sizes are tuned for 1080 lines and follow the window's height, or its width in a window narrower than 1.47:1, where
 // the menu's 1400 pixels at 1080 lines would no longer fit 88 % of the width (layout_menu). Under 720 lines at 100%
 // display scale they stay at the 720 size; that floor grows with the window's DPI, so a small window on a 150% or 200%
-// display (sizes are physical pixels) still gets text as large as the display scale asks for.
+// display (sizes are physical pixels) still gets text as large as the display scale asks for, as far as the menu still
+// fits the window: its frame is 950 x 1590 pixels at 1080 lines and may then take 97 % of the window
+// (menu_chrome.cpp skin_menu_begin), so on a 768-line screen at 125 % the text is a little smaller than asked instead of
+// spilling out of the frame.
 static float menu_scale(uint32_t w, uint32_t h) {
     float least = 720.0f * (float)gfx_window_dpi() / 96.0f, lines = fminf((float)h, (float)w * 0.68f);
+    float fits = fminf((float)h * 0.97f / 950.0f, (float)w * 0.97f / 1590.0f) * 1080.0f;
+    if (least > fits) least = fits;
     return (lines >= least ? lines : least) / 1080.0f;
 }
 

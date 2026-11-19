@@ -339,7 +339,13 @@ int main(int argc, char **argv) {
     const char *font = argv[1], *scene = argv[2], *out = argv[5];
     if (argc == 7) art_load(argv[6]);
     int w = atoi(argv[3]), h = atoi(argv[4]);
-    float scale = fmaxf(fminf((float)h, w * 0.68f), 720.0f) / 1080.0f;   // as menu.cpp menu_scale at 100 % display scale
+    // as menu.cpp menu_scale, at the display scale MENU_PREVIEW_DPI gives (96: 100 %, the default)
+    const char *dpi_s = getenv("MENU_PREVIEW_DPI");
+    float dpi = dpi_s && atof(dpi_s) > 0 ? (float)atof(dpi_s) : 96.0f;
+    float least = 720.0f * dpi / 96.0f, lines = fminf((float)h, w * 0.68f);
+    float fits = fminf(h * 0.97f / 950.0f, w * 0.97f / 1590.0f) * 1080.0f;
+    if (least > fits) least = fits;
+    float scale = (lines >= least ? lines : least) / 1080.0f;
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;

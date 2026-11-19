@@ -3685,8 +3685,9 @@ static int carry_busy(void) {
     return __atomic_load_n(&F.n, __ATOMIC_RELAXED) > 0 || __atomic_load_n(&X.head, __ATOMIC_RELAXED) != NULL;
 }
 
+// and while frames are late on a small processor (perf.c perf_background_yield)
 static void carry_wait(void) {
-    while (carry_busy()) plat_sleep_ms(50);
+    while (carry_busy() || perf_background_yield()) plat_sleep_ms(50);
 }
 
 // One request on the pass's child, started below every normal process when needed; a dead child is restarted once.

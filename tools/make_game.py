@@ -2282,20 +2282,32 @@ def note_cache_translator(out):
     os.replace(tmp, ids)
 
 
+# Carrying the shaders over moves their translation into play: a background pass translates them all again (about
+# 44,000) and the pipelines whose shaders changed are built again beside the game. With fewer logical processors than
+# this, that work and the game's own threads do not both fit: a player's 4-core processor ran the game at 2 to 15 fps
+# for the hours the pass would take (about one shader a second). There the update prepares the shaders before play.
+CARRY_MIN_CPUS = 12
+
+def cpus_usable():
+    """The logical processors this process may run on (os.process_cpu_count, Python 3.13 on), else all of them."""
+    return (getattr(os, 'process_cpu_count', None) or os.cpu_count)() or 1
+
 def shader_carry(out):
-    """Whether the game carries the shaders prepared before an update over (runtime/gfx_shader.c, OOTPC_SHADER_CARRY,
-    on unless the environment or OOT-PC.ini sets it to 0) and there are some: shader-prepared.bin is written by a
-    finished preparation, and the cache must name the translator its translations are of (SHADER_IDS,
-    note_cache_translator), else the game has nothing to carry them over by."""
-    if os.environ.get('OOTPC_SHADER_CARRY', '').strip() == '0':
-        return False
+    """Whether the game carries the shaders prepared before an update over (runtime/gfx_shader.c, OOTPC_SHADER_CARRY)
+    and there are some: shader-prepared.bin is written by a finished preparation, and the cache must name the
+    translator its translations are of (SHADER_IDS, note_cache_translator), else the game has nothing to carry them
+    over by. The environment or OOT-PC.ini set to 0 turns it off, to 1 on; unset, it is on with CARRY_MIN_CPUS logical
+    processors or more."""
+    setting = os.environ.get('OOTPC_SHADER_CARRY', '').strip()
     try:
         for line in (out / 'OOT-PC.ini').read_text(encoding='utf-8-sig', errors='replace').splitlines():
             k, eq, v = line.strip().partition('=')
-            if eq and k.strip().upper().removeprefix('OOTPC_').removeprefix('NX2NAVI_') == 'SHADER_CARRY' and v.strip().strip('"') == '0':
-                return False
+            if eq and k.strip().upper().removeprefix('OOTPC_').removeprefix('NX2NAVI_') == 'SHADER_CARRY':
+                setting = setting or v.split('#')[0].strip().strip('"')
     except OSError:
         pass
+    if setting == '0' or (setting != '1' and cpus_usable() < CARRY_MIN_CPUS):
+        return False
     return (out / 'shader-prepared.bin').is_file() and bool(cache_identities(out))
 
 

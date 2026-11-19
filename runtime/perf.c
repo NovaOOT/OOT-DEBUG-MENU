@@ -814,6 +814,38 @@ static void reserve_sweep(uint64_t frame) {
                 "processors", (unsigned long long)frame, n, n > 1 ? "s" : "");
 }
 
+// ---- background work while frames are late (OOTPC_BG_YIELD)
+//
+// The pipelines left to build after the boot, the stage library prebuild, the background compute builds and the shader
+// translations carried over from a previous translator run beside the game on threads of lower priority. Lower priority
+// is not enough on a processor with few threads: the graphics driver compiles each pipeline on threads of its own at
+// normal priority and holds its locks meanwhile, and the translator runs as another process. On a 4-core processor
+// (GTX 1080) that work held the game at 2 to 15 fps, with the GPU 5 % busy. With the setting on (auto: on with fewer
+// than BG_YIELD_CPUS logical processors), each of those loops waits while the recent frames take longer than the frame
+// limit allows (BG_YIELD_LATE of the limit's interval, a 60 fps interval without a limit), and goes on once they are back
+// in time. A pipeline a draw is waiting for is built at once as before, so the picture is never held back by this.
+#define BG_YIELD_CPUS 12
+#define BG_YIELD_LATE 1.15
+#define BG_YIELD_AFTER_NS 2000000000ull   // frames count only from 2 s after the first present (the boot screen first)
+static volatile uint64_t frame_ema_ns;   // the presents' interval, averaged over about 16 frames
+static uint64_t first_present_ns;
+
+int perf_background_yield(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *v = cfg_value("OOTPC_BG_YIELD");
+        int cpus = (int)plat_cpu_usable();
+        on = !strcmp(v, "1") ? 1 : !strcmp(v, "0") ? 0 : cpus < BG_YIELD_CPUS;
+        rt_log("perf: background builds %s while frames are late (OOTPC_BG_YIELD %s, %d logical processors)",
+               on ? "wait" : "do not wait", v, cpus);
+    }
+    if (!on || !first_present_ns || kern_now_ns() - first_present_ns < BG_YIELD_AFTER_NS) return 0;
+    uint64_t ema = __atomic_load_n(&frame_ema_ns, __ATOMIC_RELAXED);
+    double hz = frame_limit_draw_hz();
+    double allowed = 1e9 / (hz > 0 ? hz : 60.0) * BG_YIELD_LATE;
+    return ema > allowed;
+}
+
 void perf_present(uint64_t frame) {
     static uint64_t last, sum, max, n, win_start, ab_b;
     crash_filter_guard(frame);
@@ -821,6 +853,11 @@ void perf_present(uint64_t frame) {
     prof_render_tid = plat_thread_id();
     if (rt_trace & RT_TRACE_SCHED) kern_sched_report(frame);
     uint64_t now = kern_now_ns(), d = last ? now - last : 0;
+    if (!first_present_ns) first_present_ns = now;
+    if (d) {   // capped at 1 s so one long load does not hold the background back for long after it
+        uint64_t e = __atomic_load_n(&frame_ema_ns, __ATOMIC_RELAXED), c = d < 1000000000ull ? d : 1000000000ull;
+        __atomic_store_n(&frame_ema_ns, e ? e - e / 16 + c / 16 : c, __ATOMIC_RELAXED);
+    }
     prof_sampler_frame(frame, now, last ? d : 0);
     uint64_t rep = ft_frame(frame, now, d);   // d is 0 on the first present: it only starts the period
     ab_b += rt_ab();

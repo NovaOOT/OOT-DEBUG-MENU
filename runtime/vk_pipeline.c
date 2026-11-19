@@ -5170,6 +5170,12 @@ static void pipe_worker(void *arg) {
         Job *j = A.head;
         int lowrun = !j;
         double held = 0;   // the low job's reservation at the memory gate
+        if (!j && perf_background_yield()) {
+            // Frames are late on a small processor (perf_background_yield): the background build waits. A draw that
+            // needs its pipeline still moves it to the draw queue (promote), which wakes this wait.
+            plat_cond_wait_ns(&work_cv, &P.lock, 250000000ull);
+            continue;
+        }
         if (!j && !gate_enter(0, &held)) {
             // No room for a background build now (gate_enter). The job stays queued: a draw that needs its pipeline
             // moves it to the draw queue (promote), which wakes this wait; otherwise the gate is asked again in 2 s.
@@ -7442,6 +7448,7 @@ static void bg_main(void *arg) {
         uint8_t idbuf[32];
         uint64_t words = 0;
         const GfxShader *cs;
+        while (!LB.stop && perf_background_yield()) plat_sleep_ms(250);   // frames late on a small processor
         plat_mutex_lock(&LB.stat);
         int have = i < BG.n;
         if (have) {
@@ -7710,6 +7717,7 @@ static void lb_worker(void *arg) {
     lb_me = (int)(intptr_t)arg;        // its handle is LB.th[lb_me]
     if (lb_idle()) plat_thread_priority(PLAT_PRIO_IDLE);
     for (;;) {
+        while (!LB.stop && perf_background_yield()) plat_sleep_ms(250);   // frames late on a small processor
         size_t i = lb_next(lb_me);
         if (i >= LB.n) break;
         if (skip_listed(LB.e[i].iid)) {

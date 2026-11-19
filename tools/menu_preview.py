@@ -1,6 +1,6 @@
 """Draw the in-game settings menu and the performance overlay without the game (tools/menu_preview.cpp).
 
-    python tools/menu_preview.py [--out build/menu-preview] [--font FILE] [--size 1920x1080] [--romfs FOLDER]
+    python tools/menu_preview.py [--out build/menu-preview] [--font FILE] [--size 1920x1080] [--dpi 96] [--romfs FOLDER]
 
 Builds tools/menu_preview.cpp with the menu's own row, shape, overlay and text code and Dear ImGui (host clang++, into
 build/menu-preview), runs it for each scene and writes menu.png, overlay.png and boot.png. Without --romfs no game
@@ -83,6 +83,7 @@ def main():
     ap.add_argument('--out', type=Path, default=ROOT / 'build' / 'menu-preview')
     ap.add_argument('--font', help='a TrueType font for the text')
     ap.add_argument('--size', default='1920x1080')
+    ap.add_argument('--dpi', type=float, default=96, help="the window's DPI: 96 is 100 %% display scale, 120 is 125 %%")
     ap.add_argument('--romfs', type=Path, help="an extracted RomFS folder: draw the game's textures")
     a = ap.parse_args()
     font = a.font or next((f for f in FONTS if Path(f).is_file()), None)
@@ -94,7 +95,7 @@ def main():
     art = [str(decode_art(a.romfs, a.out))] if a.romfs else []
     for scene in ('menu', 'overlay', 'boot'):
         raw = a.out / f'{scene}.rgba'
-        if subprocess.run([str(exe), font, scene, str(w), str(h), str(raw), *art]).returncode:
+        if subprocess.run([str(exe), font, scene, str(w), str(h), str(raw), *art], env={**os.environ, "MENU_PREVIEW_DPI": str(a.dpi)}).returncode:
             sys.exit(f'the {scene} scene failed')
         png(a.out / f'{scene}.png', w, h, raw.read_bytes())
         raw.unlink()

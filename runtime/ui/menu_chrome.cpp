@@ -155,7 +155,9 @@ int skin_menu_begin(float w,float h,float s,ImFont *title,const char *const *cat
     heading=title;
     ImDrawList *bg=ImGui::GetBackgroundDrawList();
     bg->AddRectFilled(ImVec2(0,0),ImVec2(w,h),IM_COL32(2,10,6,175));
-    const float ww=fminf(w*.92f,1760*s), wh=fminf(h*.88f,950*s);
+    // 92 % x 88 % of the window, or up to 97 % where the text is kept larger than the window's size alone would make it
+    // (menu.cpp menu_scale), so the frame still holds the layout drawn at that scale.
+    const float ww=fminf(1760*s,fmaxf(w*.92f,fminf(1590*s,w*.97f))), wh=fminf(950*s,fmaxf(h*.88f,fminf(950*s,h*.97f)));
     ImGui::SetNextWindowPos(ImVec2(w*.5f,h*.5f),ImGuiCond_Always,ImVec2(.5f,.5f));
     ImGui::SetNextWindowSize(ImVec2(ww,wh),ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,0);

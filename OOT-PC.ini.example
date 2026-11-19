@@ -349,7 +349,14 @@
 # lowest priority translates them again with the new translator for the next start, then deletes the old ones. A shader
 # the new translator cannot translate keeps its old translation. 0: shaders the new translator has not translated yet
 # are translated before they are used (at start or when the game first draws them), as earlier versions did.
+# Unset, an update or Rebuild the Game carries them over only on a PC with 12 or more CPU threads; with fewer, it
+# prepares the shaders again before you play (a few minutes up to about an hour), because the background pass and the
+# game do not both fit on a small processor. 1 or 0 here decides it on every PC.
 # shader_carry = 1
+# Background shader and pipeline work (the pipelines left to build after the start, the shaders carried over by the
+# setting above) waits while frames come slower than the frame limit allows, and goes on once they are back in time.
+# A pipeline the game is waiting to draw with is always built at once. auto: on with fewer than 12 CPU threads.
+# bg_yield = auto
 # The most memory, in GB, that preparing the shaders (after an install, an update or a rebuild) may take, 1 to 256.
 # Over it, fewer shaders are prepared at once until memory is free again, so it takes longer but the PC keeps room for
 # everything else. Whatever it is set to, the preparation also slows down while the PC has less than 1 GB of memory

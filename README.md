@@ -191,6 +191,11 @@ and `VK_EXT_mesh_shader`. The setup is not signed, so SmartScreen warns on its f
 - Integrated AMD GPUs can fail at the title screen (their host memory heap is too small for the game's memory).
 - A rare crash in the game's particle code.
 
+## Credits
+
+- **Tustin2121** (Discord), for several ideas and bug fixes, among them the cause of Fly's reversed controls right after
+  it is switched on.
+
 ## License
 
 OOT-PC is based on NX2navi, and its code is under NX2navi's terms:

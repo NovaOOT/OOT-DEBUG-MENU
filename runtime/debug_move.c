@@ -19,6 +19,7 @@
 #include "input.h"
 #include "layout.h"
 #include "platform/platform.h"
+#include "vk_debug_cam.h"
 
 #define BTN_A (1ull << 0)
 #define BTN_B (1ull << 1)
@@ -427,14 +428,26 @@ static float axis(int32_t v) {
     return fabsf(f) < STICK_DEAD ? 0.0f : f;
 }
 
+// The camera's direction along the ground into f (x and z, length 1), 0 when there is none to take. First the view the
+// scene was drawn with last frame (vk_debug_cam.c vk_dbgcam_vp: its clip w row is the view direction), there from the
+// first frame; then the player minus the camera actor's eye, which a helper thread has to find in the heap first;
+// then the way the player faces. Without the first two, steering went by the last direction known, world +z at the
+// first use: the stick was reversed or turned sideways for the seconds the search took after Fly was switched on.
+static int air_forward(const float p[3], float f[3]) {
+    float vp[16], cam[3], d[3] = {0, 0, 0};
+    if (vk_dbgcam_vp(vp, NULL)) d[0] = vp[12], d[2] = vp[14];
+    else if (camera_pos(cam)) d[0] = p[0] - cam[0], d[2] = p[2] - cam[2];
+    else if (!dbg_player_facing(d)) return 0;
+    float n = sqrtf(d[0] * d[0] + d[2] * d[2]);
+    if (!(n > 1e-4f)) return 0;
+    f[0] = d[0] / n, f[1] = 0, f[2] = d[2] / n;
+    return 1;
+}
+
 // In the air the game gives the player no speed of its own, so both modes move air_pos with the left stick: up goes
 // where the camera looks, right to its right, A held three times faster. Fly also rises on X and sinks on B.
 static void air_step(struct Cpu *c, const float p[3], uint64_t b, int32_t lx, int32_t ly, float speed, int vertical, float dt) {
-    float cam[3];
-    if (camera_pos(cam)) {
-        float dx = p[0] - cam[0], dz = p[2] - cam[2], n = sqrtf(dx * dx + dz * dz);
-        if (n > 0.05f) fwd[0] = dx / n, fwd[2] = dz / n;
-    }
+    air_forward(p, fwd);   // kept as it was when no direction is known this frame
     float sx = axis(lx), sy = axis(ly);
     if (b & BTN_A) speed *= 3.0f;
     float move[3] = {fwd[0] * sy - fwd[2] * sx, 0, fwd[2] * sy + fwd[0] * sx};

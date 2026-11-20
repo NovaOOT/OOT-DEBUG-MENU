@@ -193,8 +193,7 @@ and `VK_EXT_mesh_shader`. The setup is not signed, so SmartScreen warns on its f
 
 ## Credits
 
-- **Tustin2121** (Discord), for several ideas and bug fixes, among them the cause of Fly's reversed controls right after
-  it is switched on.
+- **Tustin2121** (Discord), for several ideas and bug fixes.
 
 ## License
 
